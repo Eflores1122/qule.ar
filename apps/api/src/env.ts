@@ -1,0 +1,25 @@
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+
+export const env = {
+  PORT: Number(process.env.PORT ?? 3001),
+  // URL pública de la web (en desarrollo, Vite en el 5173 hace de proxy al API)
+  APP_URL: process.env.APP_URL ?? "http://localhost:5173",
+  DATABASE_URL: process.env.DATABASE_URL,
+  DATA_DIR: process.env.DATA_DIR ?? path.join(root, "data"),
+  BETTER_AUTH_SECRET: process.env.BETTER_AUTH_SECRET ?? "solo-para-desarrollo-cambiar-en-produccion",
+  GOOGLE_CLIENT_ID: process.env.GOOGLE_CLIENT_ID,
+  GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
+  VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY,
+  VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY,
+  // Emails con acceso al panel de moderación, separados por coma
+  ADMIN_EMAILS: (process.env.ADMIN_EMAILS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
+  // Carpeta con la web compilada (en producción el API la sirve)
+  WEB_DIST: process.env.WEB_DIST ?? path.join(root, "apps/web/dist"),
+};
+
+if (process.env.NODE_ENV === "production" && !process.env.BETTER_AUTH_SECRET) {
+  throw new Error("Falta BETTER_AUTH_SECRET");
+}

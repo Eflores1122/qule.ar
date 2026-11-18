@@ -1,0 +1,14 @@
+{
+  "name": "mortero",
+  "private": true,
+  "license": "AGPL-3.0-only",
+  "workspaces": ["apps/*"],
+  "scripts": {
+    "dev": "npm run dev --workspace api & npm run dev --workspace web; wait",
+    "dev:api": "npm run dev --workspace api",
+    "dev:web": "npm run dev --workspace web",
+    "db:generate": "npm run db:generate --workspace api",
+    "build": "npm run build --workspace web",
+    "vapid": "node --input-type=module -e \"import {generateVAPIDKeys} from 'web-push'; const k=generateVAPIDKeys(); console.log('VAPID_PUBLIC_KEY='+k.publicKey+'\\nVAPID_PRIVATE_KEY='+k.privateKey)\""
+  }
+}

@@ -1,0 +1,13 @@
+{
+  "name": "mortero",
+  "short_name": "mortero",
+  "description": "App comunitaria, gratuita y de código abierto para conocer gente y charlar en grupos.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0c0b0d",
+  "theme_color": "#0c0b0d",
+  "lang": "es",
+  "icons": [
+    { "src": "/icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}

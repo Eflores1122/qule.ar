@@ -1,0 +1,64 @@
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { eq } from "drizzle-orm";
+import { generateVAPIDKeys, sendNotification, setVapidDetails } from "web-push";
+import { db, schema } from "./db/index.js";
+import { env } from "./env.js";
+
+const { pushSubscription } = schema;
+
+/**
+ * Claves VAPID: en producción vienen por variables de entorno.
+ * En desarrollo, si faltan, se generan una vez y se guardan en data/vapid.json.
+ */
+function loadKeys(): { publicKey: string; privateKey: string } {
+  if (env.VAPID_PUBLIC_KEY && env.VAPID_PRIVATE_KEY) {
+    return { publicKey: env.VAPID_PUBLIC_KEY, privateKey: env.VAPID_PRIVATE_KEY };
+  }
+  if (process.env.NODE_ENV === "production") {
+    console.warn("Faltan VAPID_PUBLIC_KEY / VAPID_PRIVATE_KEY: las notificaciones push quedan apagadas.");
+    return { publicKey: "", privateKey: "" };
+  }
+  const file = path.join(env.DATA_DIR, "vapid.json");
+  if (existsSync(file)) return JSON.parse(readFileSync(file, "utf8"));
+  const keys = generateVAPIDKeys();
+  writeFileSync(file, JSON.stringify(keys));
+  return keys;
+}
+
+const keys = loadKeys();
+export const vapidPublicKey = keys.publicKey;
+export const pushEnabled = Boolean(keys.publicKey && keys.privateKey);
+
+if (pushEnabled) {
+  const subject = env.APP_URL.startsWith("https://") ? env.APP_URL : "mailto:noreply@mortero.invalid";
+  setVapidDetails(subject, keys.publicKey, keys.privateKey);
+}
+
+export type PushPayload = { title: string; body: string; url: string; tag?: string };
+
+/**
+ * Manda una notificación a todos los dispositivos de alguien.
+ * Los textos son discretos a propósito: aparecen en la pantalla bloqueada.
+ */
+export async function pushTo(userId: string, payload: PushPayload) {
+  if (!pushEnabled) return;
+  const subs = await db.select().from(pushSubscription).where(eq(pushSubscription.userId, userId));
+  await Promise.all(
+    subs.map(async (s) => {
+      try {
+        await sendNotification(
+          { endpoint: s.endpoint, keys: { p256dh: s.p256dh, auth: s.auth } },
+          JSON.stringify(payload),
+          { TTL: 60 * 60 * 24 },
+        );
+      } catch (err) {
+        const status = (err as { statusCode?: number }).statusCode;
+        // La suscripción ya no existe (desinstalaron la app, revocaron el permiso, etc.)
+        if (status === 404 || status === 410) {
+          await db.delete(pushSubscription).where(eq(pushSubscription.id, s.id)).catch(() => {});
+        }
+      }
+    }),
+  );
+}

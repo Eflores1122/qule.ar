@@ -1,0 +1,275 @@
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link } from "react-router";
+import { api, type NearbyPerson } from "../api";
+import { useMe } from "../App";
+import { FilterIcon, PinIcon, StarIcon } from "../components/Icons";
+import { BODY_TYPES, LOOKING_FOR, POSITIONS, RELATIONSHIP, TRIBES } from "../options";
+
+export type Filters = {
+  ageMin?: number; ageMax?: number;
+  heightMin?: number; heightMax?: number;
+  weightMin?: number; weightMax?: number;
+  bodyType: string[]; position: string[]; tribes: string[]; lookingFor: string[]; relationship: string[];
+  online: boolean; withPhoto: boolean; favorites: boolean;
+};
+
+const EMPTY: Filters = { bodyType: [], position: [], tribes: [], lookingFor: [], relationship: [], online: false, withPhoto: false, favorites: false };
+const STORE_KEY = "mortero:filtros";
+
+function loadFilters(): Filters {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    return raw ? { ...EMPTY, ...JSON.parse(raw) } : EMPTY;
+  } catch {
+    return EMPTY;
+  }
+}
+
+function saveFilters(f: Filters) {
+  try {
+    localStorage.setItem(STORE_KEY, JSON.stringify(f));
+  } catch {
+    /* sin almacenamiento: los filtros duran lo que dura la pestaña */
+  }
+}
+
+function toQuery(f: Filters, offset: number) {
+  const q = new URLSearchParams();
+  for (const k of ["ageMin", "ageMax", "heightMin", "heightMax", "weightMin", "weightMax"] as const) {
+    if (f[k] != null) q.set(k, String(f[k]));
+  }
+  for (const k of ["bodyType", "position", "tribes", "lookingFor", "relationship"] as const) {
+    if (f[k].length) q.set(k, f[k].join(","));
+  }
+  if (f.online) q.set("online", "1");
+  if (f.withPhoto) q.set("withPhoto", "1");
+  if (f.favorites) q.set("favorites", "1");
+  if (offset) q.set("offset", String(offset));
+  return q.toString();
+}
+
+export function countFilters(f: Filters) {
+  let n = 0;
+  if (f.ageMin != null || f.ageMax != null) n++;
+  if (f.heightMin != null || f.heightMax != null) n++;
+  if (f.weightMin != null || f.weightMax != null) n++;
+  n += [f.bodyType, f.position, f.tribes, f.lookingFor, f.relationship].filter((x) => x.length).length;
+  if (f.online) n++;
+  if (f.withPhoto) n++;
+  if (f.favorites) n++;
+  return n;
+}
+
+type Status = "loading" | "need-location" | "asking" | "denied" | "unsupported" | "ready" | "error";
+
+export function Nearby() {
+  const { me, reload } = useMe();
+  const [filters, setFilters] = useState<Filters>(loadFilters);
+  const [people, setPeople] = useState<NearbyPerson[]>([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [status, setStatus] = useState<Status>("loading");
+  const [showFilters, setShowFilters] = useState(false);
+  const locationSent = useRef(false);
+
+  const load = useCallback(async (f: Filters, offset = 0) => {
+    try {
+      const d = await api<{ needLocation: boolean; people: NearbyPerson[]; hasMore: boolean }>(`/nearby?${toQuery(f, offset)}`);
+      if (d.needLocation) return setStatus("need-location");
+      setPeople((prev) => (offset ? [...prev, ...d.people] : d.people));
+      setHasMore(d.hasMore);
+      setStatus("ready");
+    } catch {
+      setStatus("error");
+    }
+  }, []);
+
+  /** Pide la ubicación al navegador y manda solo lat/lng; el servidor la redondea a ~500 m. */
+  const shareLocation = useCallback(
+    (silent = false) => {
+      if (!("geolocation" in navigator)) return setStatus("unsupported");
+      if (!silent) setStatus("asking");
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          locationSent.current = true;
+          await api("/me/location", { method: "PUT", json: { lat: pos.coords.latitude, lng: pos.coords.longitude } }).catch(() => {});
+          if (!me?.profile?.hasLocation) reload();
+          load(filters);
+        },
+        () => {
+          if (!silent) setStatus("denied");
+        },
+        { enableHighAccuracy: false, maximumAge: 10 * 60_000, timeout: 15_000 },
+      );
+    },
+    [filters, load, me?.profile?.hasLocation, reload],
+  );
+
+  useEffect(() => {
+    load(filters);
+    // Si ya diste permiso antes, actualizamos la ubicación sin preguntar
+    if (!locationSent.current && "permissions" in navigator) {
+      navigator.permissions
+        .query({ name: "geolocation" as PermissionName })
+        .then((p) => p.state === "granted" && shareLocation(true))
+        .catch(() => {});
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  function applyFilters(f: Filters) {
+    setFilters(f);
+    saveFilters(f);
+    setShowFilters(false);
+    load(f);
+  }
+
+  const active = countFilters(filters);
+
+  return (
+    <div className="page">
+      <header className="topbar">
+        <h1 className="topbar__title">Cerca</h1>
+        {status === "ready" && (
+          <button className={`btn btn--small ${active ? "btn--primary" : ""}`} onClick={() => setShowFilters(true)}>
+            <FilterIcon /> Filtros{active ? ` · ${active}` : ""}
+          </button>
+        )}
+      </header>
+
+      {(status === "need-location" || status === "asking" || status === "denied" || status === "unsupported") && (
+        <div className="empty locate">
+          <span className="locate__icon"><PinIcon /></span>
+          <p className="empty__title">Para ver gente cerca necesitamos tu ubicación</p>
+          <p className="muted">
+            Nunca guardamos tu posición exacta: la redondeamos a una zona de unos 500 metros, y a los demás les mostramos la distancia en tramos ("a menos de 1 km", "3 km").
+          </p>
+          {status === "denied" && <p className="error">El navegador no nos dio permiso. Habilitalo en los ajustes del sitio y probá de nuevo.</p>}
+          {status === "unsupported" && <p className="error">Este navegador no permite compartir la ubicación.</p>}
+          <button className="btn btn--primary" disabled={status === "asking"} onClick={() => shareLocation()}>
+            {status === "asking" ? "Buscando…" : "Compartir ubicación"}
+          </button>
+        </div>
+      )}
+
+      {status === "error" && <div className="notice notice--error">No pudimos cargar la grilla. Probá de nuevo en un rato.</div>}
+
+      {status === "ready" && people.length === 0 && (
+        <div className="empty">
+          <p className="empty__title">{active ? "Nadie cerca con esos filtros" : "Todavía no hay nadie cerca"}</p>
+          {active ? (
+            <button className="btn btn--small" onClick={() => applyFilters(EMPTY)}>Sacar filtros</button>
+          ) : (
+            <p className="muted">Pasate por los grupos mientras tanto.</p>
+          )}
+        </div>
+      )}
+
+      {status === "ready" && people.length > 0 && (
+        <>
+          <ul className="grid">
+            {people.map((p) => (
+              <li key={p.id}>
+                <Link to={`/perfil/${p.id}`} className="tile" aria-label={`${p.name}, ${p.age}${p.distance ? `, ${p.distance}` : ""}${p.online ? ", en línea" : ""}`}>
+                  {p.photo ? <img src={p.photo} alt="" loading="lazy" /> : <span className="tile__empty">{p.name.charAt(0).toUpperCase()}</span>}
+                  {p.favorite && <span className="tile__fav" aria-label="Favorito"><StarIcon filled size={14} /></span>}
+                  <span className="tile__info">
+                    <span className="tile__name">
+                      {p.online ? <i className="dot dot--on" /> : p.recent ? <i className="dot dot--recent" /> : null}
+                      {p.name}
+                    </span>
+                    {p.distance && <span className="tile__dist">{p.distance}</span>}
+                  </span>
+                </Link>
+              </li>
+            ))}
+          </ul>
+          {hasMore && (
+            <div className="center">
+              <button className="btn btn--small" onClick={() => load(filters, people.length)}>Ver más</button>
+            </div>
+          )}
+        </>
+      )}
+
+      {showFilters && <FilterSheet initial={filters} onApply={applyFilters} onClose={() => setShowFilters(false)} />}
+    </div>
+  );
+}
+
+function RangeRow({ label, unit, min, max, onChange, lo, hi }: {
+  label: string; unit?: string; min?: number; max?: number; lo: number; hi: number;
+  onChange: (min?: number, max?: number) => void;
+}) {
+  const num = (s: string) => (s === "" ? undefined : Number(s));
+  return (
+    <fieldset className="field">
+      <legend>{label}{unit ? ` (${unit})` : ""}</legend>
+      <div className="range">
+        <input className="input" type="number" inputMode="numeric" min={lo} max={hi} placeholder={`${lo}`} value={min ?? ""} onChange={(e) => onChange(num(e.target.value), max)} aria-label={`${label} mínimo`} />
+        <span className="muted">a</span>
+        <input className="input" type="number" inputMode="numeric" min={lo} max={hi} placeholder={`${hi}`} value={max ?? ""} onChange={(e) => onChange(min, num(e.target.value))} aria-label={`${label} máximo`} />
+      </div>
+    </fieldset>
+  );
+}
+
+function Chips({ label, options, value, onChange }: { label: string; options: string[]; value: string[]; onChange: (v: string[]) => void }) {
+  return (
+    <fieldset className="field">
+      <legend>{label}</legend>
+      <div className="chips">
+        {options.map((o) => {
+          const on = value.includes(o);
+          return (
+            <button type="button" key={o} className={`chip ${on ? "chip--on" : ""}`} aria-pressed={on} onClick={() => onChange(on ? value.filter((x) => x !== o) : [...value, o])}>
+              {o}
+            </button>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
+function FilterSheet({ initial, onApply, onClose }: { initial: Filters; onApply: (f: Filters) => void; onClose: () => void }) {
+  const [f, setF] = useState<Filters>(initial);
+  const set = <K extends keyof Filters>(k: K, v: Filters[K]) => setF({ ...f, [k]: v });
+
+  return (
+    <div className="sheet-backdrop" onClick={onClose}>
+      <div className="sheet sheet--tall" role="dialog" aria-modal aria-labelledby="filters-title" onClick={(e) => e.stopPropagation()}>
+        <div className="sheet__head">
+          <h2 id="filters-title">Filtros</h2>
+          <button className="linkbtn" onClick={() => setF(EMPTY)}>Limpiar</button>
+        </div>
+        <div className="sheet__body form">
+          <label className="check">
+            <input type="checkbox" checked={f.online} onChange={(e) => set("online", e.target.checked)} />
+            <span>Solo en línea ahora</span>
+          </label>
+          <label className="check">
+            <input type="checkbox" checked={f.favorites} onChange={(e) => set("favorites", e.target.checked)} />
+            <span>Solo mis favoritos</span>
+          </label>
+          <label className="check">
+            <input type="checkbox" checked={f.withPhoto} onChange={(e) => set("withPhoto", e.target.checked)} />
+            <span>Solo con foto</span>
+          </label>
+          <RangeRow label="Edad" lo={18} hi={99} min={f.ageMin} max={f.ageMax} onChange={(a, b) => setF({ ...f, ageMin: a, ageMax: b })} />
+          <RangeRow label="Altura" unit="cm" lo={120} hi={230} min={f.heightMin} max={f.heightMax} onChange={(a, b) => setF({ ...f, heightMin: a, heightMax: b })} />
+          <RangeRow label="Peso" unit="kg" lo={35} hi={250} min={f.weightMin} max={f.weightMax} onChange={(a, b) => setF({ ...f, weightMin: a, weightMax: b })} />
+          <Chips label="Contextura" options={BODY_TYPES} value={f.bodyType} onChange={(v) => set("bodyType", v)} />
+          <Chips label="Rol" options={POSITIONS} value={f.position} onChange={(v) => set("position", v)} />
+          <Chips label="Tribus" options={TRIBES} value={f.tribes} onChange={(v) => set("tribes", v)} />
+          <Chips label="Busca" options={LOOKING_FOR} value={f.lookingFor} onChange={(v) => set("lookingFor", v)} />
+          <Chips label="Relación" options={RELATIONSHIP} value={f.relationship} onChange={(v) => set("relationship", v)} />
+          <p className="muted small">Los filtros de altura, peso y demás dejan afuera a quien no completó ese dato.</p>
+        </div>
+        <div className="row sheet__foot">
+          <button className="btn" onClick={onClose}>Cancelar</button>
+          <button className="btn btn--primary" onClick={() => onApply(f)}>Aplicar</button>
+        </div>
+      </div>
+    </div>
+  );
+}

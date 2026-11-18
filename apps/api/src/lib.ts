@@ -1,0 +1,88 @@
+import { and, asc, eq, inArray, or } from "drizzle-orm";
+import { createMiddleware } from "hono/factory";
+import { HTTPException } from "hono/http-exception";
+import { auth, type AuthUser } from "./auth.js";
+import { db, schema } from "./db/index.js";
+
+const { profile, photo, block } = schema;
+
+export type Profile = typeof profile.$inferSelect;
+export type AppEnv = { Variables: { user: AuthUser; profile: Profile | null } };
+
+/** Exige sesión. Deja `user` y `profile` (puede ser null si falta completar el perfil). */
+export const requireUser = createMiddleware<AppEnv>(async (c, next) => {
+  const s = await auth.api.getSession({ headers: c.req.raw.headers });
+  if (!s) throw new HTTPException(401, { message: "Tenés que iniciar sesión" });
+  const [p] = await db.select().from(profile).where(eq(profile.userId, s.user.id));
+  // Cuenta suspendida: solo puede ver su estado (GET /api/me) y borrar su cuenta (DELETE /api/me)
+  if (p?.suspendedAt && !(c.req.path === "/api/me" && ["GET", "DELETE"].includes(c.req.method))) {
+    throw new HTTPException(403, { message: "Tu cuenta está suspendida" });
+  }
+  c.set("user", s.user);
+  c.set("profile", p ?? null);
+  await next();
+});
+
+/** Exige además que el perfil esté completo (fecha de nacimiento y nombre). */
+export const requireProfile = createMiddleware<AppEnv>(async (c, next) => {
+  if (!c.get("profile")) throw new HTTPException(403, { message: "Completá tu perfil primero" });
+  await next();
+});
+
+export function ageFrom(birthdate: string, now = new Date()): number {
+  const [y, m, d] = birthdate.split("-").map(Number);
+  let age = now.getFullYear() - y;
+  if (now.getMonth() + 1 < m || (now.getMonth() + 1 === m && now.getDate() < d)) age--;
+  return age;
+}
+
+export const imageUrl = (key: string | null | undefined) => (key ? `/api/files/${key}` : null);
+
+export type Author = { id: string; name: string; age: number; photo: string | null };
+
+/** Nombre, edad y foto principal (pública) de varios usuarios. */
+export async function authorsFor(ids: string[]): Promise<Map<string, Author>> {
+  const unique = [...new Set(ids)];
+  const map = new Map<string, Author>();
+  if (!unique.length) return map;
+  const profiles = await db.select().from(profile).where(inArray(profile.userId, unique));
+  const photos = await db
+    .select()
+    .from(photo)
+    .where(and(inArray(photo.userId, unique), eq(photo.isPrivate, false)))
+    .orderBy(asc(photo.position));
+  const firstPhoto = new Map<string, string>();
+  for (const p of photos) if (!firstPhoto.has(p.userId)) firstPhoto.set(p.userId, p.key);
+  for (const p of profiles) {
+    map.set(p.userId, {
+      id: p.userId,
+      name: p.displayName,
+      age: ageFrom(p.birthdate),
+      photo: imageUrl(firstPhoto.get(p.userId)),
+    });
+  }
+  return map;
+}
+
+/** Todos los usuarios con los que hay un bloqueo, en cualquier dirección. */
+export async function blockedWith(userId: string): Promise<Set<string>> {
+  const rows = await db
+    .select()
+    .from(block)
+    .where(or(eq(block.blockerId, userId), eq(block.blockedId, userId)));
+  return new Set(rows.map((r) => (r.blockerId === userId ? r.blockedId : r.blockerId)));
+}
+
+export async function isBlocked(a: string, b: string): Promise<boolean> {
+  const rows = await db
+    .select()
+    .from(block)
+    .where(or(
+      and(eq(block.blockerId, a), eq(block.blockedId, b)),
+      and(eq(block.blockerId, b), eq(block.blockedId, a)),
+    ))
+    .limit(1);
+  return rows.length > 0;
+}
+
+export const newId = () => crypto.randomUUID();

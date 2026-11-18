@@ -1,0 +1,532 @@
+import { and, asc, desc, eq, gt, ilike, inArray, lt, notInArray, or, sql } from "drizzle-orm";
+import { Hono } from "hono";
+import { HTTPException } from "hono/http-exception";
+import { z } from "zod";
+import { nextSlot } from "../antispam.js";
+import { db, schema } from "../db/index.js";
+import { DEFAULT_SPAM_RULES } from "../db/schema.js";
+import { authorsFor, blockedWith, newId, requireProfile, requireUser, type AppEnv } from "../lib.js";
+import { emitToGroup, emitToUser, isOnline, serializeGroupMessages, syncGroupRoom } from "../realtime.js";
+import { pushTo } from "../push.js";
+
+const { group, groupMember, groupMessage, groupJoinRequest } = schema;
+
+/** Días que tiene que esperar alguien rechazado o expulsado para volver a pedir ingreso. */
+const REAPPLY_DAYS = 7;
+/** Grupos que puede tener una misma persona como dueña (frena la creación masiva de grupos spam). */
+const MAX_OWNED = 10;
+
+type Role = "owner" | "moderator" | "member";
+const canModerate = (role: string | null | undefined) => role === "owner" || role === "moderator";
+
+export const groupRoutes = new Hono<AppEnv>();
+groupRoutes.use("/groups/*", requireUser, requireProfile);
+groupRoutes.use("/groups", requireUser, requireProfile);
+
+// ---------- Helpers ----------
+
+async function membership(groupId: string, userId: string) {
+  const [g] = await db.select().from(group).where(eq(group.id, groupId));
+  if (!g) throw new HTTPException(404, { message: "Ese grupo no existe" });
+  const [m] = await db
+    .select()
+    .from(groupMember)
+    .where(and(eq(groupMember.groupId, groupId), eq(groupMember.userId, userId)));
+  return { group: g, member: m ?? null };
+}
+
+async function requireMod(groupId: string, userId: string) {
+  const r = await membership(groupId, userId);
+  if (!canModerate(r.member?.role)) throw new HTTPException(403, { message: "Solo dueño o moderadores" });
+  return r as typeof r & { member: NonNullable<typeof r.member> };
+}
+
+async function memberCounts(ids: string[]) {
+  const map = new Map<string, number>();
+  if (!ids.length) return map;
+  const rows = await db
+    .select({ groupId: groupMember.groupId, n: sql<number>`count(*)::int` })
+    .from(groupMember)
+    .where(inArray(groupMember.groupId, ids))
+    .groupBy(groupMember.groupId);
+  for (const r of rows) map.set(r.groupId, r.n);
+  return map;
+}
+
+async function pendingCounts(ids: string[]) {
+  const map = new Map<string, number>();
+  if (!ids.length) return map;
+  const rows = await db
+    .select({ groupId: groupJoinRequest.groupId, n: sql<number>`count(*)::int` })
+    .from(groupJoinRequest)
+    .where(and(inArray(groupJoinRequest.groupId, ids), eq(groupJoinRequest.status, "pending")))
+    .groupBy(groupJoinRequest.groupId);
+  for (const r of rows) map.set(r.groupId, r.n);
+  return map;
+}
+
+/** Estado de una persona respecto de varios grupos: solicitud pendiente o período de espera. */
+async function requestStateFor(userId: string, ids: string[]) {
+  const map = new Map<string, { pending: boolean; cooldownUntil: string | null }>();
+  if (!ids.length) return map;
+  const since = new Date(Date.now() - REAPPLY_DAYS * 86_400_000);
+  const rows = await db
+    .select()
+    .from(groupJoinRequest)
+    .where(and(
+      eq(groupJoinRequest.userId, userId),
+      inArray(groupJoinRequest.groupId, ids),
+      or(
+        eq(groupJoinRequest.status, "pending"),
+        and(inArray(groupJoinRequest.status, ["rejected", "removed"]), gt(groupJoinRequest.resolvedAt, since)),
+      ),
+    ));
+  for (const r of rows) {
+    const cur = map.get(r.groupId) ?? { pending: false, cooldownUntil: null };
+    if (r.status === "pending") cur.pending = true;
+    else if (r.resolvedAt) {
+      const until = new Date(r.resolvedAt.getTime() + REAPPLY_DAYS * 86_400_000).toISOString();
+      if (!cur.cooldownUntil || until > cur.cooldownUntil) cur.cooldownUntil = until;
+    }
+    map.set(r.groupId, cur);
+  }
+  return map;
+}
+
+/** Avisa a dueño y moderadores (por ejemplo, que hay una solicitud nueva). */
+async function notifyMods(groupId: string, event: string, payload: unknown) {
+  const mods = await db
+    .select({ userId: groupMember.userId })
+    .from(groupMember)
+    .where(and(eq(groupMember.groupId, groupId), inArray(groupMember.role, ["owner", "moderator"])));
+  for (const m of mods) emitToUser(m.userId, event, payload);
+  return mods.map((m) => m.userId);
+}
+
+const groupInput = z.object({
+  name: z.string().trim().min(3, "El nombre tiene que tener al menos 3 letras").max(40, "Máximo 40 caracteres"),
+  description: z.string().trim().max(300, "Máximo 300 caracteres").nullish(),
+});
+
+const rulesInput = z.object({
+  intervalSeconds: z.number().int().min(5).max(3600),
+  burst: z.number().int().min(1).max(10),
+  rotationWindow: z.number().int().min(5).max(100),
+  rotationMax: z.number().int().min(1).max(50),
+  newAccountHours: z.number().int().min(0).max(24 * 30),
+  maxQueued: z.number().int().min(1).max(10),
+});
+
+function parse<T>(schema: z.ZodType<T>, input: unknown): T {
+  const r = schema.safeParse(input);
+  if (!r.success) throw new HTTPException(400, { message: r.error.issues[0].message });
+  return r.data;
+}
+
+// ---------- Listados ----------
+
+/** Mis grupos (el general primero), con solicitudes pendientes si modero. */
+groupRoutes.get("/groups", async (c) => {
+  const u = c.get("user");
+  const rows = await db
+    .select({ id: group.id, name: group.name, description: group.description, isGeneral: group.isGeneral, role: groupMember.role })
+    .from(groupMember)
+    .innerJoin(group, eq(group.id, groupMember.groupId))
+    .where(eq(groupMember.userId, u.id))
+    .orderBy(desc(group.isGeneral), asc(group.name));
+  const ids = rows.map((r) => r.id);
+  const counts = await memberCounts(ids);
+  const pending = await pendingCounts(rows.filter((r) => canModerate(r.role)).map((r) => r.id));
+  return c.json(rows.map((r) => ({ ...r, memberCount: counts.get(r.id) ?? 0, pendingCount: pending.get(r.id) ?? 0 })));
+});
+
+/** Todos los grupos, para explorar y pedir ingreso. */
+groupRoutes.get("/groups/all", async (c) => {
+  const u = c.get("user");
+  const q = (c.req.query("q") ?? "").trim().slice(0, 40);
+  const conds = [eq(group.isGeneral, false)];
+  if (q) conds.push(or(ilike(group.name, `%${q}%`), ilike(group.description, `%${q}%`))!);
+  const rows = await db.select().from(group).where(and(...conds)).orderBy(desc(group.createdAt)).limit(200);
+  const ids = rows.map((r) => r.id);
+  const counts = await memberCounts(ids);
+  const mine = ids.length
+    ? await db.select().from(groupMember).where(and(eq(groupMember.userId, u.id), inArray(groupMember.groupId, ids)))
+    : [];
+  const roles = new Map(mine.map((m) => [m.groupId, m.role]));
+  const states = await requestStateFor(u.id, ids);
+  const list = rows.map((g) => ({
+    id: g.id,
+    name: g.name,
+    description: g.description,
+    memberCount: counts.get(g.id) ?? 0,
+    role: roles.get(g.id) ?? null,
+    pending: states.get(g.id)?.pending ?? false,
+    cooldownUntil: states.get(g.id)?.cooldownUntil ?? null,
+  }));
+  // Los más concurridos primero
+  list.sort((a, b) => b.memberCount - a.memberCount);
+  return c.json(list);
+});
+
+// ---------- Crear, editar, borrar ----------
+
+groupRoutes.post("/groups", async (c) => {
+  const u = c.get("user");
+  const data = parse(groupInput, await c.req.json());
+  const [{ owned }] = await db
+    .select({ owned: sql<number>`count(*)::int` })
+    .from(groupMember)
+    .where(and(eq(groupMember.userId, u.id), eq(groupMember.role, "owner")));
+  if (owned >= MAX_OWNED) throw new HTTPException(400, { message: `Podés ser dueño de hasta ${MAX_OWNED} grupos` });
+  const id = newId();
+  await db.insert(group).values({ id, name: data.name, description: data.description ?? null, ownerId: u.id });
+  await db.insert(groupMember).values({ groupId: id, userId: u.id, role: "owner" });
+  syncGroupRoom(u.id, id, true);
+  return c.json({ id });
+});
+
+groupRoutes.get("/groups/:id", async (c) => {
+  const u = c.get("user");
+  const { group: g, member } = await membership(c.req.param("id"), u.id);
+  const counts = await memberCounts([g.id]);
+  const state = (await requestStateFor(u.id, [g.id])).get(g.id);
+  const pending = canModerate(member?.role) ? (await pendingCounts([g.id])).get(g.id) ?? 0 : 0;
+  return c.json({
+    id: g.id,
+    name: g.name,
+    description: g.description,
+    isGeneral: g.isGeneral,
+    rules: g.spamRules,
+    role: member?.role ?? null,
+    memberCount: counts.get(g.id) ?? 0,
+    pending: state?.pending ?? false,
+    cooldownUntil: state?.cooldownUntil ?? null,
+    pendingCount: pending,
+  });
+});
+
+/** Editar nombre, descripción y reglas antispam (solo el dueño; el general solo se puede ajustar en código). */
+groupRoutes.patch("/groups/:id", async (c) => {
+  const u = c.get("user");
+  const { group: g, member } = await membership(c.req.param("id"), u.id);
+  if (member?.role !== "owner") throw new HTTPException(403, { message: "Solo el dueño puede editar el grupo" });
+  const body = await c.req.json();
+  const data = parse(groupInput.partial().extend({ rules: rulesInput.optional() }), body);
+  await db
+    .update(group)
+    .set({
+      ...(data.name !== undefined && { name: data.name }),
+      ...(data.description !== undefined && { description: data.description ?? null }),
+      ...(data.rules && { spamRules: { ...DEFAULT_SPAM_RULES, ...data.rules } }),
+    })
+    .where(eq(group.id, g.id));
+  return c.json({ ok: true });
+});
+
+groupRoutes.delete("/groups/:id", async (c) => {
+  const u = c.get("user");
+  const { group: g, member } = await membership(c.req.param("id"), u.id);
+  if (g.isGeneral) throw new HTTPException(400, { message: "El chat general no se puede borrar" });
+  if (member?.role !== "owner") throw new HTTPException(403, { message: "Solo el dueño puede borrar el grupo" });
+  const members = await db.select({ userId: groupMember.userId }).from(groupMember).where(eq(groupMember.groupId, g.id));
+  await db.delete(group).where(eq(group.id, g.id));
+  for (const m of members) {
+    syncGroupRoom(m.userId, g.id, false);
+    emitToUser(m.userId, "group:gone", { groupId: g.id });
+  }
+  return c.json({ ok: true });
+});
+
+// ---------- Solicitudes de ingreso ----------
+
+groupRoutes.post("/groups/:id/requests", async (c) => {
+  const u = c.get("user");
+  const { group: g, member } = await membership(c.req.param("id"), u.id);
+  if (g.isGeneral) throw new HTTPException(400, { message: "Al general ya pertenecés" });
+  if (member) throw new HTTPException(400, { message: "Ya sos parte de este grupo" });
+  const state = (await requestStateFor(u.id, [g.id])).get(g.id);
+  if (state?.pending) throw new HTTPException(409, { message: "Ya mandaste una solicitud" });
+  if (state?.cooldownUntil) {
+    const d = new Date(state.cooldownUntil).toLocaleDateString("es-AR", { day: "numeric", month: "long" });
+    throw new HTTPException(429, { message: `Podés volver a pedir ingreso a partir del ${d}` });
+  }
+  const { message } = parse(z.object({ message: z.string().trim().max(300).optional() }), await c.req.json().catch(() => ({})));
+  const id = newId();
+  await db.insert(groupJoinRequest).values({ id, groupId: g.id, userId: u.id, message: message || null });
+  const mods = await notifyMods(g.id, "group:request", { groupId: g.id });
+  for (const m of mods) {
+    if (!isOnline(m)) pushTo(m, { title: "mortero", body: "Tenés una solicitud nueva en un grupo", url: `/grupos/${g.id}/info`, tag: `req-${g.id}` }).catch(() => {});
+  }
+  return c.json({ id });
+});
+
+/** Cancelar mi solicitud pendiente. */
+groupRoutes.delete("/groups/:id/requests/mine", async (c) => {
+  const u = c.get("user");
+  await db
+    .update(groupJoinRequest)
+    .set({ status: "cancelled", resolvedAt: new Date() })
+    .where(and(
+      eq(groupJoinRequest.groupId, c.req.param("id")),
+      eq(groupJoinRequest.userId, u.id),
+      eq(groupJoinRequest.status, "pending"),
+    ));
+  await notifyMods(c.req.param("id"), "group:request", { groupId: c.req.param("id") });
+  return c.json({ ok: true });
+});
+
+/** Solicitudes pendientes (dueño y moderadores). */
+groupRoutes.get("/groups/:id/requests", async (c) => {
+  const u = c.get("user");
+  const { group: g } = await requireMod(c.req.param("id"), u.id);
+  const rows = await db
+    .select()
+    .from(groupJoinRequest)
+    .where(and(eq(groupJoinRequest.groupId, g.id), eq(groupJoinRequest.status, "pending")))
+    .orderBy(asc(groupJoinRequest.createdAt));
+  const authors = await authorsFor(rows.map((r) => r.userId));
+  return c.json(rows.map((r) => ({
+    id: r.id,
+    message: r.message,
+    createdAt: r.createdAt.toISOString(),
+    user: authors.get(r.userId) ?? { id: r.userId, name: "Cuenta borrada", age: 0, photo: null },
+  })));
+});
+
+groupRoutes.post("/groups/:id/requests/:rid/:decision{accept|reject}", async (c) => {
+  const u = c.get("user");
+  const { group: g } = await requireMod(c.req.param("id"), u.id);
+  const accept = c.req.param("decision") === "accept";
+  const [req] = await db
+    .update(groupJoinRequest)
+    .set({ status: accept ? "accepted" : "rejected", resolvedBy: u.id, resolvedAt: new Date() })
+    .where(and(
+      eq(groupJoinRequest.id, c.req.param("rid")),
+      eq(groupJoinRequest.groupId, g.id),
+      eq(groupJoinRequest.status, "pending"),
+    ))
+    .returning();
+  if (!req) throw new HTTPException(409, { message: "Esa solicitud ya fue resuelta" });
+  if (accept) {
+    await db.insert(groupMember).values({ groupId: g.id, userId: req.userId }).onConflictDoNothing();
+    syncGroupRoom(req.userId, g.id, true);
+    emitToUser(req.userId, "group:accepted", { groupId: g.id, name: g.name });
+    if (!isOnline(req.userId)) {
+      pushTo(req.userId, { title: "mortero", body: "Te aceptaron en un grupo", url: `/grupos/${g.id}`, tag: `acc-${g.id}` }).catch(() => {});
+    }
+  } else {
+    emitToUser(req.userId, "group:rejected", { groupId: g.id, name: g.name });
+  }
+  await notifyMods(g.id, "group:request", { groupId: g.id });
+  return c.json({ ok: true });
+});
+
+// ---------- Miembros ----------
+
+groupRoutes.get("/groups/:id/members", async (c) => {
+  const u = c.get("user");
+  const { group: g, member } = await membership(c.req.param("id"), u.id);
+  if (!member) throw new HTTPException(403, { message: "No sos parte de este grupo" });
+  const rows = await db
+    .select()
+    .from(groupMember)
+    .where(eq(groupMember.groupId, g.id))
+    .orderBy(sql`case ${groupMember.role} when 'owner' then 0 when 'moderator' then 1 else 2 end`, asc(groupMember.joinedAt))
+    .limit(500);
+  const blocked = await blockedWith(u.id);
+  const visible = rows.filter((r) => !blocked.has(r.userId));
+  const authors = await authorsFor(visible.map((r) => r.userId));
+  return c.json(visible.flatMap((r) => {
+    const a = authors.get(r.userId);
+    return a ? [{ ...a, role: r.role as Role, joinedAt: r.joinedAt.toISOString() }] : [];
+  }));
+});
+
+/** Nombrar o sacar moderadores (solo el dueño). */
+groupRoutes.patch("/groups/:id/members/:uid", async (c) => {
+  const u = c.get("user");
+  const { group: g, member } = await membership(c.req.param("id"), u.id);
+  if (member?.role !== "owner") throw new HTTPException(403, { message: "Solo el dueño puede cambiar roles" });
+  const { role } = parse(z.object({ role: z.enum(["moderator", "member"]) }), await c.req.json());
+  const target = c.req.param("uid");
+  if (target === u.id) throw new HTTPException(400, { message: "No podés cambiar tu propio rol" });
+  const [row] = await db
+    .update(groupMember)
+    .set({ role })
+    .where(and(eq(groupMember.groupId, g.id), eq(groupMember.userId, target)))
+    .returning();
+  if (!row) throw new HTTPException(404, { message: "Esa persona no está en el grupo" });
+  emitToUser(target, "group:role", { groupId: g.id, role });
+  return c.json({ ok: true });
+});
+
+/** Expulsar. Moderadores pueden expulsar miembros; el dueño, a cualquiera. */
+groupRoutes.delete("/groups/:id/members/:uid", async (c) => {
+  const u = c.get("user");
+  const { group: g, member } = await requireMod(c.req.param("id"), u.id);
+  if (g.isGeneral) throw new HTTPException(400, { message: "Del general no se puede expulsar: reportá o bloqueá" });
+  const target = c.req.param("uid");
+  if (target === u.id) throw new HTTPException(400, { message: "Para irte, usá «Salir del grupo»" });
+  const [t] = await db
+    .select()
+    .from(groupMember)
+    .where(and(eq(groupMember.groupId, g.id), eq(groupMember.userId, target)));
+  if (!t) throw new HTTPException(404, { message: "Esa persona no está en el grupo" });
+  if (member.role === "moderator" && t.role !== "member") {
+    throw new HTTPException(403, { message: "Solo el dueño puede expulsar a otro moderador" });
+  }
+  await db.delete(groupMember).where(and(eq(groupMember.groupId, g.id), eq(groupMember.userId, target)));
+  // Queda registrado para el período de espera antes de volver a pedir ingreso
+  await db.insert(groupJoinRequest).values({
+    id: newId(), groupId: g.id, userId: target, status: "removed", resolvedBy: u.id, resolvedAt: new Date(),
+  });
+  syncGroupRoom(target, g.id, false);
+  emitToUser(target, "group:removed", { groupId: g.id, name: g.name });
+  return c.json({ ok: true });
+});
+
+/** Salir de un grupo. Si se va el dueño, la posta pasa a un moderador o al miembro más antiguo. */
+groupRoutes.post("/groups/:id/leave", async (c) => {
+  const u = c.get("user");
+  const { group: g, member } = await membership(c.req.param("id"), u.id);
+  if (g.isGeneral) throw new HTTPException(400, { message: "Del chat general no se puede salir" });
+  if (!member) return c.json({ ok: true });
+  await db.delete(groupMember).where(and(eq(groupMember.groupId, g.id), eq(groupMember.userId, u.id)));
+  syncGroupRoom(u.id, g.id, false);
+
+  if (member.role === "owner") {
+    const [heir] = await db
+      .select()
+      .from(groupMember)
+      .where(eq(groupMember.groupId, g.id))
+      .orderBy(sql`case ${groupMember.role} when 'moderator' then 0 else 1 end`, asc(groupMember.joinedAt))
+      .limit(1);
+    if (heir) {
+      await db.update(groupMember).set({ role: "owner" })
+        .where(and(eq(groupMember.groupId, g.id), eq(groupMember.userId, heir.userId)));
+      await db.update(group).set({ ownerId: heir.userId }).where(eq(group.id, g.id));
+      emitToUser(heir.userId, "group:role", { groupId: g.id, role: "owner" });
+    } else {
+      await db.delete(group).where(eq(group.id, g.id)); // nadie más: el grupo se cierra
+    }
+  }
+  return c.json({ ok: true });
+});
+
+// ---------- Mensajes ----------
+
+/** Historial publicado (sin gente con bloqueo) + mis mensajes en cola. */
+groupRoutes.get("/groups/:id/messages", async (c) => {
+  const u = c.get("user");
+  const groupId = c.req.param("id");
+  const { member } = await membership(groupId, u.id);
+  if (!member) throw new HTTPException(403, { message: "No sos parte de este grupo" });
+
+  const before = c.req.query("before");
+  const blocked = [...(await blockedWith(u.id))];
+  const conds = [eq(groupMessage.groupId, groupId), eq(groupMessage.status, "published")];
+  if (before) conds.push(lt(groupMessage.scheduledAt, new Date(before)));
+  if (blocked.length) conds.push(notInArray(groupMessage.userId, blocked));
+
+  const published = await db
+    .select()
+    .from(groupMessage)
+    .where(and(...conds))
+    .orderBy(desc(groupMessage.scheduledAt))
+    .limit(50);
+  const queued = before
+    ? []
+    : await db
+        .select()
+        .from(groupMessage)
+        .where(and(eq(groupMessage.groupId, groupId), eq(groupMessage.userId, u.id), eq(groupMessage.status, "queued")))
+        .orderBy(asc(groupMessage.scheduledAt));
+
+  return c.json({
+    messages: await serializeGroupMessages(published.reverse()),
+    queued: await serializeGroupMessages(queued),
+    hasMore: published.length === 50,
+  });
+});
+
+const bodySchema = z.object({ body: z.string().trim().min(1, "Mensaje vacío").max(1000, "Máximo 1000 caracteres") });
+
+groupRoutes.post("/groups/:id/messages", async (c) => {
+  const u = c.get("user");
+  const groupId = c.req.param("id");
+  const { group: g, member } = await membership(groupId, u.id);
+  if (!member) throw new HTTPException(403, { message: "No sos parte de este grupo" });
+  const { body } = parse(bodySchema, await c.req.json());
+
+  // Cuentas nuevas no pueden mandar links en grupos
+  const isNew = Date.now() - new Date(u.createdAt).getTime() < g.spamRules.newAccountHours * 3_600_000;
+  if (isNew && /(https?:\/\/|www\.|\.[a-z]{2,}\/)/i.test(body)) {
+    throw new HTTPException(400, { message: `Las cuentas nuevas no pueden mandar links en grupos durante las primeras ${g.spamRules.newAccountHours} h` });
+  }
+
+  const slot = await nextSlot({ groupId, userId: u.id, userCreatedAt: new Date(u.createdAt), rules: g.spamRules });
+  if (!slot.ok) throw new HTTPException(429, { message: slot.error });
+
+  const now = new Date();
+  const publishNow = slot.at.getTime() <= now.getTime();
+  const [row] = await db
+    .insert(groupMessage)
+    .values({
+      id: newId(),
+      groupId,
+      userId: u.id,
+      body,
+      status: publishNow ? "published" : "queued",
+      scheduledAt: publishNow ? now : slot.at,
+    })
+    .returning();
+  const [msg] = await serializeGroupMessages([row]);
+  if (publishNow) await emitToGroup(groupId, u.id, "group:message", msg);
+  else emitToUser(u.id, "group:queued", msg);
+  return c.json({ message: msg, reasons: slot.reasons, intervalSeconds: slot.intervalSeconds });
+});
+
+/** Editar un mensaje propio mientras está en cola. */
+groupRoutes.patch("/groups/:id/messages/:mid", async (c) => {
+  const u = c.get("user");
+  const { body } = parse(bodySchema, await c.req.json());
+  const [row] = await db
+    .update(groupMessage)
+    .set({ body })
+    .where(and(
+      eq(groupMessage.id, c.req.param("mid")),
+      eq(groupMessage.userId, u.id),
+      eq(groupMessage.status, "queued"),
+    ))
+    .returning();
+  if (!row) throw new HTTPException(409, { message: "Ese mensaje ya salió" });
+  const [msg] = await serializeGroupMessages([row]);
+  emitToUser(u.id, "group:queued", msg);
+  return c.json({ message: msg });
+});
+
+/** Cancelar (si está en cola) o borrar (si ya salió). Dueño y moderadores pueden borrar mensajes de otros. */
+groupRoutes.delete("/groups/:id/messages/:mid", async (c) => {
+  const u = c.get("user");
+  const groupId = c.req.param("id");
+  const [row] = await db
+    .select()
+    .from(groupMessage)
+    .where(and(eq(groupMessage.id, c.req.param("mid")), eq(groupMessage.groupId, groupId)));
+  if (!row) return c.notFound();
+  const mine = row.userId === u.id;
+  if (!mine) {
+    const { member } = await membership(groupId, u.id);
+    if (!canModerate(member?.role) || row.status !== "published") {
+      throw new HTTPException(403, { message: "No podés borrar ese mensaje" });
+    }
+  }
+  if (row.status === "queued" && mine) {
+    await db.update(groupMessage).set({ status: "cancelled" }).where(eq(groupMessage.id, row.id));
+    emitToUser(u.id, "group:cancelled", { id: row.id, groupId: row.groupId });
+  } else if (row.status === "published") {
+    await db.update(groupMessage).set({ status: "deleted" }).where(eq(groupMessage.id, row.id));
+    await emitToGroup(row.groupId, row.userId, "group:deleted", { id: row.id, groupId: row.groupId });
+  }
+  return c.json({ ok: true });
+});

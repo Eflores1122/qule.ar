@@ -1,0 +1,353 @@
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Link, useNavigate, useParams } from "react-router";
+import { api, getSocket, type GroupInfo, type GroupMessage } from "../api";
+import { useMe } from "../App";
+import { Avatar } from "../components/Avatar";
+import { BackIcon, ClockIcon, DotsIcon, InfoIcon, SendIcon } from "../components/Icons";
+import { JoinButton } from "../components/JoinButton";
+import { ReportDialog } from "../components/ReportDialog";
+
+const fmtTime = (iso: string) =>
+  new Date(iso).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
+
+function fmtCountdown(ms: number) {
+  const s = Math.max(0, Math.ceil(ms / 1000));
+  return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
+}
+
+export function GroupChat() {
+  const { id = "general" } = useParams();
+  const { me } = useMe();
+  const nav = useNavigate();
+  const [info, setInfo] = useState<GroupInfo | null>(null);
+  const [infoTick, setInfoTick] = useState(0);
+  const [messages, setMessages] = useState<GroupMessage[]>([]);
+  const [queued, setQueued] = useState<GroupMessage[]>([]);
+  const [hasMore, setHasMore] = useState(false);
+  const [text, setText] = useState("");
+  const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
+  const [editing, setEditing] = useState<string | null>(null);
+  const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [reporting, setReporting] = useState<GroupMessage | null>(null);
+  const [now, setNow] = useState(Date.now());
+  const listRef = useRef<HTMLDivElement>(null);
+  const stickToBottom = useRef(true);
+
+  const isMember = Boolean(info?.role);
+  const isMod = info?.role === "owner" || info?.role === "moderator";
+
+  // Info del grupo (se recarga cuando cambian solicitudes o roles)
+  useEffect(() => {
+    let alive = true;
+    api<GroupInfo>(`/groups/${id}`)
+      .then((g) => alive && setInfo(g))
+      .catch(() => nav("/grupos", { replace: true }));
+    return () => {
+      alive = false;
+    };
+  }, [id, infoTick, nav]);
+
+  useEffect(() => {
+    const s = getSocket();
+    const bump = (p: { groupId: string }) => p.groupId === id && setInfoTick((t) => t + 1);
+    const kicked = (p: { groupId: string }) => {
+      if (p.groupId !== id) return;
+      nav("/grupos", { replace: true });
+    };
+    for (const ev of ["group:request", "group:role", "group:accepted", "group:rejected"]) s.on(ev, bump);
+    s.on("group:removed", kicked);
+    s.on("group:gone", kicked);
+    return () => {
+      for (const ev of ["group:request", "group:role", "group:accepted", "group:rejected"]) s.off(ev, bump);
+      s.off("group:removed", kicked);
+      s.off("group:gone", kicked);
+    };
+  }, [id, nav]);
+
+  useEffect(() => {
+    if (!isMember) return;
+    let alive = true;
+    setMessages([]);
+    setQueued([]);
+    api<{ messages: GroupMessage[]; queued: GroupMessage[]; hasMore: boolean }>(`/groups/${id}/messages`)
+      .then((d) => {
+        if (!alive) return;
+        stickToBottom.current = true;
+        setMessages(d.messages);
+        setQueued(d.queued);
+        setHasMore(d.hasMore);
+      })
+      .catch((e) => setNotice({ kind: "error", text: e.message }));
+
+    const s = getSocket();
+    const onMessage = (m: GroupMessage) => {
+      if (m.groupId !== id) return;
+      setQueued((q) => q.filter((x) => x.id !== m.id));
+      setMessages((list) => (list.some((x) => x.id === m.id) ? list : [...list, m]));
+    };
+    const onQueued = (m: GroupMessage) => {
+      if (m.groupId !== id) return;
+      setQueued((q) => {
+        const rest = q.filter((x) => x.id !== m.id);
+        return [...rest, m].sort((a, b) => a.scheduledAt.localeCompare(b.scheduledAt));
+      });
+    };
+    const onCancelled = (p: { id: string; groupId: string }) => {
+      if (p.groupId === id) setQueued((q) => q.filter((x) => x.id !== p.id));
+    };
+    const onDeleted = (p: { id: string; groupId: string }) => {
+      if (p.groupId === id) setMessages((list) => list.filter((x) => x.id !== p.id));
+    };
+    s.on("group:message", onMessage);
+    s.on("group:queued", onQueued);
+    s.on("group:cancelled", onCancelled);
+    s.on("group:deleted", onDeleted);
+    return () => {
+      alive = false;
+      s.off("group:message", onMessage);
+      s.off("group:queued", onQueued);
+      s.off("group:cancelled", onCancelled);
+      s.off("group:deleted", onDeleted);
+    };
+  }, [id, isMember]);
+
+  // Reloj para las cuentas regresivas de la cola
+  useEffect(() => {
+    if (!queued.length) return;
+    const t = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(t);
+  }, [queued.length]);
+
+  useLayoutEffect(() => {
+    const el = listRef.current;
+    if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
+  }, [messages, queued]);
+
+  function onScroll() {
+    const el = listRef.current;
+    if (el) stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+  }
+
+  async function loadOlder() {
+    const first = messages[0];
+    if (!first) return;
+    const el = listRef.current;
+    const prevHeight = el?.scrollHeight ?? 0;
+    const d = await api<{ messages: GroupMessage[]; hasMore: boolean }>(
+      `/groups/${id}/messages?before=${encodeURIComponent(first.scheduledAt)}`,
+    );
+    stickToBottom.current = false;
+    setMessages((list) => [...d.messages, ...list]);
+    setHasMore(d.hasMore);
+    requestAnimationFrame(() => {
+      if (el) el.scrollTop = el.scrollHeight - prevHeight;
+    });
+  }
+
+  async function send(e?: React.FormEvent) {
+    e?.preventDefault();
+    const body = text.trim();
+    if (!body) return;
+    setNotice(null);
+    // Se vacía al toque; si falla, se devuelve el texto
+    setText("");
+    const wasEditing = editing;
+    try {
+      if (wasEditing) {
+        setEditing(null);
+        await api(`/groups/${id}/messages/${wasEditing}`, { method: "PATCH", json: { body } });
+        return;
+      }
+      const r = await api<{ message: GroupMessage; reasons: string[] }>(`/groups/${id}/messages`, {
+        method: "POST",
+        json: { body },
+      });
+      stickToBottom.current = true;
+      if (r.message.status === "queued") {
+        setQueued((q) => (q.some((x) => x.id === r.message.id) ? q : [...q, r.message]));
+        const why = r.reasons.length ? ` (${r.reasons.join(", ")})` : "";
+        setNotice({ kind: "info", text: `Tu mensaje quedó en cola${why}. Sale solo cuando te toque.` });
+      } else {
+        setMessages((list) => (list.some((x) => x.id === r.message.id) ? list : [...list, r.message]));
+      }
+    } catch (err) {
+      setText((t) => t || body);
+      if (wasEditing) setEditing(wasEditing);
+      setNotice({ kind: "error", text: (err as Error).message });
+    }
+  }
+
+  async function cancel(m: GroupMessage) {
+    await api(`/groups/${id}/messages/${m.id}`, { method: "DELETE" }).catch(() => {});
+    setQueued((q) => q.filter((x) => x.id !== m.id));
+    if (editing === m.id) {
+      setEditing(null);
+      setText("");
+    }
+  }
+
+  async function remove(m: GroupMessage) {
+    setMenuFor(null);
+    await api(`/groups/${id}/messages/${m.id}`, { method: "DELETE" }).catch(() => {});
+    setMessages((list) => list.filter((x) => x.id !== m.id));
+  }
+
+  const windowSecs = info ? info.rules.burst * info.rules.intervalSeconds : 0;
+  const rulesText = info
+    ? `Modo lento · ${info.rules.burst} ${info.rules.burst === 1 ? "mensaje" : "mensajes"} cada ${windowSecs < 60 ? `${windowSecs} s` : `${Math.round((windowSecs / 60) * 10) / 10} min`}`
+    : "";
+
+  if (!info) return <div className="chat" />;
+
+  // Vista previa para quien no es miembro: no ve los mensajes, solo puede pedir ingreso
+  if (!isMember) {
+    return (
+      <div className="page">
+        <header className="topbar topbar--thread">
+          <button className="iconbtn" onClick={() => nav("/grupos?ver=todos")} aria-label="Volver"><BackIcon /></button>
+          <h1 className="topbar__title topbar__title--sm">{info.name}</h1>
+        </header>
+        <div className="preview">
+          <span className="gcard__icon gcard__icon--big" aria-hidden>{info.name.charAt(0).toUpperCase()}</span>
+          <h2>{info.name}</h2>
+          {info.description && <p className="muted">{info.description}</p>}
+          <p className="muted small">{info.memberCount} {info.memberCount === 1 ? "miembro" : "miembros"} · {rulesText}</p>
+          <p className="small">Los mensajes de este grupo solo los ven sus miembros.</p>
+          <JoinButton g={info} onChange={() => setInfoTick((t) => t + 1)} />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="chat">
+      <header className="topbar">
+        <div className="topbar__grow">
+          <h1 className="topbar__title">{info.isGeneral ? "# " : ""}{info.name}</h1>
+          <p className="topbar__sub"><ClockIcon /> {rulesText}</p>
+        </div>
+        <Link to={`/grupos/${id}/info`} className="iconbtn iconbtn--badge" aria-label={`Info del grupo${info.pendingCount ? `, ${info.pendingCount} solicitudes pendientes` : ""}`}>
+          <InfoIcon />
+          {info.pendingCount > 0 && <b className="badge">{info.pendingCount}</b>}
+        </Link>
+      </header>
+
+      <div className="chat__list" ref={listRef} onScroll={onScroll}>
+        {hasMore && (
+          <button className="btn btn--ghost btn--small chat__older" onClick={loadOlder}>Ver mensajes anteriores</button>
+        )}
+        {!messages.length && !queued.length && (
+          <div className="empty">
+            <p className="empty__title">Todavía no habló nadie</p>
+            <p className="muted">Rompé el hielo. Acá cada uno habla a su turno, así nadie copa el chat.</p>
+          </div>
+        )}
+        {messages.map((m, i) => {
+          const prev = messages[i - 1];
+          const grouped =
+            prev && prev.author.id === m.author.id &&
+            new Date(m.scheduledAt).getTime() - new Date(prev.scheduledAt).getTime() < 5 * 60_000;
+          const mine = m.author.id === me?.user.id;
+          return (
+            <div key={m.id} className={`gmsg ${grouped ? "gmsg--grouped" : ""}`}>
+              <div className="gmsg__avatar">
+                {!grouped && (
+                  <Link to={`/perfil/${m.author.id}`} aria-label={`Ver perfil de ${m.author.name}`}>
+                    <Avatar src={m.author.photo} name={m.author.name} size={36} />
+                  </Link>
+                )}
+              </div>
+              <div className="gmsg__content">
+                {!grouped && (
+                  <div className="gmsg__meta">
+                    <Link to={`/perfil/${m.author.id}`} className="gmsg__name">{m.author.name}</Link>
+                    {m.author.age > 0 && <span className="gmsg__age">{m.author.age}</span>}
+                    <time className="gmsg__time">{fmtTime(m.scheduledAt)}</time>
+                  </div>
+                )}
+                <p className="gmsg__body">{m.body}</p>
+              </div>
+              <button className="iconbtn gmsg__more" aria-label="Opciones del mensaje" onClick={() => setMenuFor(menuFor === m.id ? null : m.id)}>
+                <DotsIcon />
+              </button>
+              {menuFor === m.id && (
+                <div className="menu" role="menu">
+                  {mine ? (
+                    <button role="menuitem" onClick={() => remove(m)}>Borrar mensaje</button>
+                  ) : (
+                    <>
+                      <Link role="menuitem" to={`/perfil/${m.author.id}`}>Ver perfil</Link>
+                      <button role="menuitem" onClick={() => { setMenuFor(null); setReporting(m); }}>Reportar mensaje</button>
+                      {isMod && <button role="menuitem" className="danger" onClick={() => remove(m)}>Borrar (moderación)</button>}
+                    </>
+                  )}
+                </div>
+              )}
+            </div>
+          );
+        })}
+
+        {queued.map((m) => {
+          const ms = new Date(m.scheduledAt).getTime() - now;
+          return (
+            <div key={m.id} className="queued">
+              <div className="queued__head">
+                <ClockIcon /> En cola · sale en <b>{fmtCountdown(ms)}</b>
+              </div>
+              <p className="queued__body">{m.body}</p>
+              <div className="queued__actions">
+                <button className="linkbtn" onClick={() => { setEditing(m.id); setText(m.body ?? ""); }}>Editar</button>
+                <button className="linkbtn linkbtn--danger" onClick={() => cancel(m)}>Cancelar</button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+
+      {notice && (
+        <div className={`notice notice--${notice.kind}`} role="status">
+          <span>{notice.text}</span>
+          <button className="linkbtn" onClick={() => setNotice(null)} aria-label="Cerrar aviso">✕</button>
+        </div>
+      )}
+
+      <form className="composer" onSubmit={send}>
+        {editing && (
+          <div className="composer__editing">
+            Editando un mensaje en cola
+            <button type="button" className="linkbtn" onClick={() => { setEditing(null); setText(""); }}>Cancelar</button>
+          </div>
+        )}
+        <div className="composer__row">
+          <textarea
+            className="composer__input"
+            rows={1}
+            maxLength={1000}
+            placeholder={`Escribí en #${info?.name ?? ""}…`}
+            value={text}
+            onChange={(e) => setText(e.target.value)}
+            onKeyDown={(e) => {
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                send();
+              }
+            }}
+          />
+          <button className="sendbtn" aria-label="Mandar" disabled={!text.trim()}>
+            <SendIcon />
+          </button>
+        </div>
+      </form>
+
+      {reporting && (
+        <ReportDialog
+          userId={reporting.author.id}
+          name={reporting.author.name}
+          messageId={reporting.id}
+          messageKind="group"
+          onClose={() => setReporting(null)}
+        />
+      )}
+    </div>
+  );
+}

@@ -1,0 +1,418 @@
+import { useEffect, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router";
+import { api, authClient, closeSocket, upload, type Author, type Profile } from "../api";
+import { useMe } from "../App";
+import { Avatar } from "../components/Avatar";
+import { EyeIcon, LockIcon, PlusIcon, StarIcon } from "../components/Icons";
+import { disablePush, enablePush, pushState, type PushState } from "../push";
+import { BODY_TYPES, HIV_STATUS, LOOKING_FOR, POSITIONS, PRONOUNS, RELATIONSHIP, TRIBES } from "../options";
+
+type Form = Omit<Profile, "birthdate" | "age">;
+
+function Select({ label, value, options, onChange }: { label: string; value: string | null; options: string[]; onChange: (v: string | null) => void }) {
+  return (
+    <label className="field">
+      <span>{label}</span>
+      <select className="input" value={value ?? ""} onChange={(e) => onChange(e.target.value || null)}>
+        <option value="">Sin especificar</option>
+        {options.map((o) => <option key={o} value={o}>{o}</option>)}
+      </select>
+    </label>
+  );
+}
+
+function MultiChips({ label, value, options, onChange, max = 10 }: { label: string; value: string[]; options: string[]; onChange: (v: string[]) => void; max?: number }) {
+  return (
+    <fieldset className="field">
+      <legend>{label}</legend>
+      <div className="chips">
+        {options.map((o) => {
+          const on = value.includes(o);
+          return (
+            <button
+              type="button"
+              key={o}
+              className={`chip ${on ? "chip--on" : ""}`}
+              aria-pressed={on}
+              onClick={() => onChange(on ? value.filter((x) => x !== o) : value.length < max ? [...value, o] : value)}
+            >
+              {o}
+            </button>
+          );
+        })}
+      </div>
+    </fieldset>
+  );
+}
+
+const numOrNull = (s: string) => (s === "" ? null : Number(s));
+
+function NotificationsSetting() {
+  const [state, setState] = useState<PushState | null>(null);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    pushState().then(setState).catch(() => setState("unsupported"));
+  }, []);
+  if (!state || state === "disabled") return null;
+
+  const text: Record<PushState, string> = {
+    on: "Te avisamos de mensajes nuevos y solicitudes cuando no tenés la app abierta. Los avisos no dicen quién te escribió ni qué.",
+    off: "Activalas para enterarte de mensajes nuevos con la app cerrada. Los avisos son discretos: no dicen quién te escribió ni qué.",
+    denied: "Bloqueaste las notificaciones para este sitio. Habilitalas en los ajustes del navegador.",
+    unsupported: "Este navegador no permite notificaciones.",
+    "ios-install": "En iPhone, primero agregá mortero a la pantalla de inicio (Compartir → Agregar a inicio) y abrila desde ahí.",
+    disabled: "",
+  };
+
+  async function toggle() {
+    setBusy(true);
+    try {
+      setState(state === "on" ? await disablePush() : await enablePush());
+    } catch {
+      setState(await pushState().catch(() => "unsupported" as const));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <section className="section">
+      <div className="setting">
+        <div>
+          <h2 className="section__title" style={{ marginBottom: 4 }}>Notificaciones</h2>
+          <p className="muted small">{text[state]}</p>
+        </div>
+        {(state === "on" || state === "off") && (
+          <button className={`switch ${state === "on" ? "switch--on" : ""}`} role="switch" aria-checked={state === "on"} aria-label="Notificaciones" disabled={busy} onClick={toggle}>
+            <span />
+          </button>
+        )}
+      </div>
+    </section>
+  );
+}
+
+export function MyProfile() {
+  const { me, reload } = useMe();
+  const [params] = useSearchParams();
+  const isNew = params.get("nuevo") === "1";
+  const [form, setForm] = useState<Form | null>(null);
+  const [saved, setSaved] = useState<"idle" | "saving" | "ok" | "error">("idle");
+  const [error, setError] = useState("");
+  const [uploading, setUploading] = useState(false);
+  const [blocked, setBlocked] = useState<Author[]>([]);
+  const [deleting, setDeleting] = useState(false);
+  const [deleteText, setDeleteText] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+  const nextPrivate = useRef(false);
+  const [grants, setGrants] = useState<Author[]>([]);
+
+  useEffect(() => {
+    if (me?.profile) {
+      const p = me.profile;
+      setForm({
+        displayName: p.displayName, about: p.about, heightCm: p.heightCm, weightKg: p.weightKg,
+        bodyType: p.bodyType, position: p.position, tribes: p.tribes, lookingFor: p.lookingFor,
+        relationship: p.relationship, pronouns: p.pronouns, hivStatus: p.hivStatus, lastTested: p.lastTested,
+      });
+    }
+  }, [me?.profile]);
+
+  useEffect(() => {
+    api<Author[]>("/blocks").then(setBlocked).catch(() => {});
+    api<Author[]>("/album/grants").then(setGrants).catch(() => {});
+  }, []);
+
+  if (!me?.profile || !form) return null;
+  const publicPhotos = me.photos.filter((p) => !p.isPrivate);
+  const privatePhotos = me.photos.filter((p) => p.isPrivate);
+  const set = <K extends keyof Form>(k: K, v: Form[K]) => {
+    setForm({ ...form, [k]: v });
+    setSaved("idle");
+  };
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    setSaved("saving");
+    setError("");
+    try {
+      await api("/me/profile", { method: "PUT", json: form });
+      await reload();
+      setSaved("ok");
+    } catch (err) {
+      setSaved("error");
+      setError((err as Error).message);
+    }
+  }
+
+  function pick(priv: boolean) {
+    nextPrivate.current = priv;
+    fileRef.current?.click();
+  }
+
+  async function setPrivate(photoId: string, isPrivate: boolean) {
+    await api(`/me/photos/${photoId}`, { method: "PATCH", json: { isPrivate } });
+    await reload();
+  }
+
+  async function revoke(userId: string) {
+    await api(`/album/grants/${userId}`, { method: "DELETE" });
+    setGrants((g) => g.filter((x) => x.id !== userId));
+  }
+
+  async function addPhoto(file: File, priv = false) {
+    setUploading(true);
+    setError("");
+    try {
+      await upload("/me/photos", file, priv ? { private: "1" } : {});
+      await reload();
+    } catch (err) {
+      setError((err as Error).message);
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  async function removePhoto(photoId: string) {
+    await api(`/me/photos/${photoId}`, { method: "DELETE" });
+    await reload();
+  }
+
+  async function makeMain(photoId: string) {
+    const ids = [photoId, ...me!.photos.map((p) => p.id).filter((x) => x !== photoId)];
+    // (las privadas no cuentan para la principal: se toma la primera pública)
+    await api("/me/photos/order", { method: "PUT", json: ids });
+    await reload();
+  }
+
+  async function unblock(userId: string) {
+    await api(`/blocks/${userId}`, { method: "DELETE" });
+    setBlocked((b) => b.filter((x) => x.id !== userId));
+  }
+
+  async function logout() {
+    await authClient.signOut();
+    closeSocket();
+    await reload();
+  }
+
+  async function deleteAccount() {
+    await api("/me", { method: "DELETE" });
+    closeSocket();
+    await reload();
+  }
+
+  return (
+    <div className="page">
+      <header className="topbar">
+        <h1 className="topbar__title">Mi perfil</h1>
+        <Link to={`/perfil/${me.user.id}`} className="linkbtn">Ver como lo ven</Link>
+      </header>
+
+      {isNew && (
+        <div className="notice notice--info welcome">
+          ¡Bienvenide a mortero! Subí una foto y completá lo que quieras. Todo es opcional y lo podés cambiar cuando quieras.
+        </div>
+      )}
+
+      <nav className="quicklinks" aria-label="Accesos">
+        <Link to="/visitas" className="quicklink"><EyeIcon /> Quién me vio</Link>
+        <Link to="/favoritos" className="quicklink"><StarIcon size={18} /> Favoritos</Link>
+        {me.user.isAdmin && <Link to="/admin" className="quicklink quicklink--wide">Moderación</Link>}
+      </nav>
+
+      <NotificationsSetting />
+
+      <section className="section">
+        <h2 className="section__title">Fotos <span className="muted">{me.photos.length}/6</span></h2>
+        <div className="photos">
+          {publicPhotos.map((p, i) => (
+            <div key={p.id} className="photos__item">
+              <img src={p.url} alt={`Tu foto ${i + 1}`} />
+              {i === 0 ? <span className="photos__main">Principal</span> : (
+                <button className="photos__action" onClick={() => makeMain(p.id)}>Hacer principal</button>
+              )}
+              <button className="photos__remove" aria-label="Borrar foto" onClick={() => removePhoto(p.id)}>✕</button>
+              <button className="photos__lock" aria-label="Pasar al álbum privado" title="Pasar al álbum privado" onClick={() => setPrivate(p.id, true)}><LockIcon /></button>
+            </div>
+          ))}
+          {me.photos.length < 6 && (
+            <button className="photos__add" onClick={() => pick(false)} disabled={uploading}>
+              {uploading ? "Subiendo…" : <><PlusIcon /> Agregar</>}
+            </button>
+          )}
+        </div>
+        <p className="muted small">Al subir una foto le borramos los metadatos, incluida la ubicación GPS.</p>
+      </section>
+
+      <section className="section">
+        <h2 className="section__title"><LockIcon /> Álbum privado <span className="muted">{privatePhotos.length}</span></h2>
+        <p className="muted small" style={{ marginBottom: 10 }}>Solo lo ve la gente a la que se lo compartís desde su perfil. Podés dejar de compartirlo cuando quieras.</p>
+        <div className="photos">
+          {privatePhotos.map((p, i) => (
+            <div key={p.id} className="photos__item">
+              <img src={p.url} alt={`Tu foto privada ${i + 1}`} />
+              <button className="photos__action" onClick={() => setPrivate(p.id, false)}>Hacer pública</button>
+              <button className="photos__remove" aria-label="Borrar foto" onClick={() => removePhoto(p.id)}>✕</button>
+            </div>
+          ))}
+          {me.photos.length < 6 && (
+            <button className="photos__add" onClick={() => pick(true)} disabled={uploading}>
+              {uploading ? "Subiendo…" : <><PlusIcon /> Privada</>}
+            </button>
+          )}
+        </div>
+        {grants.length > 0 && (
+          <>
+            <h3 className="subhead" style={{ margin: "14px 0 8px" }}>Lo compartiste con</h3>
+            <ul className="blocked">
+              {grants.map((g) => (
+                <li key={g.id}>
+                  <Avatar src={g.photo} name={g.name} size={36} />
+                  <span>{g.name}</span>
+                  <button className="linkbtn" onClick={() => revoke(g.id)}>Dejar de compartir</button>
+                </li>
+              ))}
+            </ul>
+          </>
+        )}
+        <input
+          ref={fileRef}
+          type="file"
+          accept="image/*"
+          hidden
+          onChange={(e) => {
+            const f = e.target.files?.[0];
+            if (f) addPhoto(f, nextPrivate.current);
+            e.target.value = "";
+          }}
+        />
+      </section>
+
+      <form className="section form" onSubmit={save}>
+        <h2 className="section__title">Sobre vos <span className="muted">{me.profile.age} años</span></h2>
+        <label className="field">
+          <span>Nombre</span>
+          <input className="input" required maxLength={40} value={form.displayName} onChange={(e) => set("displayName", e.target.value)} />
+        </label>
+        <label className="field">
+          <span>Sobre mí</span>
+          <textarea className="input" rows={3} maxLength={500} value={form.about ?? ""} onChange={(e) => set("about", e.target.value || null)} />
+        </label>
+        <div className="grid2">
+          <label className="field">
+            <span>Altura (cm)</span>
+            <input className="input" type="number" inputMode="numeric" min={120} max={230} value={form.heightCm ?? ""} onChange={(e) => set("heightCm", numOrNull(e.target.value))} />
+          </label>
+          <label className="field">
+            <span>Peso (kg)</span>
+            <input className="input" type="number" inputMode="numeric" min={35} max={250} value={form.weightKg ?? ""} onChange={(e) => set("weightKg", numOrNull(e.target.value))} />
+          </label>
+          <Select label="Contextura" value={form.bodyType} options={BODY_TYPES} onChange={(v) => set("bodyType", v)} />
+          <Select label="Rol" value={form.position} options={POSITIONS} onChange={(v) => set("position", v)} />
+          <Select label="Relación" value={form.relationship} options={RELATIONSHIP} onChange={(v) => set("relationship", v)} />
+          <Select label="Pronombres" value={form.pronouns} options={PRONOUNS} onChange={(v) => set("pronouns", v)} />
+        </div>
+        <MultiChips label="Tribus" value={form.tribes} options={TRIBES} onChange={(v) => set("tribes", v)} />
+        <MultiChips label="Busco" value={form.lookingFor} options={LOOKING_FOR} onChange={(v) => set("lookingFor", v)} />
+        <div className="grid2">
+          <Select label="Estado serológico" value={form.hivStatus} options={HIV_STATUS} onChange={(v) => set("hivStatus", v)} />
+          <label className="field">
+            <span>Último test</span>
+            <input className="input" type="date" max={new Date().toISOString().slice(0, 10)} value={form.lastTested ?? ""} onChange={(e) => set("lastTested", e.target.value || null)} />
+          </label>
+        </div>
+        {error && <p className="error" role="alert">{error}</p>}
+        <div className="savebar">
+          <button className="btn btn--primary btn--grow" disabled={saved === "saving"}>
+            {saved === "saving" ? "Guardando…" : saved === "ok" ? "Guardado ✓" : "Guardar cambios"}
+          </button>
+        </div>
+      </form>
+
+      <section className="section">
+        <h2 className="section__title">Ubicación y privacidad</h2>
+        <div className="stack">
+          <p className="muted small">
+            {me.profile.hasLocation
+              ? "Aparecés en la grilla de Cerca. Guardamos solo una zona de ~500 m, nunca tu posición exacta."
+              : "No compartiste tu ubicación: no aparecés en la grilla de Cerca."}
+          </p>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={me.profile.incognito}
+              onChange={async (e) => {
+                await api("/me/privacy", { method: "PUT", json: { incognito: e.target.checked } });
+                await reload();
+              }}
+            />
+            <span><b>Modo incógnito.</b> No aparecés en la grilla, nadie ve si estás en línea y tus visitas a perfiles no quedan registradas. Podés seguir chateando con quien quieras.</span>
+          </label>
+          <label className="check">
+            <input
+              type="checkbox"
+              checked={me.profile.showDistance}
+              onChange={async (e) => {
+                await api("/me/privacy", { method: "PUT", json: { showDistance: e.target.checked } });
+                await reload();
+              }}
+            />
+            <span>Mostrar a qué distancia estoy. Si lo apagás, tampoco vas a ver la distancia de los demás.</span>
+          </label>
+          {me.profile.hasLocation && (
+            <button
+              className="btn btn--ghost"
+              onClick={async () => {
+                await api("/me/location", { method: "DELETE" });
+                await reload();
+              }}
+            >
+              Borrar mi ubicación y salir de la grilla
+            </button>
+          )}
+        </div>
+      </section>
+
+      <section className="section">
+        <h2 className="section__title">Bloqueados</h2>
+        {blocked.length === 0 ? (
+          <p className="muted">No bloqueaste a nadie.</p>
+        ) : (
+          <ul className="blocked">
+            {blocked.map((b) => (
+              <li key={b.id}>
+                <Avatar src={b.photo} name={b.name} size={36} />
+                <span>{b.name}</span>
+                <button className="linkbtn" onClick={() => unblock(b.id)}>Desbloquear</button>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      <section className="section">
+        <h2 className="section__title">Cuenta</h2>
+        <p className="muted small">{me.user.email}</p>
+        <div className="stack">
+          <button className="btn" onClick={logout}>Cerrar sesión</button>
+          {deleting ? (
+            <div className="confirm confirm--danger">
+              <p>Se borran tu perfil, tus fotos y tus mensajes. <b>No se puede deshacer.</b> Escribí <b>borrar</b> para confirmar.</p>
+              <input className="input" value={deleteText} onChange={(e) => setDeleteText(e.target.value)} aria-label="Escribí borrar para confirmar" />
+              <div className="row">
+                <button className="btn" onClick={() => { setDeleting(false); setDeleteText(""); }}>Cancelar</button>
+                <button className="btn btn--danger" disabled={deleteText.trim().toLowerCase() !== "borrar"} onClick={deleteAccount}>Borrar mi cuenta</button>
+              </div>
+            </div>
+          ) : (
+            <button className="btn btn--ghost btn--dangertext" onClick={() => setDeleting(true)}>Borrar mi cuenta</button>
+          )}
+        </div>
+        <p className="fineprint">
+          mortero es software libre (AGPL-3.0), hecho en comunidad.
+        </p>
+      </section>
+    </div>
+  );
+}

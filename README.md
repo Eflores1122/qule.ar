@@ -1,0 +1,77 @@
+# mortero
+
+App comunitaria, gratuita y de código abierto para conocer gente cerca y charlar en grupos.
+
+- **Gratis para siempre.** Todo lo que en otras apps es "premium" acá viene incluido.
+- **Código abierto** (AGPL-3.0). Cualquiera puede leerlo, proponer cambios y sumarse.
+- **Grupos en vez de "explorar".** Hay un chat general para toda la app y grupos a los que pedís entrar.
+- **Chat sin acaparadores.** Un sistema de modo lento, cola y rotación hace que siempre aparezca gente nueva.
+
+> Solo para mayores de 18 años.
+
+## Estado
+
+Fase 1 (MVP) en marcha. Ya funciona:
+
+- Registro con email y contraseña, y con Google (si configurás las credenciales).
+- Alta de perfil con verificación de mayor de 18.
+- Perfil con hasta 6 fotos (se les borran los metadatos y la ubicación GPS) y todos los datos: altura, peso, contextura, rol, tribus, qué buscás, relación, pronombres, estado serológico y último test.
+- Chat general con antispam: modo lento, cola con cuenta regresiva (podés editar o cancelar lo que está en cola), rotación y límites para cuentas nuevas.
+- Mensajes privados en tiempo real, con fotos y "visto".
+- Bloquear, reportar y borrar tu cuenta con todo lo asociado.
+- Grupos: cualquiera crea uno y queda como dueño. Se entra solo pidiendo ingreso, y el dueño o los moderadores aceptan o rechazan. Si te rechazan o te expulsan, esperás 7 días para volver a pedir. Hay lista de todos los grupos con búsqueda, roles (dueño, moderador, miembro), expulsiones, borrado de mensajes por moderación y reglas antispam configurables por grupo. Si el dueño se va, el grupo pasa a un moderador o al miembro más antiguo.
+
+- Grilla de gente cerca, de la más cercana a la más lejana, con estado en línea y filtros: edad, altura, peso, contextura, rol, tribus, qué busca, relación, solo en línea y solo con foto. Se guarda solo una zona de unos 500 m (nunca la posición exacta), la distancia se muestra en tramos para que no se pueda triangular a nadie, y cada persona puede esconder su distancia o borrar su ubicación.
+
+- Todo lo "premium", gratis:
+  - **Modo incógnito:** no aparecés en la grilla, no se ve si estás en línea y tus visitas no se registran.
+  - **Quién me vio:** visitas de los últimos 30 días.
+  - **Favoritos:** con filtro en la grilla. Nadie se entera de que lo marcaste.
+  - **Álbum privado:** lo compartís con alguien puntual y lo revocás cuando quieras. Las fotos están protegidas también en el servidor.
+  - **Fotos temporales:** se ven una sola vez durante 10 segundos y después se borran del servidor.
+  - **Desenviar:** borra el mensaje para las dos personas.
+  - **"Escribiendo…"**, "Visto" y sin publicidad.
+
+- Notificaciones push discretas (no dicen quién te escribió ni qué) y panel de moderación para revisar reportes, borrar mensajes y suspender o reactivar cuentas. Quién modera se define con `ADMIN_EMAILS`.
+
+Para subirlo a un servidor, seguí [docs/DEPLOY.md](docs/DEPLOY.md).
+
+El plan completo está en [docs/PLAN.md](docs/PLAN.md).
+
+## Levantarlo en tu compu
+
+Necesitás Node 22 o más nuevo. No hace falta instalar Postgres: en desarrollo se usa [PGlite](https://pglite.dev), un Postgres embebido que guarda los datos en `data/`.
+
+```bash
+npm install
+npm run dev
+```
+
+Abrí http://localhost:5173. El API corre en el puerto 3001 y Vite le hace de proxy.
+
+### Variables de entorno
+
+Copiá `.env.example` a `.env` y completá lo que necesites:
+
+| Variable | Para qué |
+|---|---|
+| `BETTER_AUTH_SECRET` | Firma de las sesiones. **Obligatoria en producción.** |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Login con Google. Sin estas variables, el botón no aparece. |
+| `DATABASE_URL` | Postgres real. Si no está, se usa PGlite. |
+| `APP_URL` | URL pública de la web (por defecto `http://localhost:5173`). |
+| `ADMIN_EMAILS` | Emails con acceso al panel de moderación, separados por coma. |
+| `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Notificaciones push. Se generan con `npm run vapid`. En desarrollo se crean solas. |
+
+Para Google, la URL de redirección autorizada es `{APP_URL}/api/auth/callback/google`.
+
+### Cambios en la base de datos
+
+Editá `apps/api/src/db/schema.ts` y corré `npm run db:generate`. Las migraciones se aplican solas al arrancar el API.
+
+## Cómo sumarte
+
+Abrí un issue con ideas, bugs o comentarios sobre el plan, o mandá un pull request.
+
+## Licencia
+
+[AGPL-3.0](https://www.gnu.org/licenses/agpl-3.0.html). Si alguien publica una versión modificada como servicio, también tiene que publicar su código.

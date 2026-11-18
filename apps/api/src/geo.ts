@@ -1,0 +1,47 @@
+/**
+ * Privacidad de ubicación.
+ *
+ * 1. La posición exacta nunca se guarda: se redondea al centro de una celda de ~500 m.
+ * 2. La distancia se calcula entre centros de celda y se muestra en tramos gruesos
+ *    ("a menos de 1 km", "3 km", "15 km"). Así no se puede triangular a nadie
+ *    moviéndose y comparando distancias: lo máximo que se puede saber es la celda.
+ */
+
+const CELL_DEG_LAT = 0.0045; // ~500 m
+
+export function snapToCell(lat: number, lng: number): { lat: number; lng: number } {
+  const row = Math.floor(lat / CELL_DEG_LAT);
+  const cLat = (row + 0.5) * CELL_DEG_LAT;
+  // Las celdas mantienen ~500 m de ancho a cualquier latitud
+  const lngStep = CELL_DEG_LAT / Math.max(Math.cos((cLat * Math.PI) / 180), 0.01);
+  const col = Math.floor(lng / lngStep);
+  const cLng = (col + 0.5) * lngStep;
+  return { lat: round6(cLat), lng: round6(cLng) };
+}
+
+const round6 = (n: number) => Math.round(n * 1e6) / 1e6;
+
+export function distanceKm(aLat: number, aLng: number, bLat: number, bLng: number): number {
+  const R = 6371;
+  const dLat = ((bLat - aLat) * Math.PI) / 180;
+  const dLng = ((bLng - aLng) * Math.PI) / 180;
+  const s =
+    Math.sin(dLat / 2) ** 2 +
+    Math.cos((aLat * Math.PI) / 180) * Math.cos((bLat * Math.PI) / 180) * Math.sin(dLng / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(s));
+}
+
+/** Tramo de distancia que se muestra. Nunca el número exacto. */
+export function distanceLabel(km: number): string {
+  if (km < 1) return "a menos de 1 km";
+  if (km < 10) return `${Math.round(km)} km`;
+  if (km < 100) return `${Math.round(km / 5) * 5} km`;
+  return "más de 100 km";
+}
+
+/** Caja de búsqueda alrededor de un punto. */
+export function boundingBox(lat: number, lng: number, km: number) {
+  const dLat = km / 111;
+  const dLng = km / (111 * Math.max(Math.cos((lat * Math.PI) / 180), 0.01));
+  return { minLat: lat - dLat, maxLat: lat + dLat, minLng: lng - dLng, maxLng: lng + dLng };
+}
