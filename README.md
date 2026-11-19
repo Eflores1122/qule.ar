@@ -73,12 +73,12 @@ Editá `apps/api/src/db/schema.ts` y corré `npm run db:generate`. Las migracion
 Es un proyecto comunitario: toda ayuda suma, también si no programás.
 
 - **Ideas y debates** van en [Discusiones](https://github.com/RGabrielR/mortero/discussions).
-- **Diseño**: leé [docs/LOOK.md](docs/LOOK.md) y proponé en la categoría *Look and feel*.
+- **Diseño**: leé [docs/LOOK.md](docs/LOOK.md) y proponé en el [hilo de look and feel](https://github.com/RGabrielR/mortero/discussions/3).
 - **Código**: mirá los issues [`para empezar`](https://github.com/RGabrielR/mortero/labels/para%20empezar) y la guía [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## El nombre
 
-"mortero" es provisorio. El nombre definitivo se elige entre todes: las propuestas se juntan en el hilo **El nombre** de Discusiones y las finalistas van a una encuesta en X (Twitter).
+"mortero" es provisorio. El nombre definitivo se elige entre todes: las propuestas se juntan en el [hilo de Discusiones](https://github.com/RGabrielR/mortero/discussions/2) y las finalistas van a una encuesta en X (Twitter).
 
 ## Licencia
 

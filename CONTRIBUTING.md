@@ -7,8 +7,8 @@ mortero es una app comunitaria, gratuita y de código abierto. No tiene empresa 
 | Qué | Dónde |
 |---|---|
 | Ideas, propuestas, preguntas, debates | [Discusiones](https://github.com/RGabrielR/mortero/discussions) |
-| Diseño, colores, tipografía, tono | Discusiones → categoría **Look and feel** (y [docs/LOOK.md](docs/LOOK.md)) |
-| El nombre definitivo | Discusiones → hilo **El nombre** |
+| Diseño, colores, tipografía, tono | el hilo [Look and feel](https://github.com/RGabrielR/mortero/discussions/3) (y [docs/LOOK.md](docs/LOOK.md)) |
+| El nombre definitivo | el hilo [El nombre](https://github.com/RGabrielR/mortero/discussions/2) |
 | Bugs concretos y tareas ya acordadas | [Issues](https://github.com/RGabrielR/mortero/issues) |
 | Cambios de código | Pull requests |
 
