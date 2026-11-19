@@ -7,7 +7,7 @@ App comunitaria, gratuita y de código abierto para conocer gente cerca y charla
 - **Grupos en vez de "explorar".** Hay un chat general para toda la app y grupos a los que pedís entrar.
 - **Chat sin acaparadores.** Un sistema de modo lento, cola y rotación hace que siempre aparezca gente nueva.
 
-> Solo para mayores de 18 años.
+> Solo para mayores de 18 años. El nombre es provisorio: [se está eligiendo](#el-nombre).
 
 ## Estado
 
@@ -70,7 +70,15 @@ Editá `apps/api/src/db/schema.ts` y corré `npm run db:generate`. Las migracion
 
 ## Cómo sumarte
 
-Abrí un issue con ideas, bugs o comentarios sobre el plan, o mandá un pull request.
+Es un proyecto comunitario: toda ayuda suma, también si no programás.
+
+- **Ideas y debates** van en [Discusiones](https://github.com/RGabrielR/mortero/discussions).
+- **Diseño**: leé [docs/LOOK.md](docs/LOOK.md) y proponé en la categoría *Look and feel*.
+- **Código**: mirá los issues [`para empezar`](https://github.com/RGabrielR/mortero/labels/para%20empezar) y la guía [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## El nombre
+
+"mortero" es provisorio. El nombre definitivo se elige entre todes: las propuestas se juntan en el hilo **El nombre** de Discusiones y las finalistas van a una encuesta en X (Twitter).
 
 ## Licencia
 

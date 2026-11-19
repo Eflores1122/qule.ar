@@ -1,0 +1,19 @@
+name: Tarea acordada
+description: Algo que ya se charló en Discusiones y hay que hacer
+labels: ["tarea"]
+body:
+  - type: input
+    id: discusion
+    attributes:
+      label: Link a la discusión
+  - type: textarea
+    id: que
+    attributes:
+      label: Qué hay que hacer
+    validations:
+      required: true
+  - type: textarea
+    id: listo
+    attributes:
+      label: Cuándo está terminado
+      placeholder: "- [ ] …"
