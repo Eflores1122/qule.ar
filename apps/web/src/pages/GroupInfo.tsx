@@ -76,6 +76,32 @@ export function GroupInfo() {
         </p>
       </section>
 
+      <section className="section">
+        <div className="setting">
+          <div>
+            <h2 className="section__title" style={{ marginBottom: 4 }}>Avisos de este grupo</h2>
+            <p className="muted small">
+              {info.muted
+                ? "Silenciado: solo te avisamos si alguien te responde."
+                : "Te avisamos cuando hay mensajes nuevos (como mucho cada 10 minutos) y cuando te responden."}
+            </p>
+          </div>
+          <button
+            className={`switch ${!info.muted ? "switch--on" : ""}`}
+            role="switch"
+            aria-checked={!info.muted}
+            aria-label="Avisos de este grupo"
+            onClick={async () => {
+              const muted = !info.muted;
+              setInfo({ ...info, muted });
+              await api(`/groups/${id}/notifications`, { method: "PUT", json: { muted } }).catch(() => setInfo({ ...info }));
+            }}
+          >
+            <span />
+          </button>
+        </div>
+      </section>
+
       {error && <div className="notice notice--error" role="alert">{error}</div>}
 
       {isMod && !info.isGeneral && (

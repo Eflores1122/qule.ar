@@ -218,10 +218,10 @@ socialRoutes.post("/conversations/:id/messages", async (c) => {
   const msg = serializeDm(row);
   emitToUser(me.id, "dm:message", msg);
   emitToUser(otherId, "dm:message", msg);
-  // Si no tiene la app abierta, le llega una notificación discreta (sin nombre ni contenido)
-  if (!isOnline(otherId)) {
-    pushTo(otherId, { title: "mortero", body: "Tenés un mensaje nuevo", url: `/mensajes/${conv.id}`, tag: `dm-${conv.id}` }).catch(() => {});
-  }
+  // Notificación discreta (sin nombre ni contenido). Se manda siempre: si la app está abierta y a la vista,
+  // el service worker no la muestra. Antes se salteaba si "estaba en línea", y en el celu con la app
+  // minimizada la conexión queda abierta un rato y el aviso nunca llegaba.
+  pushTo(otherId, { title: "mortero", body: "Tenés un mensaje nuevo", url: `/mensajes/${conv.id}`, tag: `dm-${conv.id}` }).catch(() => {});
   return c.json(msg);
 });
 

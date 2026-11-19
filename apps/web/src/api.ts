@@ -101,7 +101,9 @@ export type GroupMessage = {
   body: string | null;
   status: "queued" | "published" | "cancelled" | "deleted";
   scheduledAt: string;
-  author: Author;
+  // En los grupos solo se muestra nombre y foto, sin la edad
+  author: Pick<Author, "id" | "name" | "photo">;
+  replyTo: { id: string; authorName: string; body: string | null } | null;
 };
 
 export type Dm = {
@@ -150,6 +152,7 @@ export type GroupListing = {
 
 export type GroupInfo = GroupListing & {
   isGeneral: boolean;
+  muted: boolean;
   rules: SpamRules;
   pendingCount: number;
 };

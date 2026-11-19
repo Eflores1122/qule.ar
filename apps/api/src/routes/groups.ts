@@ -6,8 +6,9 @@ import { nextSlot } from "../antispam.js";
 import { db, schema } from "../db/index.js";
 import { DEFAULT_SPAM_RULES } from "../db/schema.js";
 import { authorsFor, blockedWith, newId, requireProfile, requireUser, type AppEnv } from "../lib.js";
-import { emitToGroup, emitToUser, isOnline, serializeGroupMessages, syncGroupRoom } from "../realtime.js";
+import { emitToGroup, emitToUser, serializeGroupMessages, syncGroupRoom } from "../realtime.js";
 import { pushTo } from "../push.js";
+import { notifyGroupMessage } from "../groupNotify.js";
 
 const { group, groupMember, groupMessage, groupJoinRequest } = schema;
 
@@ -202,7 +203,18 @@ groupRoutes.get("/groups/:id", async (c) => {
     pending: state?.pending ?? false,
     cooldownUntil: state?.cooldownUntil ?? null,
     pendingCount: pending,
+    muted: member?.muted ?? false,
   });
+});
+
+// Silenciar o activar los avisos de un grupo (solo para vos)
+groupRoutes.put("/groups/:id/notifications", async (c) => {
+  const u = c.get("user");
+  const { group: g, member } = await membership(c.req.param("id"), u.id);
+  if (!member) throw new HTTPException(403, { message: "No sos parte de este grupo" });
+  const { muted } = parse(z.object({ muted: z.boolean() }), await c.req.json());
+  await db.update(groupMember).set({ muted }).where(and(eq(groupMember.groupId, g.id), eq(groupMember.userId, u.id)));
+  return c.json({ muted });
 });
 
 /** Editar nombre, descripción y reglas antispam (solo el dueño; el general solo se puede ajustar en código). */
@@ -255,7 +267,7 @@ groupRoutes.post("/groups/:id/requests", async (c) => {
   await db.insert(groupJoinRequest).values({ id, groupId: g.id, userId: u.id, message: message || null });
   const mods = await notifyMods(g.id, "group:request", { groupId: g.id });
   for (const m of mods) {
-    if (!isOnline(m)) pushTo(m, { title: "mortero", body: "Tenés una solicitud nueva en un grupo", url: `/grupos/${g.id}/info`, tag: `req-${g.id}` }).catch(() => {});
+    pushTo(m, { title: "mortero", body: "Tenés una solicitud nueva en un grupo", url: `/grupos/${g.id}/info`, tag: `req-${g.id}` }).catch(() => {});
   }
   return c.json({ id });
 });
@@ -311,7 +323,7 @@ groupRoutes.post("/groups/:id/requests/:rid/:decision{accept|reject}", async (c)
     await db.insert(groupMember).values({ groupId: g.id, userId: req.userId }).onConflictDoNothing();
     syncGroupRoom(req.userId, g.id, true);
     emitToUser(req.userId, "group:accepted", { groupId: g.id, name: g.name });
-    if (!isOnline(req.userId)) {
+    {
       pushTo(req.userId, { title: "mortero", body: "Te aceptaron en un grupo", url: `/grupos/${g.id}`, tag: `acc-${g.id}` }).catch(() => {});
     }
   } else {
@@ -456,7 +468,16 @@ groupRoutes.post("/groups/:id/messages", async (c) => {
   const groupId = c.req.param("id");
   const { group: g, member } = await membership(groupId, u.id);
   if (!member) throw new HTTPException(403, { message: "No sos parte de este grupo" });
-  const { body } = parse(bodySchema, await c.req.json());
+  const raw = await c.req.json();
+  const { body } = parse(bodySchema, raw);
+  // Respuesta a otro mensaje: tiene que ser del mismo grupo y estar publicado
+  let replyToId: string | null = null;
+  if (typeof raw?.replyToId === "string" && raw.replyToId) {
+    const [orig] = await db.select({ id: groupMessage.id }).from(groupMessage)
+      .where(and(eq(groupMessage.id, raw.replyToId), eq(groupMessage.groupId, groupId), eq(groupMessage.status, "published")));
+    if (!orig) throw new HTTPException(400, { message: "Ese mensaje ya no está" });
+    replyToId = orig.id;
+  }
 
   // Cuentas nuevas no pueden mandar links en grupos
   const isNew = Date.now() - new Date(u.createdAt).getTime() < g.spamRules.newAccountHours * 3_600_000;
@@ -476,12 +497,16 @@ groupRoutes.post("/groups/:id/messages", async (c) => {
       groupId,
       userId: u.id,
       body,
+      replyToId,
       status: publishNow ? "published" : "queued",
       scheduledAt: publishNow ? now : slot.at,
     })
     .returning();
   const [msg] = await serializeGroupMessages([row]);
-  if (publishNow) await emitToGroup(groupId, u.id, "group:message", msg);
+  if (publishNow) {
+    await emitToGroup(groupId, u.id, "group:message", msg);
+    notifyGroupMessage(row).catch((e) => console.error("notifyGroupMessage", e));
+  }
   else emitToUser(u.id, "group:queued", msg);
   return c.json({ message: msg, reasons: slot.reasons, intervalSeconds: slot.intervalSeconds });
 });

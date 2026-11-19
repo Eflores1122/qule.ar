@@ -1,9 +1,10 @@
 import type { Server as HttpServer } from "node:http";
-import { and, eq, lte } from "drizzle-orm";
+import { and, eq, inArray, lte } from "drizzle-orm";
 import { Server } from "socket.io";
 import { auth } from "./auth.js";
 import { db, schema } from "./db/index.js";
 import { authorsFor, blockedWith } from "./lib.js";
+import { notifyGroupMessage } from "./groupNotify.js";
 
 const { groupMember, groupMessage } = schema;
 
@@ -98,15 +99,32 @@ export async function emitToGroup(groupId: string, authorId: string, event: stri
 }
 
 export async function serializeGroupMessages(rows: (typeof groupMessage.$inferSelect)[]) {
-  const authors = await authorsFor(rows.map((r) => r.userId));
-  return rows.map((r) => ({
-    id: r.id,
-    groupId: r.groupId,
-    body: r.status === "deleted" ? null : r.body,
-    status: r.status,
-    scheduledAt: r.scheduledAt.toISOString(),
-    author: authors.get(r.userId) ?? { id: r.userId, name: "Cuenta borrada", age: 0, photo: null },
-  }));
+  // Mensajes citados (respuestas)
+  const replyIds = [...new Set(rows.map((r) => r.replyToId).filter((x): x is string => Boolean(x)))];
+  const quoted = replyIds.length
+    ? await db.select().from(groupMessage).where(inArray(groupMessage.id, replyIds))
+    : [];
+  const quotedById = new Map(quoted.map((q) => [q.id, q]));
+  const authors = await authorsFor([...rows.map((r) => r.userId), ...quoted.map((q) => q.userId)]);
+  // En los grupos se muestra solo el nombre y la foto, sin la edad
+  const author = (id: string) => {
+    const a = authors.get(id);
+    return a ? { id: a.id, name: a.name, photo: a.photo } : { id, name: "Cuenta borrada", photo: null };
+  };
+  return rows.map((r) => {
+    const q = r.replyToId ? quotedById.get(r.replyToId) : undefined;
+    return {
+      id: r.id,
+      groupId: r.groupId,
+      body: r.status === "deleted" ? null : r.body,
+      status: r.status,
+      scheduledAt: r.scheduledAt.toISOString(),
+      author: author(r.userId),
+      replyTo: q
+        ? { id: q.id, authorName: author(q.userId).name, body: q.status === "published" ? q.body.slice(0, 160) : null }
+        : null,
+    };
+  });
 }
 
 /** Publica los mensajes en cola a los que ya les tocó salir. */
@@ -121,4 +139,5 @@ async function publishDue() {
   for (const m of out) {
     await emitToGroup(m.groupId, m.author.id, "group:message", m);
   }
+  for (const row of due) notifyGroupMessage(row).catch((e) => console.error("notifyGroupMessage", e));
 }

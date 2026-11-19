@@ -3,6 +3,7 @@ import { Navigate, NavLink, Outlet, Route, Routes, useLocation } from "react-rou
 import { api, ApiError, authClient, closeSocket, getSocket, type Me } from "./api";
 import { Admin } from "./pages/Admin";
 import { Login } from "./pages/Login";
+import { NotifyBanner } from "./components/NotifyBanner";
 import { ForgotPassword, ResetPassword } from "./pages/Password";
 import { Onboarding } from "./pages/Onboarding";
 import { GroupChat } from "./pages/GroupChat";
@@ -164,6 +165,15 @@ function Shell() {
     };
   }, []);
 
+  // Contador en la pestaña del navegador y en el ícono de la app instalada
+  useEffect(() => {
+    const n = unread + pending;
+    document.title = n ? `(${n}) mortero` : "mortero";
+    const nav = navigator as Navigator & { setAppBadge?: (n?: number) => Promise<void>; clearAppBadge?: () => Promise<void> };
+    if (n) nav.setAppBadge?.(n).catch(() => {});
+    else nav.clearAppBadge?.().catch(() => {});
+  }, [unread, pending]);
+
   // En una conversación abierta, la barra de abajo se esconde para dejar lugar al teclado
   const inThread = /^\/mensajes\/.+/.test(loc.pathname);
 
@@ -172,6 +182,7 @@ function Shell() {
       <main className="shell__main">
         <Outlet />
       </main>
+      {!inThread && <NotifyBanner />}
       {toast && (
         <div className="toast" role="status" key={toast.id}>
           {toast.to ? <NavLink to={toast.to} onClick={() => setToast(null)}>{toast.text} →</NavLink> : <span>{toast.text}</span>}

@@ -159,7 +159,6 @@ input[type="date"].input { color-scheme: dark; }
 .gmsg__meta { display: flex; align-items: baseline; gap: 6px; }
 .gmsg__name { font-weight: 600; }
 .gmsg__name:hover { text-decoration: underline; }
-.gmsg__age { color: var(--muted); font-size: 13px; }
 .gmsg__time { color: var(--muted); font-size: 12px; margin-left: auto; padding-left: 6px; }
 .gmsg__body { white-space: pre-wrap; overflow-wrap: anywhere; }
 .gmsg__more { width: 30px; height: 30px; opacity: 0; }
@@ -408,3 +407,30 @@ a.gcard:hover { background: var(--surface); }
 .auth__title { font-family: var(--display); font-size: 22px; margin-bottom: 4px; }
 .center-link { display: block; text-align: center; margin-top: 4px; }
 .forgot { justify-self: end; align-self: flex-end; }
+
+/* ---------- Respuestas (citas) en grupos ---------- */
+.quote {
+  display: grid; gap: 1px; text-align: left; width: 100%; max-width: 420px;
+  margin: 2px 0 4px; padding: 6px 10px; border: 0; border-left: 3px solid var(--accent);
+  border-radius: 8px; background: var(--surface-2); font-size: 13px;
+}
+button.quote:hover { background: var(--surface-3); }
+.quote__name { font-weight: 700; color: var(--accent-2); }
+.quote__body { color: var(--muted); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+.quote--static { margin: 0; max-width: none; }
+.composer__reply { display: flex; gap: 6px; align-items: center; padding: 0 0 8px; }
+.gmsg--flash { animation: gmsg-flash 1.4s ease; }
+@keyframes gmsg-flash { 0%, 40% { background: var(--accent-soft); } 100% { background: transparent; } }
+
+/* ---------- Aviso para activar notificaciones (arriba de la barra de abajo) ---------- */
+.notify-banner {
+  position: fixed; left: 12px; right: 12px; z-index: 30;
+  bottom: calc(var(--tabbar-h) + var(--safe-b) + 10px);
+  max-width: 520px; margin: 0 auto;
+  display: flex; gap: 12px; align-items: center;
+  padding: 12px 14px; border-radius: 14px;
+  background: var(--surface-2); border: 1px solid var(--line);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+.notify-banner__text { flex: 1; display: grid; gap: 2px; min-width: 0; }
+.notify-banner__actions { flex: none; display: grid; gap: 4px; justify-items: center; }

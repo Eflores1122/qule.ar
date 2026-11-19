@@ -36,6 +36,13 @@
       "when": 1795034812152,
       "tag": "0004_push_moderation",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1795116017071,
+      "tag": "0005_group_replies_mute",
+      "breakpoints": true
     }
   ]
 }

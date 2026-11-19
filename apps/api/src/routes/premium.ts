@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { db, schema } from "../db/index.js";
 import { authorsFor, blockedWith, isBlocked, newId, requireProfile, requireUser, type AppEnv } from "../lib.js";
-import { emitToUser, isOnline } from "../realtime.js";
+import { emitToUser } from "../realtime.js";
 import { pushTo } from "../push.js";
 
 const { albumGrant, profileView, favorite, conversation, directMessage, profile } = schema;
@@ -119,9 +119,7 @@ premiumRoutes.put("/album/grants/:userId", async (c) => {
     };
     emitToUser(u.id, "dm:message", msg);
     emitToUser(target, "dm:message", msg);
-    if (!isOnline(target)) {
-      pushTo(target, { title: "mortero", body: "Tenés un mensaje nuevo", url: `/mensajes/${conv.id}`, tag: `dm-${conv.id}` }).catch(() => {});
-    }
+    pushTo(target, { title: "mortero", body: "Tenés un mensaje nuevo", url: `/mensajes/${conv.id}`, tag: `dm-${conv.id}` }).catch(() => {});
   }
   return c.json({ ok: true });
 });

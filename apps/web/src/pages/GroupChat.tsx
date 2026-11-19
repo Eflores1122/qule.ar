@@ -28,6 +28,24 @@ export function GroupChat() {
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
+  const [replyTo, setReplyTo] = useState<GroupMessage | null>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
+
+  function startReply(m: GroupMessage) {
+    setMenuFor(null);
+    setEditing(null);
+    setReplyTo(m);
+    inputRef.current?.focus();
+  }
+
+  /** Al tocar una cita, va al mensaje original (si está cargado) y lo resalta un momento. */
+  function jumpTo(messageId: string) {
+    const el = document.getElementById(`gm-${messageId}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("gmsg--flash");
+    setTimeout(() => el.classList.remove("gmsg--flash"), 1400);
+  }
 
   /** Abre (o crea) la charla privada con quien escribió el mensaje. */
   async function writePrivately(userId: string) {
@@ -163,6 +181,8 @@ export function GroupChat() {
     // Se vacía al toque; si falla, se devuelve el texto
     setText("");
     const wasEditing = editing;
+    const wasReplying = replyTo;
+    setReplyTo(null);
     try {
       if (wasEditing) {
         setEditing(null);
@@ -171,7 +191,7 @@ export function GroupChat() {
       }
       const r = await api<{ message: GroupMessage; reasons: string[] }>(`/groups/${id}/messages`, {
         method: "POST",
-        json: { body },
+        json: { body, replyToId: wasReplying?.id },
       });
       stickToBottom.current = true;
       if (r.message.status === "queued") {
@@ -184,6 +204,7 @@ export function GroupChat() {
     } catch (err) {
       setText((t) => t || body);
       if (wasEditing) setEditing(wasEditing);
+      if (wasReplying) setReplyTo(wasReplying);
       setNotice({ kind: "error", text: (err as Error).message });
     }
   }
@@ -260,21 +281,26 @@ export function GroupChat() {
             new Date(m.scheduledAt).getTime() - new Date(prev.scheduledAt).getTime() < 5 * 60_000;
           const mine = m.author.id === me?.user.id;
           return (
-            <div key={m.id} className={`gmsg ${grouped ? "gmsg--grouped" : ""}`}>
+            <div key={m.id} id={`gm-${m.id}`} className={`gmsg ${grouped && !m.replyTo ? "gmsg--grouped" : ""}`}>
               <div className="gmsg__avatar">
-                {!grouped && (
+                {!(grouped && !m.replyTo) && (
                   <Link to={`/perfil/${m.author.id}`} aria-label={`Ver perfil de ${m.author.name}`}>
                     <Avatar src={m.author.photo} name={m.author.name} size={36} />
                   </Link>
                 )}
               </div>
               <div className="gmsg__content">
-                {!grouped && (
+                {!(grouped && !m.replyTo) && (
                   <div className="gmsg__meta">
                     <Link to={`/perfil/${m.author.id}`} className="gmsg__name">{m.author.name}</Link>
-                    {m.author.age > 0 && <span className="gmsg__age">{m.author.age}</span>}
                     <time className="gmsg__time">{fmtTime(m.scheduledAt)}</time>
                   </div>
+                )}
+                {m.replyTo && (
+                  <button type="button" className="quote" onClick={() => jumpTo(m.replyTo!.id)}>
+                    <span className="quote__name">{m.replyTo.authorName}</span>
+                    <span className="quote__body">{m.replyTo.body ?? "Mensaje borrado"}</span>
+                  </button>
                 )}
                 <p className="gmsg__body">{m.body}</p>
               </div>
@@ -283,6 +309,7 @@ export function GroupChat() {
               </button>
               {menuFor === m.id && (
                 <div className="menu" role="menu">
+                  {m.status === "published" && <button role="menuitem" onClick={() => startReply(m)}>Responder</button>}
                   {mine ? (
                     <button role="menuitem" onClick={() => remove(m)}>Borrar mensaje</button>
                   ) : (
@@ -308,7 +335,7 @@ export function GroupChat() {
               </div>
               <p className="queued__body">{m.body}</p>
               <div className="queued__actions">
-                <button className="linkbtn" onClick={() => { setEditing(m.id); setText(m.body ?? ""); }}>Editar</button>
+                <button className="linkbtn" onClick={() => { setReplyTo(null); setEditing(m.id); setText(m.body ?? ""); }}>Editar</button>
                 <button className="linkbtn linkbtn--danger" onClick={() => cancel(m)}>Cancelar</button>
               </div>
             </div>
@@ -330,8 +357,18 @@ export function GroupChat() {
             <button type="button" className="linkbtn" onClick={() => { setEditing(null); setText(""); }}>Cancelar</button>
           </div>
         )}
+        {replyTo && !editing && (
+          <div className="composer__reply">
+            <div className="quote quote--static">
+              <span className="quote__name">Respondiendo a {replyTo.author.name}</span>
+              <span className="quote__body">{replyTo.body}</span>
+            </div>
+            <button type="button" className="iconbtn" aria-label="Cancelar respuesta" onClick={() => setReplyTo(null)}>✕</button>
+          </div>
+        )}
         <div className="composer__row">
           <textarea
+            ref={inputRef}
             className="composer__input"
             rows={1}
             maxLength={1000}

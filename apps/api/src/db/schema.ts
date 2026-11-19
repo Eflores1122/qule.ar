@@ -178,6 +178,8 @@ export const groupMember = pgTable("group_member", {
   groupId: text("group_id").notNull().references(() => group.id, { onDelete: "cascade" }),
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   role: text("role").notNull().default("member"), // owner | moderator | member
+  // Silenciado: no llegan avisos de mensajes nuevos (las respuestas a tus mensajes sí)
+  muted: boolean("muted").notNull().default(false),
   joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.groupId, t.userId] })]);
 
@@ -204,6 +206,8 @@ export const groupMessage = pgTable("group_message", {
   groupId: text("group_id").notNull().references(() => group.id, { onDelete: "cascade" }),
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   body: text("body").notNull(),
+  // Mensaje citado al responder (del mismo grupo)
+  replyToId: text("reply_to_id"),
   status: text("status").notNull(), // queued | published | cancelled | deleted
   scheduledAt: timestamp("scheduled_at", { withTimezone: true }).notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
