@@ -177,7 +177,7 @@ function Shell() {
       {!inThread && (
         <nav className="tabbar" aria-label="Secciones">
           <NavLink to="/cerca" className="tabbar__item">
-            <GridIcon /> <span>Cerca</span>
+            <GridIcon /> <span>Gente</span>
           </NavLink>
           <NavLink to="/grupos" className="tabbar__item">
             <GroupIcon /> <span>Grupos</span>

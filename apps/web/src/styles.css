@@ -398,3 +398,10 @@ a.gcard:hover { background: var(--surface); }
   .sheet-backdrop { align-items: center; }
   .sheet { border-radius: 22px; }
 }
+
+/* ---------- Ubicación e instalación (arriba de la grilla) ---------- */
+.locate-bar, .install { background: var(--surface); border: 1px solid var(--line); align-items: center; }
+.locate-bar__icon { flex: none; width: 36px; height: 36px; border-radius: 999px; display: grid; place-items: center; background: var(--accent-soft); color: var(--accent); }
+.locate-bar__text, .install__text { flex: 1; display: grid; gap: 2px; min-width: 0; }
+.install__icon { flex: none; width: 40px; height: 40px; border-radius: 10px; }
+.install__actions { flex: none; display: grid; gap: 4px; justify-items: center; }

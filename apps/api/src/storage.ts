@@ -5,7 +5,9 @@ import { env } from "./env.js";
 
 // Por ahora las fotos se guardan en disco. Más adelante: un driver para Cloudflare R2.
 const dir = path.join(env.DATA_DIR, "uploads");
-await mkdir(dir, { recursive: true });
+const thumbs = path.join(dir, "thumbs");
+await mkdir(thumbs, { recursive: true });
+const THUMB_PX = 480;
 
 export const MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
 
@@ -26,10 +28,21 @@ export async function saveImage(input: ArrayBuffer): Promise<string> {
 
 const KEY_RE = /^[0-9a-f-]{36}\.webp$/;
 
-export async function readImage(key: string): Promise<Buffer | null> {
+export async function readImage(key: string, thumb = false): Promise<Buffer | null> {
   if (!KEY_RE.test(key)) return null;
   try {
-    return await readFile(path.join(dir, key));
+    if (!thumb) return await readFile(path.join(dir, key));
+    // La miniatura se genera la primera vez que se pide y queda guardada
+    try {
+      return await readFile(path.join(thumbs, key));
+    } catch {
+      const out = await sharp(await readFile(path.join(dir, key)))
+        .resize({ width: THUMB_PX, height: THUMB_PX, fit: "cover", position: "attention" })
+        .webp({ quality: 74 })
+        .toBuffer();
+      await writeFile(path.join(thumbs, key), out);
+      return out;
+    }
   } catch {
     return null;
   }
@@ -38,4 +51,5 @@ export async function readImage(key: string): Promise<Buffer | null> {
 export async function deleteImage(key: string) {
   if (!KEY_RE.test(key)) return;
   await unlink(path.join(dir, key)).catch(() => {});
+  await unlink(path.join(thumbs, key)).catch(() => {});
 }

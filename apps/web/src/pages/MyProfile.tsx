@@ -335,8 +335,8 @@ export function MyProfile() {
         <div className="stack">
           <p className="muted small">
             {me.profile.hasLocation
-              ? "Aparecés en la grilla de Cerca. Guardamos solo una zona de ~500 m, nunca tu posición exacta."
-              : "No compartiste tu ubicación: no aparecés en la grilla de Cerca."}
+              ? "Aparecés en la grilla con tu distancia. Guardamos solo una zona de ~500 m, nunca tu posición exacta."
+              : "No compartiste tu ubicación: aparecés en la grilla, pero sin distancia."}
           </p>
           <label className="check">
             <input

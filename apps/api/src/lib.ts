@@ -37,6 +37,8 @@ export function ageFrom(birthdate: string, now = new Date()): number {
 }
 
 export const imageUrl = (key: string | null | undefined) => (key ? `/api/files/${key}` : null);
+/** Versión chica (480 px) para grillas, avatares y listas: carga mucho más rápido. */
+export const thumbUrl = (key: string | null | undefined) => (key ? `/api/files/${key}?s=thumb` : null);
 
 export type Author = { id: string; name: string; age: number; photo: string | null };
 
@@ -58,7 +60,7 @@ export async function authorsFor(ids: string[]): Promise<Map<string, Author>> {
       id: p.userId,
       name: p.displayName,
       age: ageFrom(p.birthdate),
-      photo: imageUrl(firstPhoto.get(p.userId)),
+      photo: thumbUrl(firstPhoto.get(p.userId)),
     });
   }
   return map;

@@ -50,7 +50,7 @@ meRoutes.get("/files/:key", requireUser, async (c) => {
     if (!inConv) return c.notFound();
     if (dm.expiring && (dm.senderId === viewer || !dm.openedAt)) return c.notFound();
   }
-  const buf = await readImage(key);
+  const buf = await readImage(key, c.req.query("s") === "thumb");
   if (!buf) return c.notFound();
   return c.body(new Uint8Array(buf), 200, {
     "Content-Type": "image/webp",

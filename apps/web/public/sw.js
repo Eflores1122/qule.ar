@@ -16,8 +16,8 @@ self.addEventListener("push", (event) => {
       if (wins.some((w) => w.visibilityState === "visible")) return;
       await self.registration.showNotification(data.title, {
         body: data.body,
-        icon: "/icon.svg",
-        badge: "/icon.svg",
+        icon: "/icon-192.png",
+        badge: "/icon-192.png",
         tag: data.tag,
         renotify: Boolean(data.tag),
         data: { url: data.url },

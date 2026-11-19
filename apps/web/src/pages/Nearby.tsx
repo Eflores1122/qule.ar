@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { InstallBanner } from "../components/InstallBanner";
 import { Link } from "react-router";
 import { api, type NearbyPerson } from "../api";
 import { useMe } from "../App";
@@ -60,7 +61,8 @@ export function countFilters(f: Filters) {
   return n;
 }
 
-type Status = "loading" | "need-location" | "asking" | "denied" | "unsupported" | "ready" | "error";
+type Status = "loading" | "ready" | "error";
+type LocState = "none" | "asking" | "denied" | "unsupported" | "ok";
 
 export function Nearby() {
   const { me, reload } = useMe();
@@ -68,13 +70,14 @@ export function Nearby() {
   const [people, setPeople] = useState<NearbyPerson[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [status, setStatus] = useState<Status>("loading");
+  const [loc, setLoc] = useState<LocState>("ok");
   const [showFilters, setShowFilters] = useState(false);
   const locationSent = useRef(false);
 
   const load = useCallback(async (f: Filters, offset = 0) => {
     try {
-      const d = await api<{ needLocation: boolean; people: NearbyPerson[]; hasMore: boolean }>(`/nearby?${toQuery(f, offset)}`);
-      if (d.needLocation) return setStatus("need-location");
+      const d = await api<{ hasLocation: boolean; people: NearbyPerson[]; hasMore: boolean }>(`/nearby?${toQuery(f, offset)}`);
+      setLoc((prev) => (d.hasLocation ? "ok" : prev === "ok" ? "none" : prev));
       setPeople((prev) => (offset ? [...prev, ...d.people] : d.people));
       setHasMore(d.hasMore);
       setStatus("ready");
@@ -86,8 +89,8 @@ export function Nearby() {
   /** Pide la ubicación al navegador y manda solo lat/lng; el servidor la redondea a ~500 m. */
   const shareLocation = useCallback(
     (silent = false) => {
-      if (!("geolocation" in navigator)) return setStatus("unsupported");
-      if (!silent) setStatus("asking");
+      if (!("geolocation" in navigator)) return setLoc("unsupported");
+      if (!silent) setLoc("asking");
       navigator.geolocation.getCurrentPosition(
         async (pos) => {
           locationSent.current = true;
@@ -96,7 +99,7 @@ export function Nearby() {
           load(filters);
         },
         () => {
-          if (!silent) setStatus("denied");
+          if (!silent) setLoc("denied");
         },
         { enableHighAccuracy: false, maximumAge: 10 * 60_000, timeout: 15_000 },
       );
@@ -128,7 +131,7 @@ export function Nearby() {
   return (
     <div className="page">
       <header className="topbar">
-        <h1 className="topbar__title">Cerca</h1>
+        <h1 className="topbar__title">Gente</h1>
         {status === "ready" && (
           <button className={`btn btn--small ${active ? "btn--primary" : ""}`} onClick={() => setShowFilters(true)}>
             <FilterIcon /> Filtros{active ? ` · ${active}` : ""}
@@ -136,18 +139,22 @@ export function Nearby() {
         )}
       </header>
 
-      {(status === "need-location" || status === "asking" || status === "denied" || status === "unsupported") && (
-        <div className="empty locate">
-          <span className="locate__icon"><PinIcon /></span>
-          <p className="empty__title">Para ver gente cerca necesitamos tu ubicación</p>
-          <p className="muted">
-            Nunca guardamos tu posición exacta: la redondeamos a una zona de unos 500 metros, y a los demás les mostramos la distancia en tramos ("a menos de 1 km", "3 km").
-          </p>
-          {status === "denied" && <p className="error">El navegador no nos dio permiso. Habilitalo en los ajustes del sitio y probá de nuevo.</p>}
-          {status === "unsupported" && <p className="error">Este navegador no permite compartir la ubicación.</p>}
-          <button className="btn btn--primary" disabled={status === "asking"} onClick={() => shareLocation()}>
-            {status === "asking" ? "Buscando…" : "Compartir ubicación"}
-          </button>
+      <InstallBanner />
+
+      {status === "ready" && loc !== "ok" && (
+        <div className="notice locate-bar">
+          <span className="locate-bar__icon"><PinIcon /></span>
+          <div className="locate-bar__text">
+            <p>Compartí tu ubicación para ver a qué distancia está cada persona.</p>
+            <p className="muted small">Guardamos solo una zona de unos 500 m y la distancia se muestra en tramos.</p>
+            {loc === "denied" && <p className="error">El navegador no nos dio permiso. Habilitalo en los ajustes del sitio.</p>}
+            {loc === "unsupported" && <p className="error">Este navegador no permite compartir la ubicación.</p>}
+          </div>
+          {loc !== "unsupported" && (
+            <button className="btn btn--small btn--primary" disabled={loc === "asking"} onClick={() => shareLocation()}>
+              {loc === "asking" ? "Buscando…" : "Compartir"}
+            </button>
+          )}
         </div>
       )}
 
@@ -155,11 +162,11 @@ export function Nearby() {
 
       {status === "ready" && people.length === 0 && (
         <div className="empty">
-          <p className="empty__title">{active ? "Nadie cerca con esos filtros" : "Todavía no hay nadie cerca"}</p>
+          <p className="empty__title">{active ? "Nadie con esos filtros" : "Todavía no hay nadie más"}</p>
           {active ? (
             <button className="btn btn--small" onClick={() => applyFilters(EMPTY)}>Sacar filtros</button>
           ) : (
-            <p className="muted">Pasate por los grupos mientras tanto.</p>
+            <p className="muted">Pasate por el chat general o los grupos mientras tanto.</p>
           )}
         </div>
       )}
