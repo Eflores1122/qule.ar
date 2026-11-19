@@ -3,6 +3,7 @@ import { Navigate, NavLink, Outlet, Route, Routes, useLocation } from "react-rou
 import { api, ApiError, authClient, closeSocket, getSocket, type Me } from "./api";
 import { Admin } from "./pages/Admin";
 import { Login } from "./pages/Login";
+import { ForgotPassword, ResetPassword } from "./pages/Password";
 import { Onboarding } from "./pages/Onboarding";
 import { GroupChat } from "./pages/GroupChat";
 import { Groups } from "./pages/Groups";
@@ -46,6 +47,8 @@ export function App() {
     <MeContext.Provider value={{ me, loading, reload }}>
       <Routes>
         <Route path="/entrar" element={me ? <Navigate to="/" replace /> : <Login />} />
+        <Route path="/recuperar" element={<ForgotPassword />} />
+        <Route path="/nueva-clave" element={<ResetPassword />} />
         <Route path="/bienvenida" element={<RequireAuth><Onboarding /></RequireAuth>} />
         <Route element={<RequireAuth needProfile><Shell /></RequireAuth>}>
           <Route path="/" element={<Navigate to="/cerca" replace />} />

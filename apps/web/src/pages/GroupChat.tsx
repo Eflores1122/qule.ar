@@ -28,6 +28,17 @@ export function GroupChat() {
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
+
+  /** Abre (o crea) la charla privada con quien escribió el mensaje. */
+  async function writePrivately(userId: string) {
+    setMenuFor(null);
+    try {
+      const { id: convId } = await api<{ id: string }>("/conversations", { method: "POST", json: { userId } });
+      nav(`/mensajes/${convId}`);
+    } catch {
+      alert("No se pudo abrir la charla. Probá de nuevo.");
+    }
+  }
   const [reporting, setReporting] = useState<GroupMessage | null>(null);
   const [now, setNow] = useState(Date.now());
   const listRef = useRef<HTMLDivElement>(null);
@@ -276,6 +287,7 @@ export function GroupChat() {
                     <button role="menuitem" onClick={() => remove(m)}>Borrar mensaje</button>
                   ) : (
                     <>
+                      <button role="menuitem" onClick={() => writePrivately(m.author.id)}>Escribir por privado</button>
                       <Link role="menuitem" to={`/perfil/${m.author.id}`}>Ver perfil</Link>
                       <button role="menuitem" onClick={() => { setMenuFor(null); setReporting(m); }}>Reportar mensaje</button>
                       {isMod && <button role="menuitem" className="danger" onClick={() => remove(m)}>Borrar (moderación)</button>}

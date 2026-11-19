@@ -405,3 +405,6 @@ a.gcard:hover { background: var(--surface); }
 .locate-bar__text, .install__text { flex: 1; display: grid; gap: 2px; min-width: 0; }
 .install__icon { flex: none; width: 40px; height: 40px; border-radius: 10px; }
 .install__actions { flex: none; display: grid; gap: 4px; justify-items: center; }
+.auth__title { font-family: var(--display); font-size: 22px; margin-bottom: 4px; }
+.center-link { display: block; text-align: center; margin-top: 4px; }
+.forgot { justify-self: end; align-self: flex-end; }

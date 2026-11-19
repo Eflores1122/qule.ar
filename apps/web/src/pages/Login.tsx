@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { Link } from "react-router";
 import { api, authClient } from "../api";
 import { useMe } from "../App";
 
@@ -11,9 +12,10 @@ export function Login() {
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
   const [google, setGoogle] = useState(false);
+  const [canReset, setCanReset] = useState(false);
 
   useEffect(() => {
-    api<{ google: boolean }>("/config").then((c) => setGoogle(c.google)).catch(() => {});
+    api<{ google: boolean; passwordReset: boolean }>("/config").then((c) => { setGoogle(c.google); setCanReset(c.passwordReset); }).catch(() => {});
   }, []);
 
   async function submit(e: React.FormEvent) {
@@ -80,6 +82,7 @@ export function Login() {
               autoComplete={mode === "up" ? "new-password" : "current-password"}
             />
             {mode === "up" && <small className="muted">Mínimo 8 caracteres.</small>}
+            {mode === "in" && canReset && <Link to="/recuperar" className="linkbtn small forgot">¿Te olvidaste la contraseña?</Link>}
           </label>
           {error && <p className="error" role="alert">{error}</p>}
           <button className="btn btn--primary" disabled={busy}>

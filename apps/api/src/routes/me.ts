@@ -1,4 +1,5 @@
 import { and, asc, eq, sql } from "drizzle-orm";
+import { mailEnabled } from "../mail.js";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -33,7 +34,8 @@ const profileInput = z.object({
 export const meRoutes = new Hono<AppEnv>();
 
 // Config pública: qué métodos de login hay
-meRoutes.get("/config", (c) => c.json({ google: googleEnabled }));
+// passwordReset: sin mails configurados no ofrecemos recuperar la contraseña (en desarrollo sí: el mail sale por consola)
+meRoutes.get("/config", (c) => c.json({ google: googleEnabled, passwordReset: mailEnabled || process.env.NODE_ENV !== "production" }));
 
 // Archivos: solo para gente con sesión, así no se pueden scrapear las fotos desde afuera
 meRoutes.get("/files/:key", requireUser, async (c) => {

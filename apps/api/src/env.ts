@@ -14,6 +14,9 @@ export const env = {
   GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
   VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY,
   VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY,
+  // Mails (bienvenida, recuperar contraseña). Ej.: smtps://resend:API_KEY@smtp.resend.com:465
+  SMTP_URL: process.env.SMTP_URL,
+  MAIL_FROM: process.env.MAIL_FROM ?? "mortero <hola@mortero.local>",
   // Emails con acceso al panel de moderación, separados por coma
   ADMIN_EMAILS: (process.env.ADMIN_EMAILS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
   // Carpeta con la web compilada (en producción el API la sirve)

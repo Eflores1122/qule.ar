@@ -13,7 +13,7 @@ App comunitaria, gratuita y de código abierto para conocer gente cerca y charla
 
 Fase 1 (MVP) en marcha. Ya funciona:
 
-- Registro con email y contraseña, y con Google (si configurás las credenciales).
+- Registro con email y contraseña, y con Google (si configurás las credenciales). Mail de bienvenida y recuperación de contraseña (si configurás SMTP).
 - Alta de perfil con verificación de mayor de 18.
 - Perfil con hasta 6 fotos (se les borran los metadatos y la ubicación GPS) y todos los datos: altura, peso, contextura, rol, tribus, qué buscás, relación, pronombres, estado serológico y último test.
 - Chat general con antispam: modo lento, cola con cuenta regresiva (podés editar o cancelar lo que está en cola), rotación y límites para cuentas nuevas.
@@ -60,6 +60,7 @@ Copiá `.env.example` a `.env` y completá lo que necesites:
 | `DATABASE_URL` | Postgres real. Si no está, se usa PGlite. |
 | `APP_URL` | URL pública de la web (por defecto `http://localhost:5173`). |
 | `ADMIN_EMAILS` | Emails con acceso al panel de moderación, separados por coma. |
+| `SMTP_URL` / `MAIL_FROM` | Mails de bienvenida y para recuperar la contraseña, por cualquier SMTP (Resend, Brevo, etc.). Sin esto no se mandan mails y no aparece "¿Te olvidaste la contraseña?". En desarrollo los mails salen por consola. |
 | `VAPID_PUBLIC_KEY` / `VAPID_PRIVATE_KEY` | Notificaciones push. Se generan con `npm run vapid`. En desarrollo se crean solas. |
 
 Para Google, la URL de redirección autorizada es `{APP_URL}/api/auth/callback/google`.
