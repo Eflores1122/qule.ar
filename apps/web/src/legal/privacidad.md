@@ -26,7 +26,7 @@ Las personas voluntarias que mantienen qule.ar. El código es abierto: cualquier
 - **Estado serológico y fecha del último test.** Es un dato de salud: mirá el punto 3.
 - Fotos y videos. Al subirlos les borramos los metadatos, incluida la ubicación GPS.
 
-**Tu ubicación:** para mostrarte gente cerca, el celu nos manda tu ubicación, pero **nunca guardamos la posición exacta**: la redondeamos al centro de una zona de unos 500 metros. Podés ocultar la distancia o usar el modo incógnito.
+**Tu ubicación:** para mostrarte gente cerca, el celu nos manda tu ubicación, pero **nunca guardamos la posición exacta**: la redondeamos al centro de una zona de unos 500 metros. Podés ocultar la distancia o usar el modo incógnito. Si la ocultás, no se usa para nada: ni para mostrarla, ni para ordenar la grilla, ni para filtrar por kilómetros.
 
 **Lo que hacés en la app:**
 
