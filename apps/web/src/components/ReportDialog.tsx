@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { api } from "../api";
-import { REPORT_REASONS } from "../options";
+import { REPORT_REASONS, URGENT_REASONS } from "../options";
 
 type Props = {
   userId: string;
@@ -44,6 +44,12 @@ export function ReportDialog({ userId, name, messageId, messageKind, onClose }: 
                 </button>
               ))}
             </div>
+            {URGENT_REASONS.includes(reason) && (
+              <p className="report-urgent small">
+                Esto lo revisamos primero. Si alguien está en peligro ahora, llamá al 911. Si es contenido íntimo tuyo
+                compartido sin tu permiso, no lo borres de tus chats: puede servirte para denunciar.
+              </p>
+            )}
             <textarea
               className="input"
               placeholder="Contanos más (opcional)"

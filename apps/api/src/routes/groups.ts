@@ -7,6 +7,7 @@ import { db, schema } from "../db/index.js";
 import { DEFAULT_SPAM_RULES } from "../db/schema.js";
 import { ageFrom, authorsFor, blockedWith, newId, requireProfile, requireUser, thumbUrl, type AppEnv } from "../lib.js";
 import { distanceLabel, visibleKm } from "../geo.js";
+import { autoHiddenUsers } from "../moderation.js";
 import { emitToGroup, emitToUser, isOnline, serializeGroupMessages, syncGroupRoom } from "../realtime.js";
 import { pushTo } from "../push.js";
 import { notifyGroupMessage } from "../groupNotify.js";
@@ -491,6 +492,7 @@ groupRoutes.get("/groups/:id/invite-candidates", async (c) => {
   const rows = await db.select().from(schema.profile).where(and(...conds)).orderBy(desc(schema.profile.lastSeenAt)).limit(3000);
 
   const blocked = await blockedWith(u.id);
+  const hidden = await autoHiddenUsers();
   let chatted: Set<string> | null = null;
   if (f.chatted) {
     const convs = await db.select({ a: schema.conversation.userA, b: schema.conversation.userB }).from(schema.conversation)
@@ -505,7 +507,7 @@ groupRoutes.get("/groups/:id/invite-candidates", async (c) => {
 
   const meHasLoc = me.cellLat != null && me.cellLng != null;
   let list = rows
-    .filter((p) => !blocked.has(p.userId) && (!chatted || chatted.has(p.userId)) && (!favorites || favorites.has(p.userId)))
+    .filter((p) => !blocked.has(p.userId) && !hidden.has(p.userId) && (!chatted || chatted.has(p.userId)) && (!favorites || favorites.has(p.userId)))
     .map((p) => {
       // null si alguien escondió la distancia: tampoco se usa para ordenar ni para el filtro de km
       const km = visibleKm(me, p);

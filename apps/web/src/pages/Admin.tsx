@@ -9,6 +9,8 @@ type Report = {
   reason: string;
   details: string | null;
   status: "open" | "dismissed" | "actioned";
+  urgent: boolean;
+  targetAutoHidden: boolean;
   resolution: string | null;
   createdAt: string;
   messageId: string | null;
@@ -91,7 +93,10 @@ export function Admin() {
             {reports.map((r) => (
               <li key={r.id} className="rcard">
                 <div className="rcard__head">
-                  <span className="pill pill--reason">{r.reason}</span>
+                  <span className="rcard__pills">
+                    {r.urgent && r.status === "open" && <span className="pill pill--urgent">Urgente</span>}
+                    <span className="pill pill--reason">{r.reason}</span>
+                  </span>
                   <time className="muted small">{fmt(r.createdAt)}</time>
                 </div>
                 <Link to={`/perfil/${r.target.id}`} className="rcard__who">
@@ -101,6 +106,7 @@ export function Admin() {
                     <span className="muted small rcard__count">
                       {r.targetReportCount} {r.targetReportCount === 1 ? "reporte" : "reportes"} en total
                       {r.targetSuspendedAt && " · suspendida"}
+                      {r.targetAutoHidden && !r.targetSuspendedAt && " · oculta de la grilla hasta revisar"}
                     </span>
                   </span>
                 </Link>
