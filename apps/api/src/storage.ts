@@ -18,8 +18,14 @@ export const MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
  * Normaliza la imagen: la rota según EXIF, la achica y la pasa a WebP.
  * Re-codificar con sharp descarta TODOS los metadatos (incluida la ubicación GPS de la foto).
  */
+/**
+ * Tope de píxeles de una imagen subida (40 megapíxeles: cualquier cámara de celu entra con margen). Una imagen
+ * puede pesar poco en bytes y ser gigante en píxeles; sin tope, procesarla puede tragarse la memoria del servidor.
+ */
+const MAX_INPUT_PIXELS = 40_000_000;
+
 export async function saveImage(input: ArrayBuffer | Buffer): Promise<string> {
-  const out = await sharp(Buffer.isBuffer(input) ? input : Buffer.from(input))
+  const out = await sharp(Buffer.isBuffer(input) ? input : Buffer.from(input), { limitInputPixels: MAX_INPUT_PIXELS })
     .rotate()
     .resize({ width: 1200, height: 1200, fit: "inside", withoutEnlargement: true })
     .webp({ quality: 82 })
@@ -40,7 +46,7 @@ export async function readImage(key: string, thumb = false): Promise<Buffer | nu
     try {
       return await readFile(path.join(thumbs, key));
     } catch {
-      const out = await sharp(await readFile(path.join(dir, key)))
+      const out = await sharp(await readFile(path.join(dir, key)), { limitInputPixels: MAX_INPUT_PIXELS })
         .resize({ width: THUMB_PX, height: THUMB_PX, fit: "cover", position: "attention" })
         .webp({ quality: 74 })
         .toBuffer();
@@ -77,7 +83,31 @@ export const videoEnabled = await run(FFMPEG, ["-version"]).then(() => true, () 
  * que se reproduce en cualquier celu (los .mov de iPhone en HEVC no andan en Android).
  * Re-codificar descarta los metadatos, incluida la ubicación GPS. También saca un fotograma para la miniatura.
  */
-export async function saveVideo(input: ArrayBuffer): Promise<{ key: string; posterKey: string; seconds: number }> {
+/**
+ * Videos procesándose a la vez. ffmpeg usa mucho procesador: si varias personas suben videos juntas, los que
+ * sobran esperan su turno en vez de trabar el servidor para todes.
+ */
+const MAX_VIDEO_JOBS = 2;
+let videoJobs = 0;
+const videoQueue: (() => void)[] = [];
+async function videoSlot<T>(job: () => Promise<T>): Promise<T> {
+  // Si hay lugar se ocupa; si no, se espera y el turno lo pasa directo quien termina (así nunca hay más de MAX)
+  if (videoJobs < MAX_VIDEO_JOBS) videoJobs++;
+  else await new Promise<void>((r) => videoQueue.push(r));
+  try {
+    return await job();
+  } finally {
+    const next = videoQueue.shift();
+    if (next) next();
+    else videoJobs--;
+  }
+}
+
+export function saveVideo(input: ArrayBuffer): Promise<{ key: string; posterKey: string; seconds: number }> {
+  return videoSlot(() => processVideo(input));
+}
+
+async function processVideo(input: ArrayBuffer): Promise<{ key: string; posterKey: string; seconds: number }> {
   const id = crypto.randomUUID();
   const tmpIn = path.join(tmpdir(), `${id}.in`);
   const key = `${id}.mp4`;

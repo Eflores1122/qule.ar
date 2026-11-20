@@ -6,6 +6,7 @@ import { z } from "zod";
 import { db, schema } from "../db/index.js";
 import { REACTIONS } from "../db/schema.js";
 import { authorsFor, blockedWith, isBlocked, newId, reactionsFor, requireProfile, requireUser, type AppEnv } from "../lib.js";
+import { limit } from "../ratelimit.js";
 import { emitToGroup, emitToUser } from "../realtime.js";
 import { pushTo } from "../push.js";
 import { APP_NAME } from "../brand.js";
@@ -41,6 +42,7 @@ toqueRoutes.post("/users/:id/toques", async (c) => {
   const [p] = await db.select({ suspendedAt: profile.suspendedAt }).from(profile).where(eq(profile.userId, to));
   if (!p || p.suspendedAt) throw new HTTPException(404, { message: "Perfil no disponible" });
   if (await myRecentToque(me.id, to)) throw new HTTPException(429, { message: "Ya le mandaste un toque hace poco" });
+  limit(me.id, "toque");
 
   const now = new Date();
   const id = newId();
