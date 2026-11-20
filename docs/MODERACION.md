@@ -50,6 +50,14 @@ Fotos o videos íntimos de alguien compartidos sin su permiso. La Ley 27.736 ("L
 - Si se repite (el panel muestra cuántos reportes tiene la cuenta en total) o es grave: suspendé.
 - Ante la duda, mirá el [Código de conducta](../CODE_OF_CONDUCT.md).
 
+## Las pruebas
+
+Al reportar, la app guarda una copia de lo reportado: el texto del mensaje y sus fotos o, si se reporta un perfil por algo urgente, sus fotos públicas. Esa copia **no se borra aunque la persona desenvíe el mensaje, borre la foto o borre su cuenta**. El reporte también queda aunque se borre alguna de las dos cuentas.
+
+- Si **descartás** el reporte, la copia se borra.
+- Si el reporte **termina en una medida** (borrar el mensaje o suspender), la copia se conserva como prueba.
+- Los archivos guardados solo los puede pedir moderación. El panel dice cuántos hay, pero **no los muestra ni hace falta descargarlos**. Si una fiscalía los pide, quien administra el servidor los entrega.
+
 ## Reglas para quien modera
 
 - **Mirá solo lo necesario** para resolver el reporte: el mensaje o el perfil reportado. Nada más. Son datos personales, y muchas veces sensibles (Ley 25.326).
@@ -60,6 +68,5 @@ Fotos o videos íntimos de alguien compartidos sin su permiso. La Ley 27.736 ("L
 
 ## Pendiente
 
-- **Guardar una copia del mensaje reportado** al momento del reporte. Hoy, si quien lo escribió lo borra antes de que se revise, moderación ya no lo ve.
 - **Un canal privado de contacto**, por mail, para quien quiere apelar una suspensión o pedir ayuda. Depende del servicio de mails (discusión #25).
 - **Mirar este protocolo cada tanto** y ajustarlo con lo que vaya pasando.

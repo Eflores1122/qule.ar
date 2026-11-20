@@ -1,6 +1,6 @@
 import { and, eq, isNotNull, lt } from "drizzle-orm";
 import { db, schema } from "./db/index.js";
-import { deleteImage } from "./storage.js";
+import { deleteImageUnlessEvidence } from "./moderation.js";
 
 const { directMessage } = schema;
 
@@ -28,7 +28,8 @@ export async function sweepExpiredPhotos() {
       lt(directMessage.openedAt, new Date(Date.now() - EXPIRING_GRACE_MS)),
     ));
   for (const m of due) {
-    if (m.key) await deleteImage(m.key);
+    // Si alguien la reportó, el archivo queda como prueba (solo moderación lo puede pedir)
+    if (m.key) await deleteImageUnlessEvidence(m.key);
     await db.update(directMessage).set({ photoKey: null }).where(eq(directMessage.id, m.id));
   }
 }

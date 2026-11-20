@@ -14,6 +14,7 @@ import { hasAlbumAccess } from "./premium.js";
 import { isAdmin } from "./admin.js";
 import { APP_NAME } from "../brand.js";
 import { expiringIsOver } from "../expiring.js";
+import { deleteImageUnlessEvidence, isEvidence } from "../moderation.js";
 import { TERMS_VERSION } from "../legal.js";
 
 const { profile, photo, user, group, groupMember, directMessage, conversation } = schema;
@@ -58,6 +59,9 @@ meRoutes.get("/files/:key", requireUser, async (c) => {
   }
   // Foto de mensaje privado: solo las dos personas de la charla; si es temporal, solo quien la recibe tras abrirla
   const [dm] = await db.select().from(directMessage).where(eq(directMessage.photoKey, key));
+  // Archivo que ya no usa ningún mensaje ni perfil (desenviado, borrado): solo existe como prueba de un reporte,
+  // y solo moderación lo puede pedir
+  if (!ph && !dm && !(isAdmin(c.get("user")) && (await isEvidence(key)))) return c.notFound();
   if (dm) {
     const [conv] = await db.select().from(conversation).where(eq(conversation.id, dm.conversationId));
     const inConv = conv && (conv.userA === viewer || conv.userB === viewer);
@@ -223,8 +227,8 @@ meRoutes.delete("/me/photos/:id", requireUser, async (c) => {
     .where(and(eq(photo.id, c.req.param("id")), eq(photo.userId, u.id)))
     .returning();
   if (!row) return c.notFound();
-  await deleteImage(row.key);
-  if (row.posterKey) await deleteImage(row.posterKey);
+  await deleteImageUnlessEvidence(row.key);
+  if (row.posterKey) await deleteImageUnlessEvidence(row.posterKey);
   // Reordenar las que quedan
   const rest = await db.select().from(photo).where(eq(photo.userId, u.id)).orderBy(asc(photo.position));
   for (const [i, p] of rest.entries()) {
@@ -252,9 +256,10 @@ meRoutes.delete("/me", requireUser, async (c) => {
   const dmPhotos = await db.select().from(directMessage).where(eq(directMessage.senderId, u.id));
   await db.delete(user).where(eq(user.id, u.id)); // en cascada: perfil, fotos, mensajes, sesiones, etc.
   for (const p of photos) {
-    await deleteImage(p.key);
-    if (p.posterKey) await deleteImage(p.posterKey);
+    await deleteImageUnlessEvidence(p.key);
+    if (p.posterKey) await deleteImageUnlessEvidence(p.posterKey);
   }
-  for (const m of dmPhotos) if (m.photoKey) await deleteImage(m.photoKey);
+  // Lo que sea prueba de un reporte queda guardado para moderación (Ley 25.326, art. 16 inc. 5)
+  for (const m of dmPhotos) if (m.photoKey) await deleteImageUnlessEvidence(m.photoKey);
   return c.json({ ok: true });
 });

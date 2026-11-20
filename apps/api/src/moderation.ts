@@ -1,8 +1,9 @@
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { db, schema } from "./db/index.js";
 import { env } from "./env.js";
 import { pushTo } from "./push.js";
 import { APP_NAME } from "./brand.js";
+import { deleteImage } from "./storage.js";
 
 const { report, user } = schema;
 
@@ -57,5 +58,47 @@ export async function autoHiddenUsers(): Promise<Set<string>> {
     .where(and(eq(report.status, "open"), inArray(report.reason, [...URGENT_REASONS])))
     .groupBy(report.targetUserId)
     .having(sql`count(distinct ${report.reporterId}) >= ${AUTO_HIDE_REPORTERS}`);
-  return new Set(rows.map((r) => r.id));
+  return new Set(rows.flatMap((r) => (r.id ? [r.id] : [])));
+}
+
+// ---------- Pruebas de los reportes ----------
+// Un reporte guarda una copia del texto y la lista de archivos involucrados (evidenceKeys). Esos archivos no se
+// borran mientras el reporte esté abierto o haya terminado en una medida, aunque se desenvíe el mensaje, se borre
+// la foto o la cuenta. Ley 25.326, art. 16 inc. 5: la supresión no procede si perjudica derechos de terceros
+// o hay obligación legal de conservar. Si moderación descarta el reporte, la copia se libera y se borra.
+
+const KEPT = ["open", "actioned"];
+
+/** ¿Este archivo es prueba de algún reporte abierto o que terminó en una medida? */
+export async function isEvidence(key: string): Promise<boolean> {
+  const [r] = await db.select({ id: report.id }).from(report)
+    .where(and(inArray(report.status, KEPT), sql`${report.evidenceKeys} @> ${JSON.stringify([key])}::jsonb`))
+    .limit(1);
+  return Boolean(r);
+}
+
+/** Borra un archivo, salvo que sea prueba de un reporte (en ese caso queda guardado para moderación). */
+export async function deleteImageUnlessEvidence(key: string) {
+  if (await isEvidence(key)) return;
+  await deleteImage(key);
+}
+
+/** ¿El archivo lo sigue usando algo vivo (un mensaje o una foto de perfil/álbum)? */
+async function stillInUse(key: string) {
+  const [m] = await db.select({ id: schema.directMessage.id }).from(schema.directMessage)
+    .where(eq(schema.directMessage.photoKey, key)).limit(1);
+  if (m) return true;
+  const [p] = await db.select({ id: schema.photo.id }).from(schema.photo)
+    .where(or(eq(schema.photo.key, key), eq(schema.photo.posterKey, key))).limit(1);
+  return Boolean(p);
+}
+
+/** Al descartar reportes: se borra la copia del texto y los archivos que ya nadie usa ni son prueba de otro reporte. */
+export async function releaseEvidence(reportIds: string[]) {
+  if (!reportIds.length) return;
+  const rows = await db.select({ keys: report.evidenceKeys }).from(report).where(inArray(report.id, reportIds));
+  await db.update(report).set({ messageBody: null, evidenceKeys: [] }).where(inArray(report.id, reportIds));
+  for (const key of new Set(rows.flatMap((r) => r.keys))) {
+    if (!(await isEvidence(key)) && !(await stillInUse(key))) await deleteImage(key);
+  }
 }

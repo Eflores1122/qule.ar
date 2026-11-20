@@ -837,10 +837,11 @@ groupRoutes.delete("/groups/:id/messages/:mid", async (c) => {
     }
   }
   if (row.status === "queued" && mine) {
-    await db.update(groupMessage).set({ status: "cancelled" }).where(eq(groupMessage.id, row.id));
+    // Borrado de verdad: no queda el texto (si alguien lo había reportado, la copia está en el reporte)
+    await db.update(groupMessage).set({ status: "cancelled", body: "" }).where(eq(groupMessage.id, row.id));
     emitToUser(u.id, "group:cancelled", { id: row.id, groupId: row.groupId });
   } else if (row.status === "published") {
-    await db.update(groupMessage).set({ status: "deleted" }).where(eq(groupMessage.id, row.id));
+    await db.update(groupMessage).set({ status: "deleted", body: "" }).where(eq(groupMessage.id, row.id));
     await db.delete(schema.reaction).where(eq(schema.reaction.messageId, row.id));
     await emitToGroup(row.groupId, row.userId, "group:deleted", { id: row.id, groupId: row.groupId });
   }
