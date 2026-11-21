@@ -1,6 +1,5 @@
-import { useEffect, useLayoutEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from "react";
+import { useLayoutEffect, useRef, useState, type ReactNode, type KeyboardEvent, type PointerEvent } from "react";
 import { ApiError } from "../api";
-import { preparePhotoForUpload } from "../features/photos/preparePhoto";
 
 const PREVIEW_WIDTH = 320;
 const PREVIEW_HEIGHT = 400;
@@ -10,7 +9,9 @@ const MAX_OUTPUT_HEIGHT = 1200;
 type View = { x: number; y: number; zoom: number };
 type Crop = { x: number; y: number; width: number; height: number };
 type Props = {
-  file: File;
+  image: HTMLImageElement;
+  fileName: string;
+  notice?: ReactNode;
   number: number;
   total: number;
   isPrivate: boolean;
@@ -63,11 +64,11 @@ const KEY_MOVES: Record<string, [number, number]> = {
   ArrowDown: [0, 0.04],
 };
 
-export function PhotoCrop({ file, number, total, isPrivate, onSkip, onUpload }: Props) {
+export function PhotoCrop({ image, fileName, notice, number, total, isPrivate, onSkip, onUpload }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null);
   const previewRef = useRef<HTMLCanvasElement>(null);
   const pointer = useRef<{ id: number; x: number; y: number } | null>(null);
-  const [image, setImage] = useState<HTMLImageElement | null>(null);
+  const [previewFailed, setPreviewFailed] = useState(false);
   const [view, setView] = useState<View>({ x: 0.5, y: 0.5, zoom: 1 });
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
@@ -78,41 +79,18 @@ export function PhotoCrop({ file, number, total, isPrivate, onSkip, onUpload }: 
     return () => dialog.close();
   }, []);
 
-  useEffect(() => {
-    let url = "";
-    let cancelled = false;
-    const source = new Image();
-    source.onload = () => setImage(source);
-    source.onerror = () => setError("No pudimos leer esta imagen. Probá con otra.");
-    // Antes de mostrarla: controla el peso y convierte las HEIC (iPhone y algunos Android) a JPG,
-    // porque la mayoría de los navegadores no las pueden dibujar
-    preparePhotoForUpload(file)
-      .then((ready) => {
-        if (cancelled) return;
-        url = URL.createObjectURL(ready);
-        source.src = url;
-      })
-      .catch((err: Error) => { if (!cancelled) setError(err.message || "No pudimos leer esta imagen. Probá con otra."); });
-    return () => {
-      cancelled = true;
-      source.onload = null;
-      source.onerror = null;
-      if (url) URL.revokeObjectURL(url);
-    };
-  }, [file]);
-
-  useEffect(() => {
-    if (!image || !previewRef.current) return;
+  useLayoutEffect(() => {
+    if (!previewRef.current) return;
     try {
       drawCrop(previewRef.current, image, getCrop(image, view));
     } catch {
-      setImage(null);
+      setPreviewFailed(true);
       setError("No pudimos mostrar esta imagen. Probá con otra.");
     }
   }, [image, view]);
 
   function movePhoto(dx: number, dy: number) {
-    if (!image || busy) return;
+    if (previewFailed || busy) return;
     setView((current) => {
       const crop = getCrop(image, current);
       const x = clamp(crop.x - dx * crop.width, image.naturalWidth - crop.width);
@@ -126,7 +104,7 @@ export function PhotoCrop({ file, number, total, isPrivate, onSkip, onUpload }: 
   }
 
   function startDrag(event: PointerEvent<HTMLCanvasElement>) {
-    if (!image || busy || !event.isPrimary || event.button !== 0) return;
+    if (previewFailed || busy || !event.isPrimary || event.button !== 0) return;
     event.currentTarget.setPointerCapture(event.pointerId);
     pointer.current = { id: event.pointerId, x: event.clientX, y: event.clientY };
   }
@@ -147,11 +125,11 @@ export function PhotoCrop({ file, number, total, isPrivate, onSkip, onUpload }: 
   }
 
   async function confirm() {
-    if (!image || busy) return;
+    if (previewFailed || busy) return;
     setBusy(true);
     setError("");
     try {
-      const cropped = await exportCrop(image, getCrop(image, view), file.name);
+      const cropped = await exportCrop(image, getCrop(image, view), fileName);
       if (dialogRef.current?.open) await onUpload(cropped);
     } catch (err) {
       setError(err instanceof ApiError ? err.message : "No se pudo subir la foto. Probá de nuevo.");
@@ -192,7 +170,7 @@ export function PhotoCrop({ file, number, total, isPrivate, onSkip, onUpload }: 
           max={3}
           step={0.01}
           value={view.zoom}
-          disabled={!image || busy}
+          disabled={previewFailed || busy}
           onChange={(e) => {
             const zoom = e.currentTarget.valueAsNumber;
             setView((current) => ({ ...current, zoom }));
@@ -204,10 +182,11 @@ export function PhotoCrop({ file, number, total, isPrivate, onSkip, onUpload }: 
         <button type="button" className="btn btn--ghost" onClick={onSkip} disabled={busy}>
           {total > 1 ? "Omitir foto" : "Cancelar"}
         </button>
-        <button type="button" className="btn btn--primary" onClick={confirm} disabled={!image || busy}>
+        <button type="button" className="btn btn--primary" onClick={confirm} disabled={previewFailed || busy}>
           {busy ? "Subiendo…" : isPrivate ? "Subir al álbum" : "Subir foto"}
         </button>
       </div>
+      {notice}
     </dialog>
   );
 }

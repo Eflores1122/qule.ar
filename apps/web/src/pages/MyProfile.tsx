@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { createPortal } from "react-dom";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { api, ApiError, upload, type AlbumGrant, type Me, type Profile } from "../api";
 import { useMe } from "../App";
@@ -7,6 +8,7 @@ import { AlbumViewer, duration, untilLabel } from "../components/AlbumViewer";
 import { Avatar } from "../components/Avatar";
 import { BackIcon, ChevronRightIcon, LockIcon, PlusIcon } from "../components/Icons";
 import { PhotoCrop } from "../components/PhotoCrop";
+import { preparePhotoForCrop } from "../features/photos/preparePhoto";
 import { BODY_TYPES, HIV_STATUS, LOOKING_FOR, POSITIONS, PRONOUNS, RELATIONSHIP, TRIBES } from "../options";
 
 type Form = Omit<Profile, "birthdate" | "age">;
@@ -77,6 +79,15 @@ function PhotoOrder({ index, total, disabled, onMove }: {
   );
 }
 
+function PhotoPreparing() {
+  return (
+    <div className="photos__add" role="status">
+      <span className="photos__spinner" aria-hidden="true" />
+      <span>Preparando foto…</span>
+    </div>
+  );
+}
+
 export function EditProfile() {
   const { me, reload } = useMe();
   return me?.profile ? <ProfileEditor key={me.user.id} profile={me.profile} photos={me.photos} reload={reload} /> : null;
@@ -98,7 +109,15 @@ function ProfileEditor({ profile, photos, reload }: { profile: Profile; photos: 
   const [grants, setGrants] = useState<AlbumGrant[]>([]);
   const [progress, setProgress] = useState<{ done: number; total: number; video: boolean } | null>(null);
   const [viewing, setViewing] = useState<number | null>(null);
-  const [cropBatch, setCropBatch] = useState<MediaBatch | null>(null);
+  const [cropBatch, setCropBatch] = useState<(MediaBatch & { image: HTMLImageElement }) | null>(null);
+  const [preparing, setPreparing] = useState<"public" | "private" | null>(null);
+  const [photoError, setPhotoError] = useState("");
+
+  useEffect(() => {
+    if (!photoError) return;
+    const timer = window.setTimeout(() => setPhotoError(""), 5000);
+    return () => window.clearTimeout(timer);
+  }, [photoError]);
 
   useEffect(() => {
     api<AlbumGrant[]>("/album/grants").then(setGrants).catch(() => setMediaError("No pudimos cargar los accesos al álbum."));
@@ -106,7 +125,7 @@ function ProfileEditor({ profile, photos, reload }: { profile: Profile; photos: 
 
   const publicPhotos = photos.filter((p) => !p.isPrivate);
   const privatePhotos = photos.filter((p) => p.isPrivate);
-  const mediaLocked = uploading || mediaBusy || saving;
+  const mediaLocked = preparing !== null || uploading || mediaBusy || saving;
   const set = <K extends keyof Form>(k: K, v: Form[K]) => {
     setForm((previous) => ({ ...previous, [k]: v }));
     setError("");
@@ -138,6 +157,7 @@ function ProfileEditor({ profile, photos, reload }: { profile: Profile; photos: 
     if (!files.length) return;
     const slots = isPrivate ? MAX_ALBUM_ITEMS - privatePhotos.length : MAX_PROFILE_PHOTOS - publicPhotos.length;
     setMediaError("");
+    setPhotoError("");
     void advanceBatch({ files, index: 0, isPrivate, slots });
   }
 
@@ -189,17 +209,33 @@ function ProfileEditor({ profile, photos, reload }: { profile: Profile; photos: 
    * los procesa sin trabarse). En cada foto se detiene para que se confirme el recorte.
    */
   async function advanceBatch({ files, index, isPrivate, slots }: MediaBatch) {
-    const start = index;
+    setCropBatch(null);
     const errors: string[] = [];
+    const photoErrors: string[] = [];
+    let uploadedVideo = false;
+    let image: HTMLImageElement | undefined;
     while (index < files.length && slots > 0) {
       const file = files[index];
-      if (!isPrivate || !file.type.startsWith("video/")) break;
-      if (index === start) setCropBatch(null);
+      if (!isPrivate || !file.type.startsWith("video/")) {
+        setPreparing(isPrivate ? "private" : "public");
+        try {
+          image = await preparePhotoForCrop(file);
+          break;
+        } catch (err) {
+          const message = err instanceof Error ? err.message : "No pudimos preparar la foto.";
+          photoErrors.push(`${file.name} · ${message}`);
+          index++;
+          continue;
+        } finally {
+          setPreparing(null);
+        }
+      }
       setUploading(true);
       setProgress({ done: index, total: files.length, video: true });
       try {
         await upload("/me/photos", file, { private: "1" });
         slots--;
+        uploadedVideo = true;
       } catch (err) {
         const message = err instanceof ApiError ? err.message : "No se pudo subir el video. Probá de nuevo.";
         errors.push(`${file.name} · ${message}`);
@@ -207,18 +243,19 @@ function ProfileEditor({ profile, photos, reload }: { profile: Profile; photos: 
       }
       index++;
     }
-    if (index > start) {
+    if (uploadedVideo) {
       await reload().catch(() => setMediaError("Recargá para ver los archivos que subiste."));
-      setProgress(null);
-      setUploading(false);
     }
+    setProgress(null);
+    setUploading(false);
     if (index < files.length && slots === 0) {
       errors.push(isPrivate
         ? `Tu álbum ya tiene ${MAX_ALBUM_ITEMS} fotos y videos. No se subieron los archivos que quedaban.`
         : `Tu perfil ya tiene ${MAX_PROFILE_PHOTOS} fotos. No se subieron las que quedaban.`);
     }
     if (errors.length) setMediaError((previous) => [previous, ...errors].filter(Boolean).join(" · "));
-    setCropBatch(index < files.length && slots > 0 ? { files, index, isPrivate, slots } : null);
+    if (photoErrors.length) setPhotoError(photoErrors.join(" · "));
+    if (image) setCropBatch({ files, index, isPrivate, slots, image });
   }
 
   function removePhoto(photoId: string) {
@@ -241,6 +278,8 @@ function ProfileEditor({ profile, photos, reload }: { profile: Profile; photos: 
     });
   }
 
+  const photoNotice = photoError && <div className="toast toast--upload-error" role="alert">{photoError}</div>;
+
   return (
     <div className="page">
       <header className="topbar topbar--thread">
@@ -253,6 +292,7 @@ function ProfileEditor({ profile, photos, reload }: { profile: Profile; photos: 
         </p>
       )}
 
+      {!cropBatch && photoNotice && createPortal(photoNotice, document.body)}
       {mediaError && <p className="notice notice--error" role="alert">{mediaError}</p>}
       <section className="section">
         <h2 className="section__title">Fotos <span className="muted">{publicPhotos.length}/6</span></h2>
@@ -272,12 +312,14 @@ function ProfileEditor({ profile, photos, reload }: { profile: Profile; photos: 
             </div>
           ))}
           {publicPhotos.length < 6 && (
-            <button className="photos__add" onClick={() => publicFileRef.current?.click()} disabled={mediaLocked}>
-              {uploading ? "Subiendo…" : <><PlusIcon /> Agregar</>}
-            </button>
+            preparing === "public" ? <PhotoPreparing /> : (
+              <button className="photos__add" onClick={() => publicFileRef.current?.click()} disabled={mediaLocked}>
+                {uploading ? "Subiendo…" : <><PlusIcon /> Agregar</>}
+              </button>
+            )
           )}
         </div>
-        <input ref={publicFileRef} type="file" accept="image/*" multiple hidden onChange={(e) => selectFiles(e, false)} />
+        <input ref={publicFileRef} type="file" accept="image/*,.heic,.heif" multiple hidden onChange={(e) => selectFiles(e, false)} />
         <p className="muted small">Al subir una foto le borramos los metadatos, incluida la ubicación GPS.</p>
       </section>
 
@@ -301,9 +343,11 @@ function ProfileEditor({ profile, photos, reload }: { profile: Profile; photos: 
             </div>
           ))}
           {privatePhotos.length < 40 && (
-            <button className="photos__add" onClick={() => privateFileRef.current?.click()} disabled={mediaLocked}>
-              {uploading ? "Subiendo…" : <><PlusIcon /> Fotos y videos</>}
-            </button>
+            preparing === "private" ? <PhotoPreparing /> : (
+              <button className="photos__add" onClick={() => privateFileRef.current?.click()} disabled={mediaLocked}>
+                {uploading ? "Subiendo…" : <><PlusIcon /> Fotos y videos</>}
+              </button>
+            )
           )}
         </div>
         {progress && (
@@ -329,11 +373,13 @@ function ProfileEditor({ profile, photos, reload }: { profile: Profile; photos: 
             </ul>
           </>
         )}
-        <input ref={privateFileRef} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => selectFiles(e, true)} />
+        <input ref={privateFileRef} type="file" accept="image/*,.heic,.heif,video/*" multiple hidden onChange={(e) => selectFiles(e, true)} />
         {cropBatch && (
           <PhotoCrop
             key={`${cropBatch.isPrivate}-${cropBatch.index}`}
-            file={cropBatch.files[cropBatch.index]}
+            image={cropBatch.image}
+            fileName={cropBatch.files[cropBatch.index].name}
+            notice={photoNotice}
             number={cropBatch.index + 1}
             total={cropBatch.files.length}
             isPrivate={cropBatch.isPrivate}
