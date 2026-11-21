@@ -21,7 +21,7 @@ import { adminRoutes } from "./routes/admin.js";
 import { toqueRoutes } from "./routes/toques.js";
 import { securityHeaders } from "./security.js";
 import { sweepExpiredPhotos } from "./expiring.js";
-import { purgeRemovedGroups } from "./moderation.js";
+import { purgeRemovedGroups, scanExistingGroups } from "./moderation.js";
 
 await runMigrations();
 
@@ -31,6 +31,8 @@ setInterval(() => sweepExpiredPhotos().catch((e) => console.error("sweepExpiredP
 
 // Grupos dados de baja hace más de 90 días: se borran del todo (sus reportes conservan la copia)
 await purgeRemovedGroups().catch((e) => console.error("purgeRemovedGroups", e));
+// Grupos que ya existían con nombres que ahora no se permiten: van a moderación (no se repite si ya se revisó)
+await scanExistingGroups().catch((e) => console.error("scanExistingGroups", e));
 setInterval(() => purgeRemovedGroups().catch((e) => console.error("purgeRemovedGroups", e)), 6 * 3_600_000).unref();
 
 // El chat general existe siempre

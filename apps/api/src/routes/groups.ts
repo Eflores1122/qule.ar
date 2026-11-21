@@ -7,7 +7,7 @@ import { db, schema } from "../db/index.js";
 import { DEFAULT_SPAM_RULES } from "../db/schema.js";
 import { ageFrom, authorsFor, blockedWith, newId, requireProfile, requireUser, thumbUrl, type AppEnv } from "../lib.js";
 import { distanceLabel, visibleKm } from "../geo.js";
-import { autoHiddenGroups, autoHiddenUsers, checkMinorSignals, groupIsEvidence } from "../moderation.js";
+import { autoHiddenGroups, autoHiddenUsers, forbiddenGroupText, groupIsEvidence, reportMinorGroupAttempt } from "../moderation.js";
 import { emitToGroup, emitToUser, isOnline, serializeGroupMessages, syncGroupRoom } from "../realtime.js";
 import { pushTo } from "../push.js";
 import { notifyGroupMessage } from "../groupNotify.js";
@@ -128,6 +128,22 @@ function parse<T>(schema: z.ZodType<T>, input: unknown): T {
   return r.data;
 }
 
+// ---------- Nombres que no se permiten ----------
+
+/**
+ * Corta con 400 si el nombre o la descripción apunta a menores, venta, masajes o servicios sexuales, o drogas.
+ * Si es por menores, además le avisa a moderación quién lo intentó.
+ */
+async function rejectForbidden(u: { id: string; name: string }, name: string, description: string | null | undefined) {
+  const bad = forbiddenGroupText(name, description);
+  if (!bad) return;
+  if (bad.kind === "menores") {
+    await reportMinorGroupAttempt(u, bad.hit, [name, description].filter(Boolean).join("\n"))
+      .catch((e) => console.error("reportMinorGroupAttempt", e));
+  }
+  throw new HTTPException(400, { message: bad.message });
+}
+
 // ---------- Cerrar y dar de baja ----------
 
 /** Saca a todo el mundo de la sala en vivo del grupo y les avisa que ya no está. */
@@ -204,6 +220,7 @@ groupRoutes.get("/groups/all", async (c) => {
 groupRoutes.post("/groups", async (c) => {
   const u = c.get("user");
   const data = parse(groupInput, await c.req.json());
+  await rejectForbidden(u, data.name, data.description);
   const [{ owned }] = await db
     .select({ owned: sql<number>`count(*)::int` })
     .from(groupMember)
@@ -213,8 +230,6 @@ groupRoutes.post("/groups", async (c) => {
   await db.insert(group).values({ id, name: data.name, description: data.description ?? null, ownerId: u.id });
   await db.insert(groupMember).values({ groupId: id, userId: u.id, role: "owner" });
   syncGroupRoom(u.id, id, true);
-  checkMinorSignals({ groupId: id, name: data.name }, { "el nombre del grupo": data.name, "la descripción del grupo": data.description })
-    .catch((e) => console.error("checkMinorSignals", e));
   return c.json({ id });
 });
 
@@ -256,6 +271,7 @@ groupRoutes.patch("/groups/:id", async (c) => {
   if (member?.role !== "owner") throw new HTTPException(403, { message: "Solo el dueño puede editar el grupo" });
   const body = await c.req.json();
   const data = parse(groupInput.partial().extend({ rules: rulesInput.optional() }), body);
+  await rejectForbidden(u, data.name ?? g.name, data.description !== undefined ? data.description : g.description);
   await db
     .update(group)
     .set({
@@ -264,10 +280,6 @@ groupRoutes.patch("/groups/:id", async (c) => {
       ...(data.rules && { spamRules: { ...DEFAULT_SPAM_RULES, ...data.rules } }),
     })
     .where(eq(group.id, g.id));
-  const name = data.name ?? g.name;
-  const description = data.description !== undefined ? data.description : g.description;
-  checkMinorSignals({ groupId: g.id, name }, { "el nombre del grupo": name, "la descripción del grupo": description })
-    .catch((e) => console.error("checkMinorSignals", e));
   return c.json({ ok: true });
 });
 
