@@ -3,6 +3,7 @@ import { useNavigate, useParams, useSearchParams } from "react-router";
 import { api, type PublicProfile } from "../api";
 import { BackIcon, LockIcon, StarIcon } from "../components/Icons";
 import { useMe } from "../App";
+import { useTabData } from "../features/navigation/tabData";
 import { InviteToGroups } from "../components/Invite";
 import { ReportDialog } from "../components/ReportDialog";
 import { albumCount, AlbumGrid, AlbumViewer, untilLabel } from "../components/AlbumViewer";
@@ -25,6 +26,7 @@ export function ProfilePage() {
   const [reporting, setReporting] = useState(false);
   const [confirmBlock, setConfirmBlock] = useState(false);
   const { me } = useMe();
+  const { refreshAfterBlock } = useTabData();
   const hasOwnAlbum = Boolean(me?.photos.some((x) => x.isPrivate));
   const [params, setParams] = useSearchParams();
   // ?album=1 (desde el mensaje del chat) abre el álbum directo
@@ -88,6 +90,7 @@ export function ProfilePage() {
 
   async function doBlock() {
     await api("/blocks", { method: "POST", json: { userId: id } });
+    refreshAfterBlock();
     nav(-1);
   }
 

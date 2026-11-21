@@ -51,19 +51,25 @@ export const mediaOut = (x: { key: string; kind: string; posterKey: string | nul
 
 export type Author = { id: string; name: string; age: number; photo: string | null };
 
+/** Clave de la primera foto pública, por persona. */
+export async function firstPublicPhotoKeys(ids: string[]): Promise<Map<string, string>> {
+  if (!ids.length) return new Map();
+  const photos = await db.selectDistinctOn([photo.userId], { userId: photo.userId, key: photo.key }).from(photo)
+    .where(and(inArray(photo.userId, ids), eq(photo.isPrivate, false)))
+    .orderBy(asc(photo.userId), asc(photo.position));
+  return new Map(photos.map((p) => [p.userId, p.key]));
+}
+
 /** Nombre, edad y foto principal (pública) de varios usuarios. */
 export async function authorsFor(ids: string[]): Promise<Map<string, Author>> {
   const unique = [...new Set(ids)];
   const map = new Map<string, Author>();
   if (!unique.length) return map;
-  const profiles = await db.select().from(profile).where(inArray(profile.userId, unique));
-  const photos = await db
-    .select()
-    .from(photo)
-    .where(and(inArray(photo.userId, unique), eq(photo.isPrivate, false)))
-    .orderBy(asc(photo.position));
-  const firstPhoto = new Map<string, string>();
-  for (const p of photos) if (!firstPhoto.has(p.userId)) firstPhoto.set(p.userId, p.key);
+  const [profiles, firstPhoto] = await Promise.all([
+    db.select({ userId: profile.userId, displayName: profile.displayName, birthdate: profile.birthdate })
+      .from(profile).where(inArray(profile.userId, unique)),
+    firstPublicPhotoKeys(unique),
+  ]);
   for (const p of profiles) {
     map.set(p.userId, {
       id: p.userId,

@@ -122,8 +122,8 @@ socialRoutes.get("/conversations", async (c) => {
     .orderBy(desc(conversation.lastMessageAt))
     .limit(100);
   if (!convs.length) return c.json([]);
-  const others = convs.map((cv) => (cv.userA === me.id ? cv.userB : cv.userA));
-  const authors = await authorsFor(others);
+  const otherIdFor = (cv: typeof conversation.$inferSelect) => cv.userA === me.id ? cv.userB : cv.userA;
+  const others = convs.map(otherIdFor);
   const blockedRows = await db
     .select()
     .from(block)
@@ -133,24 +133,26 @@ socialRoutes.get("/conversations", async (c) => {
     ));
   const blocked = new Set(blockedRows.map((r) => (r.blockerId === me.id ? r.blockedId : r.blockerId)));
 
-  const out = [];
-  for (const cv of convs) {
-    const otherId = cv.userA === me.id ? cv.userB : cv.userA;
-    if (blocked.has(otherId)) continue;
-    const [last] = await db
-      .select()
-      .from(directMessage)
-      .where(eq(directMessage.conversationId, cv.id))
-      .orderBy(desc(directMessage.createdAt))
-      .limit(1);
-    if (!last) continue;
-    const [{ unread }] = await db
-      .select({ unread: sql<number>`count(*)::int` })
-      .from(directMessage)
-      .where(and(eq(directMessage.conversationId, cv.id), ne(directMessage.senderId, me.id), isNull(directMessage.readAt)));
-    out.push({ id: cv.id, other: authors.get(otherId), last: serializeDm(last), unread });
-  }
-  return c.json(out);
+  const visible = convs.filter((cv) => !blocked.has(otherIdFor(cv)));
+  if (!visible.length) return c.json([]);
+  const ids = visible.map((cv) => cv.id);
+  // El índice por conversación y fecha permite buscar solo el último mensaje de cada chat.
+  const lastMessage = db.select().from(directMessage)
+    .where(eq(directMessage.conversationId, conversation.id))
+    .orderBy(desc(directMessage.createdAt)).limit(1).as("last_message");
+  const [authors, latest, unreadCounts] = await Promise.all([
+    authorsFor(visible.map(otherIdFor)),
+    db.select().from(conversation).innerJoinLateral(lastMessage, sql`true`).where(inArray(conversation.id, ids)),
+    db.select({ id: directMessage.conversationId, unread: sql<number>`count(*)::int` }).from(directMessage)
+      .where(and(inArray(directMessage.conversationId, ids), ne(directMessage.senderId, me.id), isNull(directMessage.readAt)))
+      .groupBy(directMessage.conversationId),
+  ]);
+  const latestById = new Map(latest.map(({ last_message }) => [last_message.conversationId, last_message]));
+  const unreadById = new Map(unreadCounts.map((r) => [r.id, r.unread]));
+  return c.json(visible.flatMap((cv) => {
+    const last = latestById.get(cv.id);
+    return last ? [{ id: cv.id, other: authors.get(otherIdFor(cv)), last: serializeDm(last), unread: unreadById.get(cv.id) ?? 0 }] : [];
+  }));
 });
 
 /** Abre (o crea) la conversación con alguien. */

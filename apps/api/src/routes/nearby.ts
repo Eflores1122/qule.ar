@@ -1,14 +1,14 @@
-import { and, asc, desc, eq, inArray, isNull, ne } from "drizzle-orm";
+import { and, desc, eq, isNull, ne } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db, schema } from "../db/index.js";
 import { distanceLabel, snapToCell, visibleKm } from "../geo.js";
-import { ageFrom, blockedWith, thumbUrl, requireProfile, requireUser, type AppEnv } from "../lib.js";
+import { ageFrom, blockedWith, firstPublicPhotoKeys, thumbUrl, requireProfile, requireUser, type AppEnv } from "../lib.js";
 import { autoHiddenUsers } from "../moderation.js";
 import { isOnline } from "../realtime.js";
 
-const { profile, photo } = schema;
+const { profile } = schema;
 
 /** Radio máximo de búsqueda de la grilla. */
 const PAGE = 60;
@@ -96,23 +96,19 @@ nearbyRoutes.get("/nearby", async (c) => {
   // Con ubicación, se ordena de más cerca a más lejos; sin ubicación, por quién está en línea.
   const meHasLoc = me.cellLat != null && me.cellLng != null;
   const f = filtersSchema.parse(c.req.query());
-  const blocked = await blockedWith(u.id);
-  // Ocultos por precaución: varios reportes urgentes sin revisar (ver moderation.ts)
-  const hidden = await autoHiddenUsers();
-  const favs = new Set(
-    (await db.select({ id: schema.favorite.favoriteId }).from(schema.favorite).where(eq(schema.favorite.userId, u.id))).map((r) => r.id),
-  );
-
-  const rows = await db
-    .select()
-    .from(profile)
-    .where(and(
-      ne(profile.userId, u.id),
-      eq(profile.incognito, false), // en incógnito no se aparece en la grilla
-      isNull(profile.suspendedAt),
-    ))
-    .orderBy(desc(profile.lastSeenAt))
-    .limit(3000);
+  const [blocked, hidden, favorites, rows] = await Promise.all([
+    blockedWith(u.id),
+    autoHiddenUsers(),
+    db.select({ id: schema.favorite.favoriteId }).from(schema.favorite).where(eq(schema.favorite.userId, u.id)),
+    db.select({
+      userId: profile.userId, displayName: profile.displayName, birthdate: profile.birthdate,
+      lastSeenAt: profile.lastSeenAt, cellLat: profile.cellLat, cellLng: profile.cellLng, showDistance: profile.showDistance,
+      heightCm: profile.heightCm, weightKg: profile.weightKg, bodyType: profile.bodyType, position: profile.position,
+      relationship: profile.relationship, tribes: profile.tribes, lookingFor: profile.lookingFor,
+    }).from(profile).where(and(ne(profile.userId, u.id), eq(profile.incognito, false), isNull(profile.suspendedAt)))
+      .orderBy(desc(profile.lastSeenAt)).limit(3000),
+  ]);
+  const favs = new Set(favorites.map((r) => r.id));
 
   const anyOf = (wanted: string[], value: string | null) => !wanted.length || (value != null && wanted.includes(value));
   const overlap = (wanted: string[], values: string[]) => !wanted.length || values.some((v) => wanted.includes(v));
@@ -146,15 +142,9 @@ nearbyRoutes.get("/nearby", async (c) => {
     Number(b.online) - Number(a.online) ||
     b.p.lastSeenAt.getTime() - a.p.lastSeenAt.getTime());
 
-  // Foto principal pública de cada uno
-  const ids = candidates.map((x) => x.p.userId);
-  const photos = ids.length
-    ? await db.select().from(photo)
-        .where(and(inArray(photo.userId, ids), eq(photo.isPrivate, false)))
-        .orderBy(asc(photo.position))
-    : [];
-  const first = new Map<string, string>();
-  for (const ph of photos) if (!first.has(ph.userId)) first.set(ph.userId, ph.key);
+  // Solo el filtro con foto necesita saber quién tiene foto antes de paginar.
+  const photoCandidates = f.withPhoto ? candidates : candidates.slice(f.offset, f.offset + PAGE);
+  const first = await firstPublicPhotoKeys(photoCandidates.map((x) => x.p.userId));
 
   const filtered = f.withPhoto ? candidates.filter((x) => first.has(x.p.userId)) : candidates;
   const page = filtered.slice(f.offset, f.offset + PAGE);
