@@ -71,7 +71,7 @@ async function pendingCounts(ids: string[]) {
 
 /** Estado de una persona respecto de varios grupos: solicitud pendiente o período de espera. */
 async function requestStateFor(userId: string, ids: string[]) {
-  const map = new Map<string, { pending: boolean; cooldownUntil: string | null }>();
+  const map = new Map<string, { pending: boolean; pendingMessage: string | null; cooldownUntil: string | null }>();
   if (!ids.length) return map;
   const since = new Date(Date.now() - REAPPLY_DAYS * 86_400_000);
   const rows = await db
@@ -86,8 +86,11 @@ async function requestStateFor(userId: string, ids: string[]) {
       ),
     ));
   for (const r of rows) {
-    const cur = map.get(r.groupId) ?? { pending: false, cooldownUntil: null };
-    if (r.status === "pending") cur.pending = true;
+    const cur = map.get(r.groupId) ?? { pending: false, pendingMessage: null, cooldownUntil: null };
+    if (r.status === "pending") {
+      cur.pending = true;
+      cur.pendingMessage = r.message;
+    }
     else if (r.resolvedAt) {
       const until = new Date(r.resolvedAt.getTime() + REAPPLY_DAYS * 86_400_000).toISOString();
       if (!cur.cooldownUntil || until > cur.cooldownUntil) cur.cooldownUntil = until;
@@ -204,6 +207,7 @@ groupRoutes.get("/groups/:id", async (c) => {
     role: member?.role ?? null,
     memberCount: counts.get(g.id) ?? 0,
     pending: state?.pending ?? false,
+    pendingMessage: state?.pendingMessage ?? null,
     cooldownUntil: state?.cooldownUntil ?? null,
     pendingCount: pending,
     muted: member?.muted ?? false,

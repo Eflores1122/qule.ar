@@ -5,6 +5,7 @@ import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { BackIcon, PlusIcon } from "../components/Icons";
 import { InvitePeopleSheet } from "../components/Invite";
+import { slowModeText } from "../features/groups/groupRules";
 
 export function GroupInfo() {
   const { id = "" } = useParams();
@@ -82,10 +83,12 @@ export function GroupInfo() {
       </header>
 
       <section className="section">
-        {info.description && <p className="profile__about">{info.description}</p>}
+        <h2 className="section__title">Sobre el grupo</h2>
+        {info.description && <p className="profile__about group-description">{info.description}</p>}
         <p className="muted small hint">
           {info.memberCount} {info.memberCount === 1 ? "miembro" : "miembros"} · Tu rol: {ROLE_LABEL[info.role!]}
         </p>
+        <p className="muted small">{slowModeText(info.rules)}</p>
       </section>
 
       <section className="section">
