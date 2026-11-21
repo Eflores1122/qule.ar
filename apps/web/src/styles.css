@@ -550,3 +550,8 @@ button.quote:hover { background: var(--surface-3); }
 .beta-notice__terms h2 { font-size: var(--text-lg); margin-top: 20px; }
 .check--disabled { color: var(--muted); }
 .check__hint { display: block; margin-top: 4px; }
+
+/* Moderación: lo urgente se marca en el panel y en el diálogo de reporte (ver docs/MODERACION.md) */
+.rcard__pills { display: inline-flex; gap: 6px; flex-wrap: wrap; }
+.pill--urgent { background: var(--danger-soft); color: var(--danger); }
+.report-urgent { padding: 10px 12px; border-radius: var(--radius-lg); background: var(--danger-soft); border: 1px solid var(--danger-line); color: var(--text); }

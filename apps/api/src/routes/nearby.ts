@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db, schema } from "../db/index.js";
 import { distanceLabel, snapToCell, visibleKm } from "../geo.js";
 import { ageFrom, blockedWith, thumbUrl, requireProfile, requireUser, type AppEnv } from "../lib.js";
+import { autoHiddenUsers } from "../moderation.js";
 import { isOnline } from "../realtime.js";
 
 const { profile, photo } = schema;
@@ -96,6 +97,8 @@ nearbyRoutes.get("/nearby", async (c) => {
   const meHasLoc = me.cellLat != null && me.cellLng != null;
   const f = filtersSchema.parse(c.req.query());
   const blocked = await blockedWith(u.id);
+  // Ocultos por precaución: varios reportes urgentes sin revisar (ver moderation.ts)
+  const hidden = await autoHiddenUsers();
   const favs = new Set(
     (await db.select({ id: schema.favorite.favoriteId }).from(schema.favorite).where(eq(schema.favorite.userId, u.id))).map((r) => r.id),
   );
@@ -118,7 +121,7 @@ nearbyRoutes.get("/nearby", async (c) => {
   const now = Date.now();
 
   const candidates = rows
-    .filter((p) => !blocked.has(p.userId) && (!f.favorites || favs.has(p.userId)))
+    .filter((p) => !blocked.has(p.userId) && !hidden.has(p.userId) && (!f.favorites || favs.has(p.userId)))
     .map((p) => {
       const km = visibleKm(me, p);
       const on = isOnline(p.userId);

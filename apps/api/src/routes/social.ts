@@ -14,6 +14,7 @@ import { myRecentToque } from "./toques.js";
 import { pushTo } from "../push.js";
 import { APP_NAME } from "../brand.js";
 import { EXPIRING_GRACE_MS, EXPIRING_SECONDS } from "../expiring.js";
+import { isUrgent, notifyModeratorsUrgent, REPORT_REASONS } from "../moderation.js";
 
 const { profile, photo, block, report, conversation, directMessage } = schema;
 
@@ -324,7 +325,7 @@ socialRoutes.delete("/blocks/:userId", async (c) => {
 
 // ---------- Reportes ----------
 
-export const REPORT_REASONS = ["spam", "acoso", "menor de edad", "fotos inapropiadas", "perfil falso", "otro"] as const;
+export { REPORT_REASONS } from "../moderation.js";
 
 socialRoutes.post("/reports", async (c) => {
   const me = c.get("user");
@@ -357,5 +358,7 @@ socialRoutes.post("/reports", async (c) => {
     if (!ok) throw new HTTPException(400, { message: "Ese mensaje no corresponde a este reporte" });
   }
   await db.insert(report).values({ id: newId(), reporterId: me.id, targetUserId: userId, ...rest });
+  // Lo urgente (menores, contenido íntimo sin consentimiento, amenazas) le avisa a moderación al instante
+  if (isUrgent(rest.reason)) notifyModeratorsUrgent().catch((e) => console.error("notifyModeratorsUrgent", e));
   return c.json({ ok: true });
 });

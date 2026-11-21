@@ -12,4 +12,15 @@ export const PRONOUNS = ["él", "elle", "ella", "él/elle", "ella/elle"];
 export const HIV_STATUS = [
   "Negativo", "Negativo, con PrEP", "Positivo", "Positivo, indetectable", "Prefiero no decir",
 ];
-export const REPORT_REASONS = ["spam", "acoso", "menor de edad", "fotos inapropiadas", "perfil falso", "otro"] as const;
+/** Tiene que coincidir con apps/api/src/moderation.ts. Los tres primeros son urgentes (ver docs/MODERACION.md). */
+export const REPORT_REASONS = [
+  "menor de edad",
+  "contenido íntimo sin consentimiento",
+  "amenazas o violencia",
+  "acoso",
+  "fotos inapropiadas",
+  "perfil falso",
+  "spam",
+  "otro",
+] as const;
+export const URGENT_REASONS: readonly string[] = REPORT_REASONS.slice(0, 3);

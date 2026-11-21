@@ -11,6 +11,7 @@ import { pushEnabled, pushTo, vapidPublicKey } from "../push.js";
 import { APP_NAME } from "../brand.js";
 import { disconnectUser, emitToGroup } from "../realtime.js";
 import { deleteImage } from "../storage.js";
+import { autoHiddenUsers, isUrgent } from "../moderation.js";
 
 const { report, profile, session, groupMessage, directMessage, pushSubscription, user, group } = schema;
 
@@ -102,6 +103,7 @@ adminRoutes.get("/admin/reports", async (c) => {
     : [];
   const totalBy = new Map(totals.map((t) => [t.id, t.n]));
 
+  const hidden = await autoHiddenUsers();
   const out = [];
   for (const r of rows) {
     let message: { body: string | null; photo: boolean; deleted: boolean } | null = null;
@@ -126,8 +128,12 @@ adminRoutes.get("/admin/reports", async (c) => {
       target: people.get(r.targetUserId) ?? { id: r.targetUserId, name: "Cuenta borrada", age: 0, photo: null },
       targetSuspendedAt: suspended.get(r.targetUserId) ?? null,
       targetReportCount: totalBy.get(r.targetUserId) ?? 0,
+      urgent: isUrgent(r.reason),
+      targetAutoHidden: hidden.has(r.targetUserId),
     });
   }
+  // Lo urgente primero (menores, contenido íntimo sin consentimiento, amenazas); dentro de cada grupo, lo más nuevo
+  out.sort((a, b) => Number(b.urgent) - Number(a.urgent));
   return c.json(out);
 });
 
