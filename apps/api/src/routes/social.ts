@@ -15,6 +15,7 @@ import { pushTo } from "../push.js";
 import { APP_NAME } from "../brand.js";
 import { EXPIRING_GRACE_MS, EXPIRING_SECONDS } from "../expiring.js";
 import { deleteImageUnlessEvidence, isUrgent, notifyModeratorsUrgent, REPORT_REASONS } from "../moderation.js";
+import { limit } from "../ratelimit.js";
 
 const { profile, photo, block, report, conversation, directMessage } = schema;
 
@@ -162,6 +163,11 @@ socialRoutes.post("/conversations", async (c) => {
   const [p] = await db.select().from(profile).where(eq(profile.userId, userId));
   if (!p) throw new HTTPException(404, { message: "Perfil no disponible" });
   const key = pair(me.id, userId);
+  // Solo cuenta para el límite si es una charla nueva (abrir una que ya existe no suma)
+  const [existing] = await db.select({ id: conversation.id }).from(conversation)
+    .where(and(eq(conversation.userA, key.userA), eq(conversation.userB, key.userB)));
+  if (existing) return c.json({ id: existing.id });
+  limit(me.id, "newChat");
   await db.insert(conversation).values({ id: newId(), ...key }).onConflictDoNothing();
   const [conv] = await db
     .select()
@@ -204,6 +210,7 @@ socialRoutes.post("/conversations/:id/messages", async (c) => {
   let photoKey: string | null = null;
   let expiring = false;
   if ((c.req.header("content-type") ?? "").includes("multipart/form-data")) {
+    limit(me.id, "dmPhoto");
     const form = await c.req.parseBody();
     expiring = form.expiring === "1";
     const file = form.file;
@@ -215,6 +222,7 @@ socialRoutes.post("/conversations/:id/messages", async (c) => {
       throw new HTTPException(400, { message: "No pudimos leer esa imagen" });
     }
   } else {
+    limit(me.id, "dm");
     const r = z.object({ body: z.string().trim().min(1).max(2000) }).safeParse(await c.req.json());
     if (!r.success) throw new HTTPException(400, { message: "Mensaje vacío o demasiado largo" });
     body = r.data.body;
@@ -329,6 +337,7 @@ export { REPORT_REASONS } from "../moderation.js";
 
 socialRoutes.post("/reports", async (c) => {
   const me = c.get("user");
+  limit(me.id, "report");
   const r = z
     .object({
       userId: z.string(),

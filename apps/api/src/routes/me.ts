@@ -15,6 +15,7 @@ import { isAdmin } from "./admin.js";
 import { APP_NAME } from "../brand.js";
 import { expiringIsOver } from "../expiring.js";
 import { deleteImageUnlessEvidence, isEvidence } from "../moderation.js";
+import { limit } from "../ratelimit.js";
 import { TERMS_VERSION } from "../legal.js";
 
 const { profile, photo, user, group, groupMember, directMessage, conversation } = schema;
@@ -172,6 +173,7 @@ const MAX_ALBUM = 40;
 /** Subir una foto (al perfil o al álbum) o un video (solo al álbum). Se sube de a un archivo; la web manda varios seguidos. */
 meRoutes.post("/me/photos", requireUser, requireProfile, async (c) => {
   const u = c.get("user");
+  limit(u.id, "upload");
   const body = await c.req.parseBody();
   const file = body.file;
   if (!(file instanceof File)) throw new HTTPException(400, { message: "Falta el archivo" });
