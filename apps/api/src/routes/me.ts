@@ -60,9 +60,11 @@ meRoutes.get("/files/:key", requireUser, async (c) => {
   }
   // Foto de mensaje privado: solo las dos personas de la charla; si es temporal, solo quien la recibe tras abrirla
   const [dm] = await db.select().from(directMessage).where(eq(directMessage.photoKey, key));
-  // Archivo que ya no usa ningún mensaje ni perfil (desenviado, borrado): solo existe como prueba de un reporte,
+  // Foto de un grupo: la ve cualquiera con sesión, igual que el nombre del grupo al explorar
+  const [gr] = ph || dm ? [] : await db.select({ id: group.id }).from(group).where(eq(group.photoKey, key)).limit(1);
+  // Archivo que ya no usa ningún mensaje, perfil ni grupo (desenviado, borrado): solo existe como prueba de un reporte,
   // y solo moderación lo puede pedir
-  if (!ph && !dm && !(isAdmin(c.get("user")) && (await isEvidence(key)))) return c.notFound();
+  if (!ph && !dm && !gr && !(isAdmin(c.get("user")) && (await isEvidence(key)))) return c.notFound();
   if (dm) {
     const [conv] = await db.select().from(conversation).where(eq(conversation.id, dm.conversationId));
     const inConv = conv && (conv.userA === viewer || conv.userB === viewer);

@@ -155,6 +155,8 @@ export type MyGroup = {
   name: string;
   description: string | null;
   isGeneral: boolean;
+  /** Foto del grupo (miniatura). null: sin foto. */
+  photo: string | null;
   role: Role;
   memberCount: number;
   pendingCount: number;
@@ -164,6 +166,7 @@ export type GroupListing = {
   id: string;
   name: string;
   description: string | null;
+  photo: string | null;
   memberCount: number;
   role: Role | null;
   pending: boolean;
@@ -185,14 +188,14 @@ export type InviteState = "member" | "invited" | "requested" | "declined" | null
 /** Alguien para invitar a un grupo, de la lista larga (como la grilla de Gente). */
 export type InviteCandidate = Author & { online: boolean; distance: string | null; state: InviteState };
 export type InviteCandidates = { people: InviteCandidate[]; total: number; hasMore: boolean; hasLocation: boolean };
-export type InvitableGroup = { id: string; name: string; state: InviteState };
+export type InvitableGroup = { id: string; name: string; photo: string | null; state: InviteState };
 /** Invitación pendiente de un grupo (la ven dueño y moderadores). */
 export type SentInvite = { id: string; createdAt: string; user: Author };
 /** Invitación que me mandaron. */
 export type MyInvite = {
   id: string;
   createdAt: string;
-  group: { id: string; name: string; description: string | null; memberCount: number };
+  group: { id: string; name: string; description: string | null; photo: string | null; memberCount: number };
   invitedBy: Author | null;
 };
 

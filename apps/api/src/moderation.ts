@@ -83,14 +83,16 @@ export async function deleteImageUnlessEvidence(key: string) {
   await deleteImage(key);
 }
 
-/** ¿El archivo lo sigue usando algo vivo (un mensaje o una foto de perfil/álbum)? */
+/** ¿El archivo lo sigue usando algo vivo (un mensaje, una foto de perfil/álbum o la foto de un grupo)? */
 async function stillInUse(key: string) {
   const [m] = await db.select({ id: schema.directMessage.id }).from(schema.directMessage)
     .where(eq(schema.directMessage.photoKey, key)).limit(1);
   if (m) return true;
   const [p] = await db.select({ id: schema.photo.id }).from(schema.photo)
     .where(or(eq(schema.photo.key, key), eq(schema.photo.posterKey, key))).limit(1);
-  return Boolean(p);
+  if (p) return true;
+  const [g] = await db.select({ id: schema.group.id }).from(schema.group).where(eq(schema.group.photoKey, key)).limit(1);
+  return Boolean(g);
 }
 
 /** Al descartar reportes: se borra la copia del texto y los archivos que ya nadie usa ni son prueba de otro reporte. */

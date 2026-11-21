@@ -5,6 +5,8 @@ import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { BackIcon, PlusIcon } from "../components/Icons";
 import { InvitePeopleSheet } from "../components/Invite";
+import { GroupPhotoSetting } from "../components/GroupPhoto";
+import { GroupAvatar } from "../components/GroupAvatar";
 
 export function GroupInfo() {
   const { id = "" } = useParams();
@@ -80,6 +82,11 @@ export function GroupInfo() {
         <button className="iconbtn" onClick={() => nav(`/grupos/${id}`)} aria-label="Volver al chat"><BackIcon /></button>
         <h1 className="topbar__title topbar__title--sm">{info.isGeneral ? "# " : ""}{info.name}</h1>
       </header>
+
+      <section className="section group-head">
+        <GroupAvatar name={info.name} photo={info.photo} general={info.isGeneral} size="big" />
+        {isOwner && !info.isGeneral && <GroupPhotoSetting groupId={id} photo={info.photo} onChange={(photo) => setInfo({ ...info, photo })} />}
+      </section>
 
       <section className="section">
         {info.description && <p className="profile__about">{info.description}</p>}

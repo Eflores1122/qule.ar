@@ -190,6 +190,8 @@ export const group = pgTable("group", {
   description: text("description"),
   ownerId: text("owner_id").references(() => user.id, { onDelete: "set null" }),
   isGeneral: boolean("is_general").notNull().default(false),
+  // Foto del grupo (la pone el dueño). El general no tiene: muestra el logo de la app.
+  photoKey: text("photo_key"),
   spamRules: jsonb("spam_rules").$type<SpamRules>().notNull().default(DEFAULT_SPAM_RULES),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
