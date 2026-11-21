@@ -97,7 +97,12 @@ export const photo = pgTable("photo", {
   posterKey: text("poster_key"),
   seconds: integer("seconds"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [index("photo_user_idx").on(t.userId, t.position)]);
+}, (t) => [
+  index("photo_user_idx").on(t.userId, t.position),
+  // /files/:key busca la foto por archivo en cada imagen que se muestra
+  index("photo_key_idx").on(t.key),
+  index("photo_poster_key_idx").on(t.posterKey),
+]);
 
 /** A quién le compartiste tu álbum privado. Se puede revocar en cualquier momento. */
 export const albumGrant = pgTable("album_grant", {
@@ -127,7 +132,7 @@ export const block = pgTable("block", {
   blockerId: text("blocker_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   blockedId: text("blocked_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [primaryKey({ columns: [t.blockerId, t.blockedId] })]);
+}, (t) => [primaryKey({ columns: [t.blockerId, t.blockedId] }), index("block_blocked_idx").on(t.blockedId)]);
 
 export const report = pgTable("report", {
   id: text("id").primaryKey(),
@@ -201,7 +206,7 @@ export const groupMember = pgTable("group_member", {
   // Silenciado: no llegan avisos de mensajes nuevos (las respuestas a tus mensajes sí)
   muted: boolean("muted").notNull().default(false),
   joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [primaryKey({ columns: [t.groupId, t.userId] })]);
+}, (t) => [primaryKey({ columns: [t.groupId, t.userId] }), index("group_member_user_idx").on(t.userId)]);
 
 /**
  * Solicitudes de ingreso. Nadie puede meter a otra persona en un grupo: se entra pidiendo o aceptando una invitación (group_invite).
@@ -262,7 +267,7 @@ export const conversation = pgTable("conversation", {
   userB: text("user_b").notNull().references(() => user.id, { onDelete: "cascade" }),
   lastMessageAt: timestamp("last_message_at", { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [uniqueIndex("conv_pair_idx").on(t.userA, t.userB)]);
+}, (t) => [uniqueIndex("conv_pair_idx").on(t.userA, t.userB), index("conv_user_b_idx").on(t.userB)]);
 
 export const directMessage = pgTable("direct_message", {
   id: text("id").primaryKey(),
@@ -276,7 +281,11 @@ export const directMessage = pgTable("direct_message", {
   openedAt: timestamp("opened_at", { withTimezone: true }),
   readAt: timestamp("read_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [index("dm_conv_idx").on(t.conversationId, t.createdAt)]);
+}, (t) => [
+  index("dm_conv_idx").on(t.conversationId, t.createdAt),
+  // /files/:key busca si el archivo es foto de un mensaje privado
+  index("dm_photo_key_idx").on(t.photoKey),
+]);
 
 // ---------- Toques y reacciones ----------
 
