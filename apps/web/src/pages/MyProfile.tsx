@@ -189,7 +189,7 @@ function isHeicPhoto(file: File, bytes: ArrayBuffer): boolean {
     || /\.hei[cf]$/i.test(file.name);
 }
 
-async function preparePhotoForUpload(file: File): Promise<File> {
+export async function preparePhotoForUpload(file: File): Promise<File> {
   if (file.size > MAX_PHOTO_BYTES) throw new Error("La foto pesa demasiado (máx. 12 MB)");
   // El selector puede entregar un archivo respaldado por un proveedor de fotos en la nube.
   // Leemos sus bytes antes de que el navegador intente enviarlo como parte del formulario.

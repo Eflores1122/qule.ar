@@ -83,14 +83,16 @@ export async function deleteImageUnlessEvidence(key: string) {
   await deleteImage(key);
 }
 
-/** ¿El archivo lo sigue usando algo vivo (un mensaje o una foto de perfil/álbum)? */
+/** ¿El archivo lo sigue usando algo vivo (un mensaje, una foto de perfil/álbum o la foto de un grupo)? */
 async function stillInUse(key: string) {
   const [m] = await db.select({ id: schema.directMessage.id }).from(schema.directMessage)
     .where(eq(schema.directMessage.photoKey, key)).limit(1);
   if (m) return true;
   const [p] = await db.select({ id: schema.photo.id }).from(schema.photo)
     .where(or(eq(schema.photo.key, key), eq(schema.photo.posterKey, key))).limit(1);
-  return Boolean(p);
+  if (p) return true;
+  const [g] = await db.select({ id: schema.group.id }).from(schema.group).where(eq(schema.group.photoKey, key)).limit(1);
+  return Boolean(g);
 }
 
 /** Al descartar reportes: se borra la copia del texto y los archivos que ya nadie usa ni son prueba de otro reporte. */
@@ -136,8 +138,11 @@ export const REMOVED_GROUP_DAYS = 90;
 
 /** Borra del todo los grupos dados de baja hace más de REMOVED_GROUP_DAYS (sus reportes conservan la copia). */
 export async function purgeRemovedGroups() {
-  await db.delete(schema.group)
-    .where(sql`${schema.group.removedAt} < now() - make_interval(days => ${REMOVED_GROUP_DAYS})`);
+  const gone = await db.delete(schema.group)
+    .where(sql`${schema.group.removedAt} < now() - make_interval(days => ${REMOVED_GROUP_DAYS})`)
+    .returning({ photoKey: schema.group.photoKey });
+  // La foto del grupo se guardó con él como prueba; ahora se borra, salvo que sea prueba de un reporte
+  for (const g of gone) if (g.photoKey) await deleteImageUnlessEvidence(g.photoKey);
 }
 
 // ---------- Alertas automáticas: señales de menores en nombres y descripciones ----------

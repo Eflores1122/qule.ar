@@ -4,6 +4,7 @@ import { api, getSocket, type GroupInfo, type GroupMessage, type ReactionEvent }
 import { myReaction, ReactionBar, ReactionPicker } from "../components/Reactions";
 import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
+import { GroupAvatar } from "../components/GroupAvatar";
 import { BackIcon, ClockIcon, DotsIcon, InfoIcon, SendIcon } from "../components/Icons";
 import { JoinButton } from "../components/JoinButton";
 import { ReportDialog } from "../components/ReportDialog";
@@ -255,7 +256,7 @@ export function GroupChat() {
           <h1 className="topbar__title topbar__title--sm">{info.name}</h1>
         </header>
         <div className="preview">
-          <span className="gcard__icon gcard__icon--big" aria-hidden>{info.name.charAt(0).toUpperCase()}</span>
+          <GroupAvatar name={info.name} photo={info.photo} general={info.isGeneral} size="big" />
           <h2>{info.name}</h2>
           {info.description && <p className="muted group-description">{info.description}</p>}
           <p className="muted small">{info.memberCount} {info.memberCount === 1 ? "miembro" : "miembros"} · {rulesText}</p>
@@ -277,6 +278,7 @@ export function GroupChat() {
   return (
     <div className="chat">
       <header className="topbar">
+        <GroupAvatar name={info.name} photo={info.photo} general={info.isGeneral} size="sm" />
         <div className="topbar__grow">
           <h1 className="topbar__title topbar__title--sm"><Link to={`/grupos/${id}/info`}>{info.isGeneral ? "# " : ""}{info.name}</Link></h1>
           <p className="topbar__sub"><ClockIcon /> {rulesText}</p>

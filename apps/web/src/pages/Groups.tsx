@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { api, getSocket, ROLE_LABEL, type GroupListing, type MyGroup, type MyInvite } from "../api";
+import { api, getSocket, ROLE_LABEL, upload, type GroupListing, type MyGroup, type MyInvite } from "../api";
+import { GroupAvatar } from "../components/GroupAvatar";
+import { PhotoPicker } from "../components/GroupPhoto";
+import { preparePhotoForUpload } from "./MyProfile";
 import { PlusIcon } from "../components/Icons";
 import { MyInvites } from "../components/Invite";
 import { JoinButton } from "../components/JoinButton";
@@ -64,7 +67,7 @@ export function Groups() {
           {mine?.map((g) => (
             <li key={g.id}>
               <Link to={`/grupos/${g.id}`} className="gcard">
-                <span className={`gcard__icon ${g.isGeneral ? "gcard__icon--general" : ""}`} aria-hidden>{g.isGeneral ? "#" : g.name.charAt(0).toUpperCase()}</span>
+                <GroupAvatar name={g.name} photo={g.photo} general={g.isGeneral} />
                 <div className="gcard__text">
                   <div className="gcard__top">
                     <b>{g.name}</b>
@@ -98,7 +101,7 @@ export function Groups() {
             <ul className="glist">
               {all?.map((g) => (
                 <li key={g.id} className="gcard gcard--static">
-                  <span className="gcard__icon" aria-hidden>{g.name.charAt(0).toUpperCase()}</span>
+                  <GroupAvatar name={g.name} photo={g.photo} />
                   <div className="gcard__text">
                     <Link className="gcard__details" to={`/grupos/${g.id}${g.role ? "/info" : ""}`}>
                       <b>{g.name}</b>
@@ -129,6 +132,7 @@ function CreateGroup({ onClose }: { onClose: () => void }) {
   const nav = useNavigate();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [photo, setPhoto] = useState<File | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -138,6 +142,8 @@ function CreateGroup({ onClose }: { onClose: () => void }) {
     setError("");
     try {
       const { id } = await api<{ id: string }>("/groups", { method: "POST", json: { name, description: description || null } });
+      // El grupo ya está creado: si la foto falla, se puede volver a poner desde la info del grupo
+      if (photo) await upload(`/groups/${id}/photo`, await preparePhotoForUpload(photo)).catch(() => {});
       nav(`/grupos/${id}`);
     } catch (err) {
       setError((err as Error).message);
@@ -149,6 +155,7 @@ function CreateGroup({ onClose }: { onClose: () => void }) {
     <div className="sheet-backdrop" onClick={onClose}>
       <form className="sheet" role="dialog" aria-modal aria-labelledby="create-title" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <h2 id="create-title">Crear un grupo</h2>
+        <PhotoPicker name={name || "?"} file={photo} onPick={setPhoto} />
         <label className="field">
           <span>Nombre</span>
           <input className="input" required minLength={3} maxLength={40} value={name} onChange={(e) => setName(e.target.value)} autoFocus />

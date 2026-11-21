@@ -7,7 +7,9 @@ import { db, schema } from "../db/index.js";
 import { DEFAULT_SPAM_RULES } from "../db/schema.js";
 import { ageFrom, authorsFor, blockedWith, newId, requireProfile, requireUser, thumbUrl, type AppEnv } from "../lib.js";
 import { distanceLabel, visibleKm } from "../geo.js";
-import { autoHiddenGroups, autoHiddenUsers, forbiddenGroupText, groupIsEvidence, reportMinorGroupAttempt } from "../moderation.js";
+import { autoHiddenGroups, autoHiddenUsers, deleteImageUnlessEvidence, forbiddenGroupText, groupIsEvidence, reportMinorGroupAttempt } from "../moderation.js";
+import { limit } from "../ratelimit.js";
+import { MAX_UPLOAD_BYTES, saveImage } from "../storage.js";
 import { emitToGroup, emitToUser, isOnline, serializeGroupMessages, syncGroupRoom } from "../realtime.js";
 import { pushTo } from "../push.js";
 import { notifyGroupMessage } from "../groupNotify.js";
@@ -176,7 +178,7 @@ async function closeGroup(groupId: string, reason: string) {
 groupRoutes.get("/groups", async (c) => {
   const u = c.get("user");
   const rows = await db
-    .select({ id: group.id, name: group.name, description: group.description, isGeneral: group.isGeneral, role: groupMember.role })
+    .select({ id: group.id, name: group.name, description: group.description, isGeneral: group.isGeneral, photoKey: group.photoKey, role: groupMember.role })
     .from(groupMember)
     .innerJoin(group, eq(group.id, groupMember.groupId))
     .where(and(eq(groupMember.userId, u.id), isNull(group.removedAt)))
@@ -184,7 +186,7 @@ groupRoutes.get("/groups", async (c) => {
   const ids = rows.map((r) => r.id);
   const counts = await memberCounts(ids);
   const pending = await pendingCounts(rows.filter((r) => canModerate(r.role)).map((r) => r.id));
-  return c.json(rows.map((r) => ({ ...r, memberCount: counts.get(r.id) ?? 0, pendingCount: pending.get(r.id) ?? 0 })));
+  return c.json(rows.map(({ photoKey, ...r }) => ({ ...r, photo: thumbUrl(photoKey), memberCount: counts.get(r.id) ?? 0, pendingCount: pending.get(r.id) ?? 0 })));
 });
 
 /** Todos los grupos, para explorar y pedir ingreso. */
@@ -207,6 +209,7 @@ groupRoutes.get("/groups/all", async (c) => {
     id: g.id,
     name: g.name,
     description: g.description,
+    photo: thumbUrl(g.photoKey),
     memberCount: counts.get(g.id) ?? 0,
     role: roles.get(g.id) ?? null,
     pending: states.get(g.id)?.pending ?? false,
@@ -245,6 +248,7 @@ groupRoutes.get("/groups/:id", async (c) => {
     id: g.id,
     name: g.name,
     description: g.description,
+    photo: thumbUrl(g.photoKey),
     isGeneral: g.isGeneral,
     rules: g.spamRules,
     role: member?.role ?? null,
@@ -284,6 +288,40 @@ groupRoutes.patch("/groups/:id", async (c) => {
     })
     .where(eq(group.id, g.id));
   return c.json({ ok: true });
+});
+
+/** Poner o cambiar la foto del grupo (solo el dueño; el general muestra el logo de la app). */
+groupRoutes.post("/groups/:id/photo", async (c) => {
+  const u = c.get("user");
+  const { group: g, member } = await membership(c.req.param("id"), u.id);
+  if (g.isGeneral) throw new HTTPException(400, { message: "El chat general usa el logo de la app" });
+  if (member?.role !== "owner") throw new HTTPException(403, { message: "Solo el dueño puede cambiar la foto del grupo" });
+  limit(u.id, "upload");
+  const file = (await c.req.parseBody()).file;
+  if (!(file instanceof File)) throw new HTTPException(400, { message: "Falta la foto" });
+  if (file.type.startsWith("video/")) throw new HTTPException(400, { message: "La foto del grupo no puede ser un video" });
+  if (file.size > MAX_UPLOAD_BYTES) throw new HTTPException(413, { message: "La foto pesa demasiado (máx. 12 MB)" });
+  let key: string;
+  try {
+    key = await saveImage(await file.arrayBuffer());
+  } catch {
+    throw new HTTPException(400, { message: "No pudimos leer esa imagen" });
+  }
+  await db.update(group).set({ photoKey: key }).where(eq(group.id, g.id));
+  if (g.photoKey) await deleteImageUnlessEvidence(g.photoKey);
+  return c.json({ photo: thumbUrl(key) });
+});
+
+/** Sacar la foto del grupo (vuelve a mostrar la inicial). */
+groupRoutes.delete("/groups/:id/photo", async (c) => {
+  const u = c.get("user");
+  const { group: g, member } = await membership(c.req.param("id"), u.id);
+  if (member?.role !== "owner") throw new HTTPException(403, { message: "Solo el dueño puede cambiar la foto del grupo" });
+  if (g.photoKey) {
+    await db.update(group).set({ photoKey: null }).where(eq(group.id, g.id));
+    await deleteImageUnlessEvidence(g.photoKey);
+  }
+  return c.json({ photo: null });
 });
 
 groupRoutes.delete("/groups/:id", async (c) => {
@@ -455,14 +493,14 @@ groupRoutes.get("/groups/invitable/:uid", async (c) => {
   const u = c.get("user");
   const target = c.req.param("uid");
   const rows = await db
-    .select({ id: group.id, name: group.name })
+    .select({ id: group.id, name: group.name, photoKey: group.photoKey })
     .from(groupMember)
     .innerJoin(group, eq(group.id, groupMember.groupId))
     .where(and(eq(groupMember.userId, u.id), inArray(groupMember.role, ["owner", "moderator"]), eq(group.isGeneral, false), isNull(group.removedAt)))
     .orderBy(asc(group.name));
   if (target === u.id || (await blockedWith(u.id)).has(target)) return c.json([]);
   const states = await inviteStateFor(target, rows.map((r) => r.id));
-  return c.json(rows.map((r) => ({ ...r, state: states.get(r.id) ?? null })));
+  return c.json(rows.map(({ photoKey, ...r }) => ({ ...r, photo: thumbUrl(photoKey), state: states.get(r.id) ?? null })));
 });
 
 groupRoutes.post("/groups/:id/invites", async (c) => {
@@ -630,7 +668,7 @@ groupRoutes.delete("/groups/:id/invites/:iid", async (c) => {
 groupRoutes.get("/invites", requireUser, requireProfile, async (c) => {
   const u = c.get("user");
   const rows = await db
-    .select({ id: groupInvite.id, invitedBy: groupInvite.invitedBy, createdAt: groupInvite.createdAt, groupId: group.id, name: group.name, description: group.description })
+    .select({ id: groupInvite.id, invitedBy: groupInvite.invitedBy, createdAt: groupInvite.createdAt, groupId: group.id, name: group.name, description: group.description, photoKey: group.photoKey })
     .from(groupInvite)
     .innerJoin(group, eq(group.id, groupInvite.groupId))
     .where(and(eq(groupInvite.userId, u.id), eq(groupInvite.status, "pending"), isNull(group.removedAt)))
@@ -642,7 +680,7 @@ groupRoutes.get("/invites", requireUser, requireProfile, async (c) => {
   return c.json(visible.map((r) => ({
     id: r.id,
     createdAt: r.createdAt.toISOString(),
-    group: { id: r.groupId, name: r.name, description: r.description, memberCount: counts.get(r.groupId) ?? 0 },
+    group: { id: r.groupId, name: r.name, description: r.description, photo: thumbUrl(r.photoKey), memberCount: counts.get(r.groupId) ?? 0 },
     invitedBy: (r.invitedBy && authors.get(r.invitedBy)) || null,
   })));
 });

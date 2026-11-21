@@ -288,7 +288,14 @@ html:has(.nearby-page), .nearby-page { overscroll-behavior-y: none; }
 .gcard { display: flex; align-items: center; gap: 12px; padding: 12px 16px; }
 a.gcard:hover { background: var(--surface); }
 .gcard__icon { width: 48px; height: 48px; border-radius: var(--radius-xl); flex: none; display: grid; place-items: center; font-family: var(--display); font-weight: 800; font-size: var(--title-xs); background: var(--surface-3); color: var(--text); }
-.gcard__icon--general { background: var(--accent); color: var(--accent-ink); }
+.gcard__icon--photo { object-fit: cover; }
+.gcard__icon--logo { display: flex; align-items: center; justify-content: center; background: var(--surface-3); }
+.gcard__icon--logo img { width: 76%; height: 76%; object-fit: contain; }
+.group-head { display: flex; gap: 16px; align-items: center; }
+.group-photo { display: flex; align-items: center; gap: 12px; }
+.group-photo__actions { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.group-photo__actions .row { justify-content: flex-start; align-items: center; }
+.group-photo__actions .row > .btn { flex: none; }
 .gcard__icon--big { width: 72px; height: 72px; font-size: var(--title-2xl); border-radius: var(--radius-3xl); }
 .gcard__text { flex: 1; min-width: 0; }
 .gcard__details { display: block; }
