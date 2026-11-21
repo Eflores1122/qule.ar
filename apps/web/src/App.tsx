@@ -9,6 +9,7 @@ import { TermsBanner } from "./components/TermsBanner";
 import { Legal } from "./pages/Legal";
 import { Wordmark } from "./components/Wordmark";
 import { Logo } from "./components/Logo";
+import { TAB_PATHS, useTabSwipe } from "./features/navigation/useTabSwipe";
 import { APP_NAME } from "./brand";
 import { ForgotPassword, ResetPassword } from "./pages/Password";
 import { Onboarding } from "./pages/Onboarding";
@@ -18,7 +19,9 @@ import { GroupInfo } from "./pages/GroupInfo";
 import { Inbox } from "./pages/Inbox";
 import { Conversation } from "./pages/Conversation";
 import { ProfilePage } from "./pages/Profile";
-import { MyProfile } from "./pages/MyProfile";
+import { EditProfile } from "./pages/MyProfile";
+import { MyProfileOverview } from "./pages/MyProfileOverview";
+import { Settings } from "./pages/Settings";
 import { ChatIcon, GridIcon, GroupIcon, UserIcon } from "./components/Icons";
 import { Nearby } from "./pages/Nearby";
 import { Favorites, Toques, Views } from "./pages/People";
@@ -70,7 +73,9 @@ export function App() {
           <Route path="/mensajes" element={<Inbox />} />
           <Route path="/mensajes/:id" element={<Conversation />} />
           <Route path="/perfil/:id" element={<ProfilePage />} />
-          <Route path="/yo" element={<MyProfile />} />
+          <Route path="/yo" element={<MyProfileOverview />} />
+          <Route path="/yo/editar" element={<EditProfile />} />
+          <Route path="/yo/configuracion" element={<Settings />} />
           <Route path="/visitas" element={<Views />} />
           <Route path="/favoritos" element={<Favorites />} />
           <Route path="/toques" element={<Toques />} />
@@ -89,8 +94,7 @@ function RequireAuth({ children, needProfile }: { children: React.ReactNode; nee
   if (!me) return <Navigate to="/entrar" replace state={{ from: loc.pathname }} />;
   if (me.profile?.suspendedAt) return <Suspended />;
   if (needProfile && !me.profile) return <Navigate to="/bienvenida" replace />;
-  // Recién completó el alta: lo llevamos a su perfil para que suba fotos
-  if (!needProfile && me.profile && loc.pathname === "/bienvenida") return <Navigate to="/yo?nuevo=1" replace />;
+  if (!needProfile && me.profile && loc.pathname === "/bienvenida") return <Navigate to="/yo/editar?nuevo=1" replace />;
   return <>{children}</>;
 }
 
@@ -128,6 +132,7 @@ function Shell() {
   const [pending, setPending] = useState(0);
   const [toast, setToast] = useState<Toast | null>(null);
   const loc = useLocation();
+  const { main, enabled: canSwipeTabs, ...swipeHandlers } = useTabSwipe();
   const { me } = useMe();
 
   // Si compartiste tu ubicación, se mantiene al día mientras usás la app (por si te moviste o te fuiste de viaje)
@@ -200,14 +205,16 @@ function Shell() {
 
   // En una conversación abierta, la barra de abajo se esconde para dejar lugar al teclado
   const inThread = /^\/mensajes\/.+/.test(loc.pathname);
+  const inMyProfile = /^\/yo(?:\/|$)/.test(loc.pathname);
+  const nearbyEntry = loc.pathname.startsWith("/perfil/") ? loc.state?.nearbyEntry : undefined;
 
   return (
-    <div className={`shell ${inThread ? "shell--thread" : ""}`}>
-      <main className="shell__main">
+    <div className={`shell${inThread ? " shell--thread" : ""}${canSwipeTabs ? " shell--swipe" : ""}`}>
+      <main className="shell__main" ref={main} {...swipeHandlers}>
         <Outlet />
       </main>
       {!inThread && <TermsBanner />}
-      {!inThread && <NotifyBanner />}
+      {!inThread && !inMyProfile && <NotifyBanner />}
       {toast && (
         <div className="toast" role="status" key={toast.id}>
           {toast.to ? <NavLink to={toast.to} onClick={() => setToast(null)}>{toast.text} →</NavLink> : <span>{toast.text}</span>}
@@ -215,18 +222,18 @@ function Shell() {
       )}
       {!inThread && (
         <nav className="tabbar" aria-label="Secciones">
-          <NavLink to="/cerca" className="tabbar__item">
+          <NavLink to={TAB_PATHS[0]} state={nearbyEntry ? { nearbyEntry } : undefined} className="tabbar__item">
             <GridIcon /> <span>Gente</span>
           </NavLink>
-          <NavLink to="/grupos" className="tabbar__item">
+          <NavLink to={TAB_PATHS[1]} className="tabbar__item">
             <GroupIcon /> <span>Grupos</span>
             {pending > 0 && <b className="badge">{pending > 99 ? "99+" : pending}</b>}
           </NavLink>
-          <NavLink to="/mensajes" className="tabbar__item">
+          <NavLink to={TAB_PATHS[2]} className="tabbar__item">
             <ChatIcon /> <span>Mensajes</span>
             {unread > 0 && <b className="badge">{unread > 99 ? "99+" : unread}</b>}
           </NavLink>
-          <NavLink to="/yo" className="tabbar__item">
+          <NavLink to={TAB_PATHS[3]} className="tabbar__item">
             <UserIcon /> <span>Yo</span>
           </NavLink>
         </nav>

@@ -3,11 +3,13 @@ import type { Server as HttpServer } from "node:http";
 import path from "node:path";
 import { serve } from "@hono/node-server";
 import { serveStatic } from "@hono/node-server/serve-static";
-import { eq, or, sql } from "drizzle-orm";
+import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { auth } from "./auth.js";
 import { closeDb, db, runMigrations, schema } from "./db/index.js";
+import { encryptLegacyHealth } from "./db/health.js";
+import { checkDataKey } from "./crypt.js";
 import { env } from "./env.js";
 import { APP_NAME } from "./brand.js";
 import type { AppEnv } from "./lib.js";
@@ -21,23 +23,22 @@ import { adminRoutes } from "./routes/admin.js";
 import { toqueRoutes } from "./routes/toques.js";
 import { securityHeaders } from "./security.js";
 import { sweepExpiredPhotos } from "./expiring.js";
-import { checkDataKey } from "./crypt.js";
+import { purgeRemovedGroups, scanExistingGroups } from "./moderation.js";
 
 checkDataKey();
 await runMigrations();
-
-// Datos de salud guardados antes del cifrado: se cifran una sola vez (ver src/crypt.ts)
-{
-  const p = schema.profile;
-  const legacy = await db.select({ id: p.userId, hivStatus: p.hivStatus, lastTested: p.lastTested }).from(p)
-    .where(or(sql`${p.hivStatus} not like 'v1:%'`, sql`${p.lastTested} not like 'v1:%'`));
-  for (const { id, ...health } of legacy) await db.update(p).set(health).where(eq(p.userId, id));
-  if (legacy.length) console.log(`Datos de salud cifrados: ${legacy.length} perfiles`);
-}
+const encryptedProfiles = await encryptLegacyHealth(db);
+if (encryptedProfiles) console.log(`Datos de salud cifrados: ${encryptedProfiles} perfiles`);
 
 // Fotos temporales ya vistas: se borran al arrancar (por si el API se reinició justo después de abrir una) y cada minuto
 await sweepExpiredPhotos().catch((e) => console.error("sweepExpiredPhotos", e));
 setInterval(() => sweepExpiredPhotos().catch((e) => console.error("sweepExpiredPhotos", e)), 60_000).unref();
+
+// Grupos dados de baja hace más de 90 días: se borran del todo (sus reportes conservan la copia)
+await purgeRemovedGroups().catch((e) => console.error("purgeRemovedGroups", e));
+// Grupos que ya existían con nombres que ahora no se permiten: van a moderación (no se repite si ya se revisó)
+await scanExistingGroups().catch((e) => console.error("scanExistingGroups", e));
+setInterval(() => purgeRemovedGroups().catch((e) => console.error("purgeRemovedGroups", e)), 6 * 3_600_000).unref();
 
 // El chat general existe siempre
 const [general] = await db.select().from(schema.group).where(eq(schema.group.isGeneral, true));

@@ -52,7 +52,9 @@ GOOGLE_CLIENT_SECRET=
 
 Protegelo: `chmod 600 /opt/mortero/app.env`.
 
-**Guardá `DATA_KEY` fuera del servidor** (en el mismo gestor de contraseñas que la de los backups). Sin ella, el estado serológico de la base y de los backups no se puede leer. No la cambies una vez en uso: los datos cifrados con la anterior dejarían de leerse.
+**Antes de actualizar a una versión con la migración `0016_cifrar_salud`**, agregá `DATA_KEY` en `~/mortero/app.env` (o la ruta de `app.env` de tu instalación). Usá una clave de 32 bytes en base64, generada con `openssl rand -base64 32`, y guardala fuera del servidor junto con las claves de recuperación. Los backups anteriores a esta migración pueden contener los datos de salud en claro. Los posteriores necesitan `DATA_KEY` para leer esos campos.
+
+Si necesitás volver a una versión anterior al cifrado, restaurá también la base del backup previo a la actualización. La imagen anterior espera una fecha sin cifrar en `last_tested`. Conservá la clave para las copias tomadas después de cifrar.
 
 ## 3. Base de datos
 

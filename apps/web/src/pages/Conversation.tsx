@@ -5,11 +5,13 @@ import { myReaction, ReactionBar, ReactionPicker } from "../components/Reactions
 import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { BackIcon, ImageIcon, LockIcon, SendIcon, TimerIcon } from "../components/Icons";
+import { useSectionBack } from "../useSectionBack";
 
 export function Conversation() {
   const { id = "" } = useParams();
   const { me } = useMe();
   const nav = useNavigate();
+  const goBack = useSectionBack("/mensajes");
   const [other, setOther] = useState<Author | null>(null);
   const [messages, setMessages] = useState<Dm[]>([]);
   const [text, setText] = useState("");
@@ -20,6 +22,7 @@ export function Conversation() {
   const [msgMenu, setMsgMenu] = useState<string | null>(null);
   const [viewer, setViewer] = useState<{ src: string; seconds: number } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const stickToBottom = useRef(true);
   const fileRef = useRef<HTMLInputElement>(null);
   const expiringNext = useRef(false);
   const typingTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -100,6 +103,21 @@ export function Conversation() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [messages, typing]);
 
+  useLayoutEffect(() => {
+    const list = listRef.current;
+    if (!list) return;
+    const observer = new ResizeObserver(() => {
+      if (stickToBottom.current) list.scrollTop = list.scrollHeight;
+    });
+    observer.observe(list);
+    return () => observer.disconnect();
+  }, []);
+
+  function onListScroll(event: React.UIEvent<HTMLDivElement>) {
+    const list = event.currentTarget;
+    stickToBottom.current = list.scrollHeight - list.scrollTop - list.clientHeight < 2;
+  }
+
   function onType(v: string) {
     setText(v);
     if (v.trim()) getSocket().emit("dm:typing", { conversationId: id });
@@ -161,7 +179,7 @@ export function Conversation() {
   return (
     <div className="chat">
       <header className="topbar topbar--thread">
-        <button className="iconbtn" onClick={() => nav("/mensajes")} aria-label="Volver"><BackIcon /></button>
+        <button className="iconbtn" onClick={goBack} aria-label="Volver"><BackIcon /></button>
         {other && (
           <Link to={`/perfil/${other.id}`} className="topbar__who">
             <Avatar src={other.photo} name={other.name} size={36} />
@@ -173,7 +191,7 @@ export function Conversation() {
         )}
       </header>
 
-      <div className="chat__list chat__list--dm" ref={listRef} onClick={() => setMsgMenu(null)}>
+      <div className="chat__list chat__list--dm" ref={listRef} onScroll={onListScroll} onClick={() => setMsgMenu(null)}>
         {messages.map((m) => {
           const mine = m.senderId === myId;
           return (

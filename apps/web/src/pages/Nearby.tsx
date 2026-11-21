@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type TouchEvent } from "react";
 import { InstallBanner } from "../components/InstallBanner";
-import { Link } from "react-router";
+import { Link, useLocation } from "react-router";
 import { api, type NearbyPerson } from "../api";
 import { useMe } from "../App";
-import { FilterIcon, PinIcon, StarIcon } from "../components/Icons";
+import { CheckIcon, FilterIcon, PinIcon, RefreshIcon, StarIcon } from "../components/Icons";
 import { LOCATION_EVENT, shareLocation } from "../location";
 import { BODY_TYPES, LOOKING_FOR, POSITIONS, RELATIONSHIP, TRIBES } from "../options";
 
@@ -64,9 +64,18 @@ export function countFilters(f: Filters) {
 
 type Status = "loading" | "ready" | "error";
 type LocState = "none" | "asking" | "denied" | "unsupported" | "ok";
+const REFRESH_DISTANCE = 100;
+type NearbyPage = { hasLocation: boolean; people: NearbyPerson[]; hasMore: boolean };
+type NearbyPosition = { userId: string; query: string; top: number; count: number };
+
+// Guarda las posiciones recientes por entrada del historial, sin guardar los perfiles.
+const positions = new Map<string, NearbyPosition>();
+const POSITION_LIMIT = 20;
 
 export function Nearby() {
   const { me, reload } = useMe();
+  const { key: entry, state } = useLocation();
+  const userId = me?.user.id;
   const [filters, setFilters] = useState<Filters>(loadFilters);
   const [people, setPeople] = useState<NearbyPerson[]>([]);
   const [hasMore, setHasMore] = useState(false);
@@ -74,20 +83,127 @@ export function Nearby() {
   const [loc, setLoc] = useState<LocState>("ok");
   const [showFilters, setShowFilters] = useState(false);
   const [updating, setUpdating] = useState<"idle" | "busy" | "done">("idle");
+  const [refreshDistance, setRefreshDistance] = useState(0);
+  const [refreshError, setRefreshError] = useState(false);
+  const [pullDistance, setPullDistance] = useState(0);
+  const pageRef = useRef<HTMLDivElement>(null);
+  const requestRef = useRef<AbortController | null>(null);
+  const pull = useRef<{ x: number; y: number; distance: number } | null>(null);
+  // Al volver de un perfil, la grilla vuelve a la misma posición (y carga las páginas que hagan falta)
+  const [returnPosition] = useState(() => {
+    const previousEntry = typeof state?.nearbyEntry === "string" ? state.nearbyEntry : entry;
+    const saved = positions.get(entry) ?? positions.get(previousEntry);
+    return saved && saved.userId === userId && saved.query === toQuery(filters, 0) ? saved : undefined;
+  });
+  const pendingRestore = useRef(returnPosition);
+  const visible = useRef({ count: 0, ready: false });
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
 
-  const load = useCallback(async (f: Filters, offset = 0) => {
+  useLayoutEffect(() => {
+    visible.current = { count: people.length, ready: status === "ready" };
+    if (status === "ready" && pendingRestore.current && pageRef.current) {
+      pageRef.current.scrollTop = pendingRestore.current.top;
+      pendingRestore.current = undefined;
+    }
+  }, [people, status]);
+
+  useLayoutEffect(() => {
+    const page = pageRef.current;
+    return () => {
+      const { count, ready } = visible.current;
+      if (page && userId && ready) {
+        positions.delete(entry);
+        positions.set(entry, { userId, query: toQuery(filtersRef.current, 0), top: page.scrollTop, count });
+        if (positions.size > POSITION_LIMIT) {
+          const oldest = positions.keys().next().value;
+          if (oldest !== undefined) positions.delete(oldest);
+        }
+      }
+    };
+  }, [entry, userId]);
+
+  const load = useCallback(async (f: Filters, offset = 0, releasedDistance = 0, restoreCount = 0) => {
+    requestRef.current?.abort();
+    const controller = new AbortController();
+    requestRef.current = controller;
+    const { signal } = controller;
+    const fetchPage = (start: number) => api<NearbyPage>(`/nearby?${toQuery(f, start)}`, { signal });
+    setRefreshDistance(releasedDistance);
+    setRefreshError(false);
     try {
-      const d = await api<{ hasLocation: boolean; people: NearbyPerson[]; hasMore: boolean }>(`/nearby?${toQuery(f, offset)}`);
+      const d = await fetchPage(offset);
+      const loaded = [...d.people];
+      let hasMore = d.hasMore;
+      while (hasMore && loaded.length < restoreCount) {
+        const next = await fetchPage(loaded.length);
+        loaded.push(...next.people);
+        hasMore = next.hasMore && next.people.length > 0;
+      }
+      if (signal.aborted) return;
       setLoc((prev) => (d.hasLocation ? "ok" : prev === "ok" ? "none" : prev));
-      setPeople((prev) => (offset ? [...prev, ...d.people] : d.people));
-      setHasMore(d.hasMore);
+      setPeople((prev) => (offset ? [...prev, ...loaded] : loaded));
+      setHasMore(hasMore);
       setStatus("ready");
     } catch {
-      setStatus("error");
+      if (controller.signal.aborted) return;
+      if (releasedDistance > 0) setRefreshError(true);
+      else setStatus("error");
+    } finally {
+      if (requestRef.current === controller) {
+        requestRef.current = null;
+        setRefreshDistance(0);
+      }
     }
   }, []);
+
+  const cancelPull = useCallback(() => {
+    pull.current = null;
+    setPullDistance(0);
+  }, []);
+
+  function startPull(event: TouchEvent<HTMLDivElement>) {
+    if (requestRef.current || showFilters || event.currentTarget.scrollTop > 0 || event.touches.length !== 1) {
+      cancelPull();
+      return;
+    }
+    const { clientX, clientY } = event.touches[0];
+    pull.current = { x: clientX, y: clientY, distance: 0 };
+  }
+
+  useEffect(() => {
+    const page = pageRef.current;
+    if (!page) return;
+
+    const movePull = (event: globalThis.TouchEvent) => {
+      const start = pull.current;
+      if (!start) return;
+      if (event.touches.length !== 1 || page.scrollTop > 0) {
+        cancelPull();
+        return;
+      }
+      const { clientX, clientY } = event.touches[0];
+      const down = clientY - start.y;
+      const sideways = Math.abs(clientX - start.x);
+      if (down < -8 || (sideways > 12 && sideways > down)) {
+        cancelPull();
+        return;
+      }
+      // Evita que el navegador convierta en scroll el movimiento de vuelta del mismo arrastre.
+      if ((start.distance > 0 || down > sideways) && event.cancelable) event.preventDefault();
+      start.distance = Math.max(0, Math.min(down, REFRESH_DISTANCE));
+      setPullDistance(start.distance);
+    };
+
+    page.addEventListener("touchmove", movePull, { passive: false });
+    return () => page.removeEventListener("touchmove", movePull);
+  }, [cancelPull]);
+
+  function endPull() {
+    const gesture = pull.current;
+    cancelPull();
+    if (gesture?.distance === REFRESH_DISTANCE && !requestRef.current) void load(filters, 0, gesture.distance);
+  }
 
   /** Pide la ubicación al navegador y manda solo lat/lng; el servidor la redondea a ~500 m. */
   async function share() {
@@ -115,15 +231,23 @@ export function Nearby() {
   }
 
   useEffect(() => {
-    load(filters);
-    // Cada vez que se manda una ubicación nueva (a mano o sola), la grilla se reordena
-    const onLocation = () => load(filtersRef.current);
+    // Cada vez que se manda una ubicación nueva (a mano o sola), la grilla se reordena.
+    // Si volvés de un perfil, carga tantas personas como había para poder volver a la misma posición.
+    const onLocation = () => load(filtersRef.current, 0, 0, pendingRestore.current?.count ?? visible.current.count);
+    onLocation();
     window.addEventListener(LOCATION_EVENT, onLocation);
-    return () => window.removeEventListener(LOCATION_EVENT, onLocation);
+    return () => {
+      window.removeEventListener(LOCATION_EVENT, onLocation);
+      const current = requestRef.current;
+      requestRef.current = null;
+      current?.abort();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   function applyFilters(f: Filters) {
+    pendingRestore.current = undefined;
+    if (pageRef.current) pageRef.current.scrollTop = 0;
     setFilters(f);
     saveFilters(f);
     setShowFilters(false);
@@ -131,9 +255,13 @@ export function Nearby() {
   }
 
   const active = countFilters(filters);
+  const refreshing = refreshDistance > 0;
+  const refreshHeight = refreshing ? refreshDistance : pullDistance;
+  const pullProgress = pullDistance / REFRESH_DISTANCE;
+  const readyToRefresh = pullDistance === REFRESH_DISTANCE;
 
   return (
-    <div className="page">
+    <div ref={pageRef} className="page nearby-page" onTouchStart={startPull} onTouchEnd={endPull} onTouchCancel={cancelPull}>
       <header className="topbar">
         <h1 className="topbar__title">Gente</h1>
         {status === "ready" && (
@@ -178,6 +306,21 @@ export function Nearby() {
       )}
 
       {status === "error" && <div className="notice notice--error">No pudimos cargar la grilla. Probá de nuevo en un rato.</div>}
+      {refreshError && <p className="notice notice--error" role="alert">No pudimos actualizar la grilla. Probá de nuevo.</p>}
+
+      <div
+        className={`nearby-refresh${readyToRefresh || refreshing ? " nearby-refresh--ready" : ""}${pullDistance > 0 ? " nearby-refresh--pulling" : ""}`}
+        aria-hidden="true"
+        style={{ height: refreshHeight }}
+      >
+        <span
+          className={refreshing ? "nearby-refresh__spin" : undefined}
+          style={refreshing ? undefined : { transform: `rotate(${(pullProgress - 1) * 270}deg)` }}
+        >
+          {readyToRefresh ? <CheckIcon /> : <RefreshIcon />}
+        </span>
+      </div>
+      <p className="sr-only" role="status">{refreshing ? "Actualizando…" : readyToRefresh ? "Soltá para actualizar" : ""}</p>
 
       {status === "ready" && people.length === 0 && (
         <div className="empty">
@@ -195,7 +338,7 @@ export function Nearby() {
           <ul className="grid">
             {people.map((p) => (
               <li key={p.id}>
-                <Link to={`/perfil/${p.id}`} className="tile" aria-label={`${p.name}, ${p.age}${p.distance ? `, ${p.distance}` : ""}${p.online ? ", en línea" : ""}`}>
+                <Link to={`/perfil/${p.id}`} state={{ nearbyEntry: entry }} className="tile" aria-label={`${p.name}, ${p.age}${p.distance ? `, ${p.distance}` : ""}${p.online ? ", en línea" : ""}`}>
                   {p.photo ? <img src={p.photo} alt="" loading="lazy" /> : <span className="tile__empty">{p.name.charAt(0).toUpperCase()}</span>}
                   {p.favorite && <span className="tile__fav" aria-label="Favorito"><StarIcon filled size={14} /></span>}
                   <span className="tile__info">
@@ -211,7 +354,9 @@ export function Nearby() {
           </ul>
           {hasMore && (
             <div className="center">
-              <button className="btn btn--small" onClick={() => load(filters, people.length)}>Ver más</button>
+              <button className="btn btn--small" disabled={refreshing} onClick={() => {
+                if (!requestRef.current) void load(filters, people.length);
+              }}>Ver más</button>
             </div>
           )}
         </>

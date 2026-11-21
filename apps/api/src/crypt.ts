@@ -13,7 +13,7 @@ import { env } from "./env.js";
  *
  * Si se pierde DATA_KEY, esos datos no se pueden recuperar. Ver docs/DEPLOY.md.
  */
-const PREFIX = "v1:";
+export const ENCRYPTED_PREFIX = "v1:";
 let cached: Buffer | undefined;
 
 function key(): Buffer {
@@ -38,18 +38,18 @@ function key(): Buffer {
 /** Para chequear al arrancar que la clave está y es válida, antes de atender a nadie. */
 export const checkDataKey = () => void key();
 
-export const isEncrypted = (v: string) => v.startsWith(PREFIX);
+export const isEncrypted = (v: string) => v.startsWith(ENCRYPTED_PREFIX);
 
 export function encrypt(plain: string): string {
   const iv = randomBytes(12);
   const c = createCipheriv("aes-256-gcm", key(), iv);
   const body = Buffer.concat([c.update(plain, "utf8"), c.final()]);
-  return PREFIX + Buffer.concat([iv, c.getAuthTag(), body]).toString("base64");
+  return ENCRYPTED_PREFIX + Buffer.concat([iv, c.getAuthTag(), body]).toString("base64");
 }
 
 export function decrypt(stored: string): string {
   if (!isEncrypted(stored)) return stored;
-  const raw = Buffer.from(stored.slice(PREFIX.length), "base64");
+  const raw = Buffer.from(stored.slice(ENCRYPTED_PREFIX.length), "base64");
   const d = createDecipheriv("aes-256-gcm", key(), raw.subarray(0, 12));
   d.setAuthTag(raw.subarray(12, 28));
   return Buffer.concat([d.update(raw.subarray(28)), d.final()]).toString("utf8");
