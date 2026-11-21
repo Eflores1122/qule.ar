@@ -6,7 +6,7 @@ import { APP_NAME } from "../brand";
 import { AlbumViewer, duration, untilLabel } from "../components/AlbumViewer";
 import { Avatar } from "../components/Avatar";
 import { BackIcon, ChevronRightIcon, LockIcon, PlusIcon } from "../components/Icons";
-import { preparePhotoForUpload } from "../features/photos/preparePhoto";
+import { PhotoCrop } from "../components/PhotoCrop";
 import { BODY_TYPES, HIV_STATUS, LOOKING_FOR, POSITIONS, PRONOUNS, RELATIONSHIP, TRIBES } from "../options";
 
 type Form = Omit<Profile, "birthdate" | "age">;
@@ -48,6 +48,12 @@ function MultiChips({ label, value, options, onChange, max = 10 }: { label: stri
 }
 
 const numOrNull = (s: string) => (s === "" ? null : Number(s));
+
+const MAX_PROFILE_PHOTOS = 6;
+const MAX_ALBUM_ITEMS = 40;
+
+/** Fotos elegidas que se van subiendo de a una: las fotos pasan por el recorte, los videos del álbum suben directo. */
+type MediaBatch = { files: File[]; index: number; isPrivate: boolean; slots: number };
 
 function profileForm(p: Profile): Form {
   return {
@@ -92,6 +98,7 @@ function ProfileEditor({ profile, photos, reload }: { profile: Profile; photos: 
   const [grants, setGrants] = useState<AlbumGrant[]>([]);
   const [progress, setProgress] = useState<{ done: number; total: number; video: boolean } | null>(null);
   const [viewing, setViewing] = useState<number | null>(null);
+  const [cropBatch, setCropBatch] = useState<MediaBatch | null>(null);
 
   useEffect(() => {
     api<AlbumGrant[]>("/album/grants").then(setGrants).catch(() => setMediaError("No pudimos cargar los accesos al álbum."));
@@ -128,7 +135,10 @@ function ProfileEditor({ profile, photos, reload }: { profile: Profile; photos: 
   function selectFiles(e: ChangeEvent<HTMLInputElement>, isPrivate: boolean) {
     const files = Array.from(e.currentTarget.files ?? []);
     e.currentTarget.value = "";
-    void addFiles(files, isPrivate);
+    if (!files.length) return;
+    const slots = isPrivate ? MAX_ALBUM_ITEMS - privatePhotos.length : MAX_PROFILE_PHOTOS - publicPhotos.length;
+    setMediaError("");
+    void advanceBatch({ files, index: 0, isPrivate, slots });
   }
 
   async function changeMedia(action: () => Promise<void>) {
@@ -166,29 +176,49 @@ function ProfileEditor({ profile, photos, reload }: { profile: Profile; photos: 
     });
   }
 
-  /** Sube varios archivos seguidos (de a uno, así el servidor procesa los videos sin trabarse). */
-  async function addFiles(files: File[], priv = false) {
-    if (!files.length) return;
-    setUploading(true);
-    setMediaError("");
+  /** Sube la foto ya recortada y sigue con el resto de la tanda. */
+  async function uploadCrop(batch: MediaBatch, file: File) {
+    const { isPrivate, index, slots } = batch;
+    await upload("/me/photos", file, isPrivate ? { private: "1" } : {});
+    await reload().catch(() => setMediaError("Recargá para ver las fotos que subiste."));
+    await advanceBatch({ ...batch, index: index + 1, slots: slots - 1 });
+  }
+
+  /**
+   * Sube los archivos en el orden en que se eligieron. Los videos del álbum suben directo (de a uno, así el servidor
+   * los procesa sin trabarse). En cada foto se detiene para que se confirme el recorte.
+   */
+  async function advanceBatch({ files, index, isPrivate, slots }: MediaBatch) {
+    const start = index;
     const errors: string[] = [];
-    for (const [i, file] of files.entries()) {
-      setProgress({ done: i, total: files.length, video: file.type.startsWith("video/") });
+    while (index < files.length && slots > 0) {
+      const file = files[index];
+      if (!isPrivate || !file.type.startsWith("video/")) break;
+      if (index === start) setCropBatch(null);
+      setUploading(true);
+      setProgress({ done: index, total: files.length, video: true });
       try {
-        const media = file.type.startsWith("video/") ? file : await preparePhotoForUpload(file);
-        await upload("/me/photos", media, priv ? { private: "1" } : {});
+        await upload("/me/photos", file, { private: "1" });
+        slots--;
       } catch (err) {
-        // ApiError: lo que dijo el servidor. Error: lo que pasó al preparar la foto (peso, HEIC que no se pudo convertir)
-        const message = err instanceof Error && err.message ? err.message : "No pudimos subir el archivo.";
+        const message = err instanceof ApiError ? err.message : "No se pudo subir el video. Probá de nuevo.";
         errors.push(`${file.name} · ${message}`);
-        // Si se llenó el álbum o el perfil, no tiene sentido seguir
-        if (/hasta \d+/.test(message)) break;
+        if (/hasta \d+/.test(message)) slots = 0;
       }
+      index++;
     }
-    await reload();
-    setProgress(null);
-    setUploading(false);
-    if (errors.length) setMediaError(errors.join(" · "));
+    if (index > start) {
+      await reload().catch(() => setMediaError("Recargá para ver los archivos que subiste."));
+      setProgress(null);
+      setUploading(false);
+    }
+    if (index < files.length && slots === 0) {
+      errors.push(isPrivate
+        ? `Tu álbum ya tiene ${MAX_ALBUM_ITEMS} fotos y videos. No se subieron los archivos que quedaban.`
+        : `Tu perfil ya tiene ${MAX_PROFILE_PHOTOS} fotos. No se subieron las que quedaban.`);
+    }
+    if (errors.length) setMediaError((previous) => [previous, ...errors].filter(Boolean).join(" · "));
+    setCropBatch(index < files.length && slots > 0 ? { files, index, isPrivate, slots } : null);
   }
 
   function removePhoto(photoId: string) {
@@ -300,6 +330,17 @@ function ProfileEditor({ profile, photos, reload }: { profile: Profile; photos: 
           </>
         )}
         <input ref={privateFileRef} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => selectFiles(e, true)} />
+        {cropBatch && (
+          <PhotoCrop
+            key={`${cropBatch.isPrivate}-${cropBatch.index}`}
+            file={cropBatch.files[cropBatch.index]}
+            number={cropBatch.index + 1}
+            total={cropBatch.files.length}
+            isPrivate={cropBatch.isPrivate}
+            onSkip={() => { void advanceBatch({ ...cropBatch, index: cropBatch.index + 1 }); }}
+            onUpload={(file) => uploadCrop(cropBatch, file)}
+          />
+        )}
         {viewing != null && (
           <AlbumViewer items={privatePhotos} start={viewing} title="Tu álbum privado" onClose={() => setViewing(null)} />
         )}
