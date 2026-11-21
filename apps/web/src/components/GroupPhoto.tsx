@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { api, upload } from "../api";
-import { preparePhotoForUpload } from "../pages/MyProfile";
+import { preparePhotoForUpload } from "../features/photos/preparePhoto";
 import { GroupAvatar } from "./GroupAvatar";
 
 /** Botón que abre el selector de fotos del celu. */

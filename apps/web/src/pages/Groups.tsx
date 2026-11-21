@@ -3,7 +3,7 @@ import { Link, useNavigate, useSearchParams } from "react-router";
 import { api, getSocket, ROLE_LABEL, upload, type GroupListing, type MyGroup, type MyInvite } from "../api";
 import { GroupAvatar } from "../components/GroupAvatar";
 import { PhotoPicker } from "../components/GroupPhoto";
-import { preparePhotoForUpload } from "./MyProfile";
+import { preparePhotoForUpload } from "../features/photos/preparePhoto";
 import { PlusIcon } from "../components/Icons";
 import { MyInvites } from "../components/Invite";
 import { JoinButton } from "../components/JoinButton";

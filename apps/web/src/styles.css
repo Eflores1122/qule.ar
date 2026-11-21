@@ -233,15 +233,16 @@ html:has(.nearby-page), .nearby-page { overscroll-behavior-y: none; }
 
 /* ---------- Perfil ---------- */
 .profile { padding-bottom: 32px; }
-.profile__photo { position: relative; aspect-ratio: 4 / 5; max-height: 70vh; width: 100%; background: var(--surface-2); overflow: hidden; }
+.profile__photo { position: relative; isolation: isolate; aspect-ratio: 4 / 5; max-height: 70vh; width: 100%; background: var(--surface-2); overflow: hidden; }
 .profile__photo img { width: 100%; height: 100%; object-fit: cover; display: block; }
 .profile__photo::after { content: ""; position: absolute; inset: auto 0 0; height: 45%; background: linear-gradient(transparent, var(--scrim-strong)); pointer-events: none; }
 .profile__photo > .iconbtn--float { z-index: var(--z-sticky); }
 .profile__nophoto { width: 100%; height: 100%; display: grid; place-items: center; font-family: var(--display); font-size: var(--display-xl); color: var(--accent); background: var(--accent-soft); }
 .profile__name { position: absolute; left: 16px; right: 16px; bottom: 16px; z-index: var(--z-raised); display: flex; flex-direction: column; pointer-events: none; }
-.profile__name h1 { font-family: var(--display); font-size: var(--title-3xl); font-weight: 800; letter-spacing: -0.02em; }
-.profile__name span { font-size: var(--title-sm); color: var(--muted); }
-.profile__dots { position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); left: 64px; right: 16px; display: flex; gap: 4px; z-index: var(--z-sticky); }
+.profile__name h1 { font-family: var(--display); font-size: var(--title-3xl); font-weight: 800; letter-spacing: -0.02em; min-width: 0; overflow-wrap: anywhere; }
+.profile__name span { font-size: var(--title-sm); color: var(--muted); flex: none; }
+.profile__dots { position: absolute; top: calc(14px + env(safe-area-inset-top, 0px)); left: 16px; right: 16px; display: flex; gap: 4px; z-index: var(--z-sticky); }
+.profile__dots--with-back { left: 64px; }
 .profile__dots button { flex: 1; height: 3px; border-radius: var(--radius-hair); border: 0; padding: 0; background: var(--on-media-dim); }
 .profile__dots button.on { background: var(--on-media); }
 .profile__tap { position: absolute; inset-block: 0; width: 50%; background: transparent; border: 0; z-index: var(--z-raised); }
@@ -264,6 +265,8 @@ html:has(.nearby-page), .nearby-page { overscroll-behavior-y: none; }
 /* ---------- Mi perfil ---------- */
 .section { padding: 18px 16px; border-bottom: 1px solid var(--line); }
 .section__title { font-size: var(--text-lg); font-weight: 700; margin-bottom: 12px; display: flex; gap: 8px; align-items: baseline; }
+.profile-editor__actions, .settings__account-actions { padding-block-start: 12px; }
+.settings__clear-location { margin-block-start: 6px; }
 .welcome { margin: 12px 16px 0; }
 .photos { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; margin-bottom: 10px; }
 .photos__item, .photos__add { aspect-ratio: 3 / 4; border-radius: var(--radius-lg); overflow: hidden; position: relative; }
@@ -272,8 +275,27 @@ html:has(.nearby-page), .nearby-page { overscroll-behavior-y: none; }
 .photos__main { background: var(--accent); color: var(--accent-ink); }
 .photos__action { background: var(--scrim); color: var(--text); }
 .photos__remove { position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; border-radius: var(--radius-pill); border: 0; background: var(--scrim); font-size: var(--text-xs); }
-.photos__add { border: 1.5px dashed var(--line); background: var(--surface); color: var(--muted); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font-size: var(--text-sm); font-weight: 600; }
+.photos__add { width: 100%; align-self: start; border: 1.5px dashed var(--line); background: var(--surface); color: var(--muted); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font-size: var(--text-sm); font-weight: 600; }
 .photos__add:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.photos__order { display: flex; justify-content: center; }
+.photos__order .iconbtn { width: 38px; height: 38px; }
+.photo-crop {
+  width: min(440px, calc(100% - 24px)); max-height: calc(100dvh - 24px); margin: auto; padding: 16px;
+  overflow-y: auto; overscroll-behavior: contain; background: var(--surface); color: var(--text);
+  border: 1px solid var(--line); border-radius: var(--radius-4xl);
+}
+.photo-crop[open] { display: grid; gap: 12px; }
+.photo-crop::backdrop { background: var(--scrim-strong); }
+.photo-crop__head { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; }
+.photo-crop__head h2 { font-size: var(--title-sm); }
+.photo-crop__preview {
+  display: block; width: min(100%, 304px, 44dvh); height: auto; margin-inline: auto;
+  aspect-ratio: 4 / 5; border-radius: var(--radius-lg); background: var(--media-bg);
+  cursor: grab; touch-action: none;
+}
+.photo-crop__preview:active { cursor: grabbing; }
+.photo-crop__zoom { display: flex; align-items: center; gap: 12px; font-size: var(--text-sm); }
+.photo-crop__zoom input { flex: 1; min-width: 0; height: 32px; margin: 0; accent-color: var(--accent); }
 .savebar { position: sticky; bottom: 0; padding: 10px 0 4px; background: linear-gradient(transparent, var(--bg) 30%); display: flex; }
 .blocked { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 10px; }
 .blocked li { display: flex; align-items: center; gap: 10px; }
@@ -395,9 +417,17 @@ a.gcard:hover { background: var(--surface); }
 .lightbox__nav--next { right: 8px; }
 @media (hover: none) { .lightbox__nav { display: none; } }
 .photos__lock { position: absolute; top: 6px; left: 6px; width: 28px; height: 28px; border-radius: var(--radius-pill); border: 0; background: var(--scrim); display: grid; place-items: center; }
-.quicklinks { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; padding: 14px 16px 0; }
-.quicklink { display: flex; align-items: center; justify-content: center; gap: 8px; height: 46px; border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--line); font-weight: 600; font-size: var(--text-md); }
+.quicklinks { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 8px; }
+.quicklink {
+  position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center;
+  min-height: 64px; gap: 3px; padding: 8px 4px; text-align: center;
+  border-radius: var(--radius-lg); background: var(--surface); border: 1px solid var(--line); font-weight: 600; font-size: var(--text-sm);
+}
 .quicklink:hover { background: var(--surface-2); }
+.quicklink .badge { position: absolute; top: 5px; inset-inline-end: 5px; }
+.my-profile__album { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.my-profile__album .album__title { margin-bottom: 2px; }
+.my-profile__album .btn { flex: none; }
 .section__title svg { align-self: center; }
 
 .bubble--album { border: 1px dashed var(--line); background: var(--surface); color: var(--text); }
@@ -437,7 +467,7 @@ a.gcard:hover { background: var(--surface); }
 .switch--on span { transform: translateX(22px); background: var(--accent-ink); }
 .prefs__lead { margin-top: 16px; }
 .prefs { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
-.quicklink--wide { grid-column: span 2; color: var(--accent-2); }
+.quicklink--wide { grid-column: 1 / -1; min-height: 46px; color: var(--accent-2); }
 .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 0; padding: 14px 16px 4px; }
 .kpis > div { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 10px; }
 .kpis dt { font-size: var(--text-2xs); color: var(--muted); }
@@ -536,7 +566,6 @@ button.quote:hover { background: var(--surface-3); }
 .toque-picker .reaction-picker { grid-template-columns: repeat(4, 1fr); justify-items: center; }
 .tile__reaction { position: absolute; top: 6px; right: 6px; z-index: var(--z-raised); width: 38px; height: 38px; border-radius: var(--radius-pill); background: var(--scrim); display: grid; place-items: center; }
 .tile__reaction--new { outline: 2px solid var(--accent); }
-.quicklink--full { grid-column: span 2; }
 
 /* ---------- Invitar gente: filtros de la lista ---------- */
 .invite-filters { display: flex; gap: 6px; overflow-x: auto; scrollbar-width: none; padding-bottom: 2px; flex: none; }

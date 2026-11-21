@@ -19,7 +19,9 @@ import { GroupInfo } from "./pages/GroupInfo";
 import { Inbox } from "./pages/Inbox";
 import { Conversation } from "./pages/Conversation";
 import { ProfilePage } from "./pages/Profile";
-import { MyProfile } from "./pages/MyProfile";
+import { EditProfile } from "./pages/MyProfile";
+import { MyProfileOverview } from "./pages/MyProfileOverview";
+import { Settings } from "./pages/Settings";
 import { ChatIcon, GridIcon, GroupIcon, UserIcon } from "./components/Icons";
 import { Nearby } from "./pages/Nearby";
 import { Favorites, Toques, Views } from "./pages/People";
@@ -71,7 +73,9 @@ export function App() {
           <Route path="/mensajes" element={<Inbox />} />
           <Route path="/mensajes/:id" element={<Conversation />} />
           <Route path="/perfil/:id" element={<ProfilePage />} />
-          <Route path="/yo" element={<MyProfile />} />
+          <Route path="/yo" element={<MyProfileOverview />} />
+          <Route path="/yo/editar" element={<EditProfile />} />
+          <Route path="/yo/configuracion" element={<Settings />} />
           <Route path="/visitas" element={<Views />} />
           <Route path="/favoritos" element={<Favorites />} />
           <Route path="/toques" element={<Toques />} />
@@ -90,8 +94,7 @@ function RequireAuth({ children, needProfile }: { children: React.ReactNode; nee
   if (!me) return <Navigate to="/entrar" replace state={{ from: loc.pathname }} />;
   if (me.profile?.suspendedAt) return <Suspended />;
   if (needProfile && !me.profile) return <Navigate to="/bienvenida" replace />;
-  // Recién completó el alta: lo llevamos a su perfil para que suba fotos
-  if (!needProfile && me.profile && loc.pathname === "/bienvenida") return <Navigate to="/yo?nuevo=1" replace />;
+  if (!needProfile && me.profile && loc.pathname === "/bienvenida") return <Navigate to="/yo/editar?nuevo=1" replace />;
   return <>{children}</>;
 }
 
@@ -202,6 +205,8 @@ function Shell() {
 
   // En una conversación abierta, la barra de abajo se esconde para dejar lugar al teclado
   const inThread = /^\/mensajes\/.+/.test(loc.pathname);
+  const inMyProfile = /^\/yo(?:\/|$)/.test(loc.pathname);
+  const nearbyEntry = loc.pathname.startsWith("/perfil/") ? loc.state?.nearbyEntry : undefined;
 
   return (
     <div className={`shell${inThread ? " shell--thread" : ""}${canSwipeTabs ? " shell--swipe" : ""}`}>
@@ -209,7 +214,7 @@ function Shell() {
         <Outlet />
       </main>
       {!inThread && <TermsBanner />}
-      {!inThread && <NotifyBanner />}
+      {!inThread && !inMyProfile && <NotifyBanner />}
       {toast && (
         <div className="toast" role="status" key={toast.id}>
           {toast.to ? <NavLink to={toast.to} onClick={() => setToast(null)}>{toast.text} →</NavLink> : <span>{toast.text}</span>}
@@ -217,7 +222,7 @@ function Shell() {
       )}
       {!inThread && (
         <nav className="tabbar" aria-label="Secciones">
-          <NavLink to={TAB_PATHS[0]} className="tabbar__item">
+          <NavLink to={TAB_PATHS[0]} state={nearbyEntry ? { nearbyEntry } : undefined} className="tabbar__item">
             <GridIcon /> <span>Gente</span>
           </NavLink>
           <NavLink to={TAB_PATHS[1]} className="tabbar__item">

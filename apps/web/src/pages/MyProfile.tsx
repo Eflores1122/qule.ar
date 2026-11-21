@@ -1,14 +1,12 @@
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import { Link, useSearchParams } from "react-router";
-import { api, authClient, closeSocket, upload, type AlbumGrant, type Author, type NotifyKind, type Profile } from "../api";
+import { useEffect, useRef, useState, type ChangeEvent } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router";
+import { api, ApiError, upload, type AlbumGrant, type Me, type Profile } from "../api";
 import { useMe } from "../App";
-import { APP_NAME, THEME_LABELS, themes, type ThemeName } from "../brand";
+import { APP_NAME } from "../brand";
 import { AlbumViewer, duration, untilLabel } from "../components/AlbumViewer";
 import { Avatar } from "../components/Avatar";
-import { EyeIcon, LockIcon, PlusIcon, StarIcon } from "../components/Icons";
-import { getTheme, setTheme } from "../theme";
-import { disablePush, enablePush, pushHelp, pushState, testPush, type PushState } from "../push";
+import { BackIcon, ChevronRightIcon, LockIcon, PlusIcon } from "../components/Icons";
+import { PhotoCrop } from "../components/PhotoCrop";
 import { BODY_TYPES, HIV_STATUS, LOOKING_FOR, POSITIONS, PRONOUNS, RELATIONSHIP, TRIBES } from "../options";
 
 type Form = Omit<Profile, "birthdate" | "age">;
@@ -51,360 +49,235 @@ function MultiChips({ label, value, options, onChange, max = 10 }: { label: stri
 
 const numOrNull = (s: string) => (s === "" ? null : Number(s));
 
-const NOTICES: { kind: NotifyKind; label: string; hint?: string }[] = [
-  { kind: "mensajes", label: "Mensajes privados" },
-  { kind: "toques", label: "Toques" },
-  { kind: "respuestas", label: "Respuestas en grupos", hint: "Cuando alguien responde un mensaje tuyo." },
-  { kind: "grupos", label: "Mensajes nuevos en grupos", hint: "Como mucho uno cada 10 minutos por grupo. También podés silenciar un grupo solo." },
-  { kind: "solicitudes", label: "Solicitudes e invitaciones", hint: "Pedidos para entrar a tus grupos, invitaciones y cuando te aceptan." },
-];
+const MAX_PROFILE_PHOTOS = 6;
+const MAX_ALBUM_ITEMS = 40;
 
-/** Qué avisos le llegan. Se guarda en la cuenta, así vale para todos los dispositivos. */
-function NoticePrefs({ initial }: { initial: Partial<Record<NotifyKind, boolean>> }) {
-  const [prefs, setPrefs] = useState(initial);
-  const [error, setError] = useState("");
+/** Fotos elegidas que se van subiendo de a una: las fotos pasan por el recorte, los videos del álbum suben directo. */
+type MediaBatch = { files: File[]; index: number; isPrivate: boolean; slots: number };
 
-  async function toggle(kind: NotifyKind) {
-    const on = prefs[kind] !== false;
-    const before = prefs;
-    setPrefs({ ...prefs, [kind]: !on });
-    setError("");
-    try {
-      const r = await api<{ notifyPrefs: Partial<Record<NotifyKind, boolean>> }>("/me/notificaciones", { method: "PUT", json: { [kind]: !on } });
-      setPrefs(r.notifyPrefs);
-    } catch {
-      setPrefs(before);
-      setError("No pudimos guardar el cambio. Probá de nuevo.");
-    }
-  }
+function profileForm(p: Profile): Form {
+  return {
+    displayName: p.displayName, about: p.about, heightCm: p.heightCm, weightKg: p.weightKg,
+    bodyType: p.bodyType, position: p.position, tribes: p.tribes, lookingFor: p.lookingFor,
+    relationship: p.relationship, pronouns: p.pronouns, hivStatus: p.hivStatus, lastTested: p.lastTested,
+  };
+}
 
+type Photos = Me["photos"];
+
+function PhotoOrder({ index, total, disabled, onMove }: {
+  index: number; total: number; disabled: boolean; onMove: (direction: -1 | 1) => void;
+}) {
+  if (total < 2) return null;
   return (
-    <>
-      <p className="muted small prefs__lead">¿Qué avisos querés recibir?</p>
-      <ul className="prefs">
-        {NOTICES.map((n) => {
-          const on = prefs[n.kind] !== false;
-          return (
-            <li key={n.kind} className="setting">
-              <div>
-                <p>{n.label}</p>
-                {n.hint && <p className="muted small">{n.hint}</p>}
-              </div>
-              <button className={`switch ${on ? "switch--on" : ""}`} role="switch" aria-checked={on} aria-label={n.label} onClick={() => toggle(n.kind)}>
-                <span />
-              </button>
-            </li>
-          );
-        })}
-      </ul>
-      {error && <p className="error small hint" role="alert">{error}</p>}
-    </>
+    <div className="photos__order" role="group" aria-label={`Orden del archivo ${index + 1}`}>
+      <button type="button" className="iconbtn" aria-label="Mover antes" title="Mover antes" disabled={disabled || index === 0} onClick={() => onMove(-1)}><BackIcon /></button>
+      <button type="button" className="iconbtn" aria-label="Mover después" title="Mover después" disabled={disabled || index === total - 1} onClick={() => onMove(1)}><ChevronRightIcon /></button>
+    </div>
   );
 }
 
-function NotificationsSetting({ prefs }: { prefs: Partial<Record<NotifyKind, boolean>> }) {
-  const [state, setState] = useState<PushState | null>(null);
-  const [busy, setBusy] = useState(false);
-  const [test, setTest] = useState("");
-  useEffect(() => {
-    pushState().then(setState).catch(() => setState("unsupported"));
-  }, []);
-  if (!state || state === "disabled") return null;
-
-  async function toggle() {
-    setBusy(true);
-    setTest("");
-    try {
-      const next = state === "on" ? await disablePush() : await enablePush();
-      setState(next);
-      if (next === "on") await sendTest();
-    } catch {
-      setState(await pushState().catch(() => "unsupported" as const));
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function sendTest() {
-    setTest("Mandando…");
-    const sent = await testPush().catch(() => 0);
-    setTest(sent ? `Mandamos una de prueba a ${sent === 1 ? "tu dispositivo" : `tus ${sent} dispositivos`}. Si no la ves, revisá que el navegador tenga permiso para mostrar notificaciones en tu sistema.` : "No pudimos mandarla. Probá desactivarlas y activarlas de nuevo.");
-  }
-
-  return (
-    <section className="section">
-      <div className="setting">
-        <div>
-          <h2 className="section__title section__title--tight">Notificaciones</h2>
-          <p className="muted small">{pushHelp(state, APP_NAME)}</p>
-        </div>
-        {(state === "on" || state === "off") && (
-          <button className={`switch ${state === "on" ? "switch--on" : ""}`} role="switch" aria-checked={state === "on"} aria-label="Notificaciones" disabled={busy} onClick={toggle}>
-            <span />
-          </button>
-        )}
-      </div>
-      {state === "on" && (
-        <>
-          <p className="small hint">
-            <button className="linkbtn" onClick={sendTest} disabled={busy}>Mandarme una de prueba</button>
-            {test && <span className="muted" role="status"> · {test}</span>}
-          </p>
-          <NoticePrefs initial={prefs} />
-        </>
-      )}
-    </section>
-  );
-}
-
-function ThemeSetting() {
-  const [theme, setCurrent] = useState(getTheme);
-  const choose = (t: ThemeName) => { setTheme(t); setCurrent(t); };
-  return (
-    <section className="section">
-      <h2 className="section__title section__title--tight">Tema</h2>
-      <p className="muted small lead">Penumbra es un oscuro más suave, para usar de día o con mucho brillo.</p>
-      <div className="segmented" role="radiogroup" aria-label="Tema">
-        {(Object.keys(themes) as ThemeName[]).map((t) => (
-          <button key={t} role="radio" aria-checked={theme === t} onClick={() => choose(t)}>{THEME_LABELS[t]}</button>
-        ))}
-      </div>
-    </section>
-  );
-}
-
-type UploadState = { isPrivate: boolean } & (
-  | { kind: "uploading"; current: number; total: number; video: boolean }
-  | { kind: "error"; message: string }
-);
-
-const MAX_PHOTO_BYTES = 12 * 1024 * 1024;
-const UPLOAD_ERROR_DURATION_MS = 5000;
-
-function isHeicPhoto(file: File, bytes: ArrayBuffer): boolean {
-  // Algunos selectores omiten el MIME o cambian la extensión. Reconocemos también la marca del contenedor.
-  const header = new TextDecoder().decode(bytes.slice(4, 12));
-  return /^ftyp(?:hei[cxms]|hev[cxms]|mif1|msf1)$/.test(header)
-    || /^image\/hei[cf](?:-sequence)?$/i.test(file.type)
-    || /\.hei[cf]$/i.test(file.name);
-}
-
-export async function preparePhotoForUpload(file: File): Promise<File> {
-  if (file.size > MAX_PHOTO_BYTES) throw new Error("La foto pesa demasiado (máx. 12 MB)");
-  // El selector puede entregar un archivo respaldado por un proveedor de fotos en la nube.
-  // Leemos sus bytes antes de que el navegador intente enviarlo como parte del formulario.
-  const bytes = await file.arrayBuffer().catch(() => null);
-  if (!bytes?.byteLength) throw new Error("No pudimos abrir la foto. Descargala al dispositivo y volvé a elegirla.");
-  const readable = new File([bytes], file.name, { type: file.type });
-  if (!isHeicPhoto(file, bytes)) return readable;
-
-  let jpeg: Blob;
-  try {
-    const { heicTo } = await import("heic-to/csp");
-    jpeg = await heicTo({ blob: readable, type: "image/jpeg", quality: 0.85 });
-    if (!jpeg.size || jpeg.type !== "image/jpeg") throw new Error("JPEG inválido");
-  } catch {
-    throw new Error("No pudimos convertir la foto a JPG. Probá guardarla como JPG y volvé a elegirla.");
-  }
-  if (jpeg.size > MAX_PHOTO_BYTES) throw new Error("La foto convertida pesa demasiado (máx. 12 MB)");
-  return new File([jpeg], `${file.name.replace(/\.[^.]+$/, "") || "foto"}.jpg`, { type: jpeg.type });
-}
-
-function UploadProgress({ upload }: { upload: UploadState | null }) {
-  if (upload?.kind !== "uploading") return null;
-  return (
-    <p className="muted small" role="status">
-      Subiendo {upload.current} de {upload.total}{upload.video ? " · los videos tardan un poco más en procesarse" : ""}…
-    </p>
-  );
-}
-
-export function MyProfile() {
+export function EditProfile() {
   const { me, reload } = useMe();
+  return me?.profile ? <ProfileEditor key={me.user.id} profile={me.profile} photos={me.photos} reload={reload} /> : null;
+}
+
+function ProfileEditor({ profile, photos, reload }: { profile: Profile; photos: Photos; reload: () => Promise<void> }) {
+  const navigate = useNavigate();
   const [params] = useSearchParams();
   const isNew = params.get("nuevo") === "1";
-  const [form, setForm] = useState<Form | null>(null);
-  const [saved, setSaved] = useState<"idle" | "saving" | "ok" | "error">("idle");
+  const [initialForm] = useState(() => profileForm(profile));
+  const [form, setForm] = useState(initialForm);
+  const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
-  const [uploadState, setUploadState] = useState<UploadState | null>(null);
-  const uploading = uploadState?.kind === "uploading";
-  const [blocked, setBlocked] = useState<Author[]>([]);
-  const [deleting, setDeleting] = useState(false);
-  const [deleteText, setDeleteText] = useState("");
-  const fileRef = useRef<HTMLInputElement>(null);
-  const nextPrivate = useRef(false);
+  const [uploading, setUploading] = useState(false);
+  const [mediaBusy, setMediaBusy] = useState(false);
+  const [mediaError, setMediaError] = useState("");
+  const publicFileRef = useRef<HTMLInputElement>(null);
+  const privateFileRef = useRef<HTMLInputElement>(null);
   const [grants, setGrants] = useState<AlbumGrant[]>([]);
+  const [progress, setProgress] = useState<{ done: number; total: number; video: boolean } | null>(null);
   const [viewing, setViewing] = useState<number | null>(null);
-  const [toquesNew, setToquesNew] = useState(0);
+  const [cropBatch, setCropBatch] = useState<MediaBatch | null>(null);
 
   useEffect(() => {
-    if (me?.profile) {
-      const p = me.profile;
-      setForm({
-        displayName: p.displayName, about: p.about, heightCm: p.heightCm, weightKg: p.weightKg,
-        bodyType: p.bodyType, position: p.position, tribes: p.tribes, lookingFor: p.lookingFor,
-        relationship: p.relationship, pronouns: p.pronouns, hivStatus: p.hivStatus, lastTested: p.lastTested,
-      });
-    }
-  }, [me?.profile]);
-
-  useEffect(() => {
-    api<Author[]>("/blocks").then(setBlocked).catch(() => {});
-    api<{ count: number }>("/toques/unseen").then((r) => setToquesNew(r.count)).catch(() => {});
-    api<AlbumGrant[]>("/album/grants").then(setGrants).catch(() => {});
+    api<AlbumGrant[]>("/album/grants").then(setGrants).catch(() => setMediaError("No pudimos cargar los accesos al álbum."));
   }, []);
 
-  useEffect(() => {
-    if (uploadState?.kind !== "error") return;
-    const timer = window.setTimeout(() => setUploadState(null), UPLOAD_ERROR_DURATION_MS);
-    return () => window.clearTimeout(timer);
-  }, [uploadState]);
-
-  if (!me?.profile || !form) return null;
-  const publicPhotos = me.photos.filter((p) => !p.isPrivate);
-  const privatePhotos = me.photos.filter((p) => p.isPrivate);
+  const publicPhotos = photos.filter((p) => !p.isPrivate);
+  const privatePhotos = photos.filter((p) => p.isPrivate);
+  const mediaLocked = uploading || mediaBusy || saving;
   const set = <K extends keyof Form>(k: K, v: Form[K]) => {
-    setForm({ ...form, [k]: v });
-    setSaved("idle");
+    setForm((previous) => ({ ...previous, [k]: v }));
+    setError("");
   };
+
+  function leave() {
+    if (JSON.stringify(form) !== JSON.stringify(initialForm) && !confirm("¿Descartar los cambios de Sobre vos?")) return;
+    navigate("/yo", { replace: true });
+  }
 
   async function save(e: React.FormEvent) {
     e.preventDefault();
-    setSaved("saving");
+    setSaving(true);
     setError("");
     try {
       await api("/me/profile", { method: "PUT", json: form });
       await reload();
-      setSaved("ok");
+      navigate("/yo", { replace: true });
     } catch (err) {
-      setSaved("error");
-      setError((err as Error).message);
+      setError(err instanceof ApiError ? err.message : "No pudimos guardar los cambios. Probá de nuevo.");
+    } finally {
+      setSaving(false);
     }
   }
 
-  function pick(priv: boolean) {
-    nextPrivate.current = priv;
-    const input = fileRef.current;
-    if (!input) return;
-    // Al álbum se pueden subir fotos y videos; al perfil, solo fotos
-    input.accept = priv ? "image/*,video/*" : "image/*";
-    input.click();
-  }
-
-  async function setPrivate(photoId: string, isPrivate: boolean) {
-    await api(`/me/photos/${photoId}`, { method: "PATCH", json: { isPrivate } });
-    await reload();
-  }
-
-  async function revoke(userId: string) {
-    await api(`/album/grants/${userId}`, { method: "DELETE" });
-    setGrants((g) => g.filter((x) => x.id !== userId));
-  }
-
-  async function blockFromAlbum(g: AlbumGrant) {
-    if (!confirm(`¿Bloquear a ${g.name}? Pierde el acceso a tu álbum y no van a poder verse ni escribirse.`)) return;
-    await api("/blocks", { method: "POST", json: { userId: g.id } });
-    setGrants((x) => x.filter((y) => y.id !== g.id));
-    setBlocked((b) => [{ id: g.id, name: g.name, age: g.age, photo: g.photo }, ...b]);
-  }
-
-  /** Sube varios archivos seguidos (de a uno, así el servidor procesa los videos sin trabarse). */
-  async function addFiles(files: File[], priv = false) {
+  function selectFiles(e: ChangeEvent<HTMLInputElement>, isPrivate: boolean) {
+    const files = Array.from(e.currentTarget.files ?? []);
+    e.currentTarget.value = "";
     if (!files.length) return;
-    const errors: string[] = [];
-    for (const [i, file] of files.entries()) {
-      const video = file.type.startsWith("video/");
-      setUploadState({ kind: "uploading", isPrivate: priv, current: i + 1, total: files.length, video });
-      try {
-        const media = video ? file : await preparePhotoForUpload(file);
-        await upload("/me/photos", media, priv ? { private: "1" } : {});
-      } catch (err) {
-        errors.push(`${file.name}: ${(err as Error).message}`);
-        // Si se llenó el álbum o el perfil, no tiene sentido seguir
-        if (/hasta \d+/.test((err as Error).message)) break;
-      }
+    const slots = isPrivate ? MAX_ALBUM_ITEMS - privatePhotos.length : MAX_PROFILE_PHOTOS - publicPhotos.length;
+    setMediaError("");
+    void advanceBatch({ files, index: 0, isPrivate, slots });
+  }
+
+  async function changeMedia(action: () => Promise<void>) {
+    setMediaBusy(true);
+    setMediaError("");
+    try {
+      await action();
+    } catch (err) {
+      setMediaError(err instanceof ApiError ? err.message : "No pudimos aplicar el cambio. Probá de nuevo.");
+    } finally {
+      setMediaBusy(false);
     }
-    await reload();
-    const remaining = errors.length - 1;
-    const details = remaining > 0 ? ` · ${remaining} ${remaining === 1 ? "archivo más" : "archivos más"} sin subir` : "";
-    setUploadState(errors.length ? { kind: "error", isPrivate: priv, message: `${errors[0]}${details}` } : null);
   }
 
-  async function removePhoto(photoId: string) {
-    await api(`/me/photos/${photoId}`, { method: "DELETE" });
-    await reload();
+  function setPrivate(photoId: string, isPrivate: boolean) {
+    if (!isPrivate && !confirm("¿Mostrar esta foto en tu perfil público?")) return;
+    return changeMedia(async () => {
+      await api(`/me/photos/${photoId}`, { method: "PATCH", json: { isPrivate } });
+      await reload();
+    });
   }
 
-  async function makeMain(photoId: string) {
-    const ids = [photoId, ...me!.photos.map((p) => p.id).filter((x) => x !== photoId)];
-    // (las privadas no cuentan para la principal: se toma la primera pública)
-    await api("/me/photos/order", { method: "PUT", json: ids });
-    await reload();
+  function revoke(userId: string) {
+    return changeMedia(async () => {
+      await api(`/album/grants/${userId}`, { method: "DELETE" });
+      setGrants((g) => g.filter((x) => x.id !== userId));
+    });
   }
 
-  async function unblock(userId: string) {
-    await api(`/blocks/${userId}`, { method: "DELETE" });
-    setBlocked((b) => b.filter((x) => x.id !== userId));
+  function blockFromAlbum(g: AlbumGrant) {
+    if (!confirm(`¿Bloquear a ${g.name}? Pierde el acceso a tu álbum y no van a poder verse ni escribirse.`)) return;
+    return changeMedia(async () => {
+      await api("/blocks", { method: "POST", json: { userId: g.id } });
+      setGrants((x) => x.filter((y) => y.id !== g.id));
+    });
   }
 
-  async function logout() {
-    await authClient.signOut();
-    closeSocket();
-    await reload();
+  /** Sube la foto ya recortada y sigue con el resto de la tanda. */
+  async function uploadCrop(batch: MediaBatch, file: File) {
+    const { isPrivate, index, slots } = batch;
+    await upload("/me/photos", file, isPrivate ? { private: "1" } : {});
+    await reload().catch(() => setMediaError("Recargá para ver las fotos que subiste."));
+    await advanceBatch({ ...batch, index: index + 1, slots: slots - 1 });
   }
 
-  async function deleteAccount() {
-    await api("/me", { method: "DELETE" });
-    closeSocket();
-    await reload();
+  /**
+   * Sube los archivos en el orden en que se eligieron. Los videos del álbum suben directo (de a uno, así el servidor
+   * los procesa sin trabarse). En cada foto se detiene para que se confirme el recorte.
+   */
+  async function advanceBatch({ files, index, isPrivate, slots }: MediaBatch) {
+    const start = index;
+    const errors: string[] = [];
+    while (index < files.length && slots > 0) {
+      const file = files[index];
+      if (!isPrivate || !file.type.startsWith("video/")) break;
+      if (index === start) setCropBatch(null);
+      setUploading(true);
+      setProgress({ done: index, total: files.length, video: true });
+      try {
+        await upload("/me/photos", file, { private: "1" });
+        slots--;
+      } catch (err) {
+        const message = err instanceof ApiError ? err.message : "No se pudo subir el video. Probá de nuevo.";
+        errors.push(`${file.name} · ${message}`);
+        if (/hasta \d+/.test(message)) slots = 0;
+      }
+      index++;
+    }
+    if (index > start) {
+      await reload().catch(() => setMediaError("Recargá para ver los archivos que subiste."));
+      setProgress(null);
+      setUploading(false);
+    }
+    if (index < files.length && slots === 0) {
+      errors.push(isPrivate
+        ? `Tu álbum ya tiene ${MAX_ALBUM_ITEMS} fotos y videos. No se subieron los archivos que quedaban.`
+        : `Tu perfil ya tiene ${MAX_PROFILE_PHOTOS} fotos. No se subieron las que quedaban.`);
+    }
+    if (errors.length) setMediaError((previous) => [previous, ...errors].filter(Boolean).join(" · "));
+    setCropBatch(index < files.length && slots > 0 ? { files, index, isPrivate, slots } : null);
+  }
+
+  function removePhoto(photoId: string) {
+    if (!confirm("¿Borrar este archivo?")) return;
+    return changeMedia(async () => {
+      await api(`/me/photos/${photoId}`, { method: "DELETE" });
+      await reload();
+    });
+  }
+
+  function reorder(items: Photos, from: number, to: number) {
+    const ordered = items.slice();
+    const [selected] = ordered.splice(from, 1);
+    ordered.splice(to, 0, selected);
+    let index = 0;
+    const ids = photos.map((photo) => photo.isPrivate === selected.isPrivate ? ordered[index++].id : photo.id);
+    return changeMedia(async () => {
+      await api("/me/photos/order", { method: "PUT", json: ids });
+      await reload();
+    });
   }
 
   return (
     <div className="page">
-      <header className="topbar">
-        <h1 className="topbar__title">Mi perfil</h1>
-        <Link to={`/perfil/${me.user.id}`} className="linkbtn">Ver como lo ven</Link>
+      <header className="topbar topbar--thread">
+        <button type="button" className="iconbtn" aria-label="Volver a Mi perfil" onClick={leave} disabled={mediaLocked}><BackIcon /></button>
+        <h1 className="topbar__title">Editar perfil</h1>
       </header>
-
       {isNew && (
-        <div className="notice notice--info welcome">
-          ¡Bienvenide a {APP_NAME}! Subí una foto y completá lo que quieras. Todo es opcional y lo podés cambiar cuando quieras.
-        </div>
+        <p className="notice notice--info welcome">
+          ¡Bienvenide a {APP_NAME}! Subí una foto y completá lo que quieras.
+        </p>
       )}
 
-      <nav className="quicklinks" aria-label="Accesos">
-        <Link to="/visitas" className="quicklink"><EyeIcon /> Quién me vio</Link>
-        <Link to="/favoritos" className="quicklink"><StarIcon size={18} /> Favoritos</Link>
-        <Link to="/toques" className="quicklink quicklink--full">
-          <img src="/reacciones/rayo.svg" alt="" width={18} height={18} /> Toques
-          {toquesNew > 0 && <b className="badge badge--inline">{toquesNew}</b>}
-        </Link>
-        {me.user.isAdmin && <Link to="/admin" className="quicklink quicklink--wide">Moderación</Link>}
-      </nav>
-
-      <NotificationsSetting prefs={me.profile?.notifyPrefs ?? {}} />
-      <ThemeSetting />
-
+      {mediaError && <p className="notice notice--error" role="alert">{mediaError}</p>}
       <section className="section">
         <h2 className="section__title">Fotos <span className="muted">{publicPhotos.length}/6</span></h2>
+        <p className="muted small lead">Los cambios en fotos y en el álbum se aplican en el momento.</p>
         <div className="photos">
           {publicPhotos.map((p, i) => (
-            <div key={p.id} className="photos__item">
-              <img src={p.thumb ?? p.url} alt={`Tu foto ${i + 1}`} />
-              {i === 0 ? <span className="photos__main">Principal</span> : (
-                <button className="photos__action" onClick={() => makeMain(p.id)}>Hacer principal</button>
-              )}
-              <button className="photos__remove" aria-label="Borrar foto" onClick={() => removePhoto(p.id)}>✕</button>
-              <button className="photos__lock" aria-label="Pasar al álbum privado" title="Pasar al álbum privado" onClick={() => setPrivate(p.id, true)}><LockIcon /></button>
+            <div key={p.id}>
+              <div className="photos__item">
+                <img src={p.thumb ?? p.url} alt={`Tu foto ${i + 1}`} />
+                {i === 0 ? <span className="photos__main">Principal</span> : (
+                  <button className="photos__action" disabled={mediaLocked} onClick={() => reorder(publicPhotos, i, 0)}>Hacer principal</button>
+                )}
+                <button className="photos__remove" aria-label="Borrar foto" disabled={mediaLocked} onClick={() => removePhoto(p.id)}>✕</button>
+                <button className="photos__lock" aria-label="Pasar al álbum privado" title="Pasar al álbum privado" disabled={mediaLocked} onClick={() => setPrivate(p.id, true)}><LockIcon /></button>
+              </div>
+              <PhotoOrder index={i} total={publicPhotos.length} disabled={mediaLocked} onMove={(step) => reorder(publicPhotos, i, i + step)} />
             </div>
           ))}
           {publicPhotos.length < 6 && (
-            <button className="photos__add" onClick={() => pick(false)} disabled={uploading}>
+            <button className="photos__add" onClick={() => publicFileRef.current?.click()} disabled={mediaLocked}>
               {uploading ? "Subiendo…" : <><PlusIcon /> Agregar</>}
             </button>
           )}
         </div>
-        <UploadProgress upload={uploadState?.isPrivate === false ? uploadState : null} />
+        <input ref={publicFileRef} type="file" accept="image/*" multiple hidden onChange={(e) => selectFiles(e, false)} />
         <p className="muted small">Al subir una foto le borramos los metadatos, incluida la ubicación GPS.</p>
       </section>
 
@@ -415,22 +288,29 @@ export function MyProfile() {
         </p>
         <div className="photos">
           {privatePhotos.map((p, i) => (
-            <div key={p.id} className="photos__item">
-              <button className="photos__open" onClick={() => setViewing(i)} aria-label={`Ver ${p.kind === "video" ? "video" : "foto"} ${i + 1}`}>
-                {p.thumb ? <img src={p.thumb} alt="" /> : <span className="album__nothumb" />}
-                {p.kind === "video" && <span className="album__play">▶ {duration(p.seconds)}</span>}
-              </button>
-              {p.kind === "photo" && <button className="photos__action" onClick={() => setPrivate(p.id, false)}>Hacer pública</button>}
-              <button className="photos__remove" aria-label="Borrar" onClick={() => removePhoto(p.id)}>✕</button>
+            <div key={p.id}>
+              <div className="photos__item">
+                <button className="photos__open" onClick={() => setViewing(i)} aria-label={`Ver ${p.kind === "video" ? "video" : "foto"} ${i + 1}`}>
+                  {p.thumb ? <img src={p.thumb} alt="" /> : <span className="album__nothumb" />}
+                  {p.kind === "video" && <span className="album__play">▶ {duration(p.seconds)}</span>}
+                </button>
+                {p.kind === "photo" && <button className="photos__action" disabled={mediaLocked} onClick={() => setPrivate(p.id, false)}>Hacer pública</button>}
+                <button className="photos__remove" aria-label="Borrar archivo" disabled={mediaLocked} onClick={() => removePhoto(p.id)}>✕</button>
+              </div>
+              <PhotoOrder index={i} total={privatePhotos.length} disabled={mediaLocked} onMove={(step) => reorder(privatePhotos, i, i + step)} />
             </div>
           ))}
           {privatePhotos.length < 40 && (
-            <button className="photos__add" onClick={() => pick(true)} disabled={uploading}>
+            <button className="photos__add" onClick={() => privateFileRef.current?.click()} disabled={mediaLocked}>
               {uploading ? "Subiendo…" : <><PlusIcon /> Fotos y videos</>}
             </button>
           )}
         </div>
-        <UploadProgress upload={uploadState?.isPrivate ? uploadState : null} />
+        {progress && (
+          <p className="muted small" role="status">
+            Subiendo {progress.done + 1} de {progress.total}{progress.video ? " · los videos tardan un poco más en procesarse" : ""}…
+          </p>
+        )}
         {grants.length > 0 && (
           <>
             <h3 className="subhead subhead--spaced">Lo pueden ver</h3>
@@ -442,36 +322,32 @@ export function MyProfile() {
                     <Link to={`/perfil/${g.id}`}>{g.name}</Link>
                     <small className="muted">{untilLabel(g.expiresAt)}</small>
                   </span>
-                  <button className="linkbtn" onClick={() => revoke(g.id)}>Quitar</button>
-                  <button className="linkbtn linkbtn--danger" onClick={() => blockFromAlbum(g)}>Bloquear</button>
+                  <button className="linkbtn" disabled={mediaLocked} onClick={() => revoke(g.id)}>Quitar</button>
+                  <button className="linkbtn linkbtn--danger" disabled={mediaLocked} onClick={() => blockFromAlbum(g)}>Bloquear</button>
                 </li>
               ))}
             </ul>
           </>
         )}
-        <input
-          ref={fileRef}
-          type="file"
-          accept="image/*"
-          multiple
-          hidden
-          onChange={async (e) => {
-            const input = e.currentTarget;
-            const files = Array.from(input.files ?? []);
-            try {
-              await addFiles(files, nextPrivate.current);
-            } finally {
-              input.value = "";
-            }
-          }}
-        />
+        <input ref={privateFileRef} type="file" accept="image/*,video/*" multiple hidden onChange={(e) => selectFiles(e, true)} />
+        {cropBatch && (
+          <PhotoCrop
+            key={`${cropBatch.isPrivate}-${cropBatch.index}`}
+            file={cropBatch.files[cropBatch.index]}
+            number={cropBatch.index + 1}
+            total={cropBatch.files.length}
+            isPrivate={cropBatch.isPrivate}
+            onSkip={() => { void advanceBatch({ ...cropBatch, index: cropBatch.index + 1 }); }}
+            onUpload={(file) => uploadCrop(cropBatch, file)}
+          />
+        )}
         {viewing != null && (
           <AlbumViewer items={privatePhotos} start={viewing} title="Tu álbum privado" onClose={() => setViewing(null)} />
         )}
       </section>
 
       <form className="section form" onSubmit={save}>
-        <h2 className="section__title">Sobre vos <span className="muted">{me.profile.age} años</span></h2>
+        <h2 className="section__title">Sobre vos <span className="muted">{profile.age} años</span></h2>
         <label className="field">
           <span>Nombre</span>
           <input className="input" required maxLength={40} value={form.displayName} onChange={(e) => set("displayName", e.target.value)} />
@@ -504,101 +380,13 @@ export function MyProfile() {
           </label>
         </div>
         {error && <p className="error" role="alert">{error}</p>}
-        <div className="savebar">
-          <button className="btn btn--primary btn--grow" disabled={saved === "saving"}>
-            {saved === "saving" ? "Guardando…" : saved === "ok" ? "Guardado ✓" : "Guardar cambios"}
+        <div className="row profile-editor__actions">
+          <button type="button" className="btn btn--ghost" onClick={leave} disabled={mediaLocked}>Cancelar</button>
+          <button className="btn btn--primary" disabled={mediaLocked}>
+            {saving ? "Guardando…" : "Guardar cambios"}
           </button>
         </div>
       </form>
-
-      <section className="section">
-        <h2 className="section__title">Ubicación y privacidad</h2>
-        <div className="stack">
-          <p className="muted small">
-            {me.profile.hasLocation
-              ? "Aparecés en la grilla con tu distancia. Mientras usás la app, tu zona se actualiza sola. Guardamos solo una zona de ~500 m, nunca tu posición exacta."
-              : "No compartiste tu ubicación: aparecés en la grilla, pero sin distancia."}
-          </p>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={me.profile.incognito}
-              onChange={async (e) => {
-                await api("/me/privacy", { method: "PUT", json: { incognito: e.target.checked } });
-                await reload();
-              }}
-            />
-            <span><b>Modo incógnito.</b> No aparecés en la grilla, nadie ve si estás en línea y tus visitas a perfiles no quedan registradas. Podés seguir chateando con quien quieras.</span>
-          </label>
-          <label className="check">
-            <input
-              type="checkbox"
-              checked={me.profile.showDistance}
-              onChange={async (e) => {
-                await api("/me/privacy", { method: "PUT", json: { showDistance: e.target.checked } });
-                await reload();
-              }}
-            />
-            <span>Mostrar a qué distancia estoy. Si lo apagás, tampoco vas a ver la distancia de los demás.</span>
-          </label>
-          {me.profile.hasLocation && (
-            <button
-              className="btn btn--ghost"
-              onClick={async () => {
-                await api("/me/location", { method: "DELETE" });
-                await reload();
-              }}
-            >
-              Borrar mi ubicación y salir de la grilla
-            </button>
-          )}
-        </div>
-      </section>
-
-      <section className="section">
-        <h2 className="section__title">Bloqueados</h2>
-        {blocked.length === 0 ? (
-          <p className="muted">No bloqueaste a nadie.</p>
-        ) : (
-          <ul className="blocked">
-            {blocked.map((b) => (
-              <li key={b.id}>
-                <Avatar src={b.photo} name={b.name} size={36} />
-                <span>{b.name}</span>
-                <button className="linkbtn" onClick={() => unblock(b.id)}>Desbloquear</button>
-              </li>
-            ))}
-          </ul>
-        )}
-      </section>
-
-      <section className="section">
-        <h2 className="section__title">Cuenta</h2>
-        <p className="muted small">{me.user.email}</p>
-        <div className="stack">
-          <button className="btn" onClick={logout}>Cerrar sesión</button>
-          {deleting ? (
-            <div className="confirm confirm--danger">
-              <p>Se borran tu perfil, tus fotos y tus mensajes. <b>No se puede deshacer.</b> Escribí <b>borrar</b> para confirmar.</p>
-              <input className="input" value={deleteText} onChange={(e) => setDeleteText(e.target.value)} aria-label="Escribí borrar para confirmar" />
-              <div className="row">
-                <button className="btn" onClick={() => { setDeleting(false); setDeleteText(""); }}>Cancelar</button>
-                <button className="btn btn--danger" disabled={deleteText.trim().toLowerCase() !== "borrar"} onClick={deleteAccount}>Borrar mi cuenta</button>
-              </div>
-            </div>
-          ) : (
-            <button className="btn btn--ghost btn--dangertext" onClick={() => setDeleting(true)}>Borrar mi cuenta</button>
-          )}
-        </div>
-        <p className="fineprint">
-          {APP_NAME} es software libre (AGPL-3.0), hecho en comunidad. Está en beta:{" "}
-          <Link to="/terminos">Términos</Link> · <Link to="/privacidad">Privacidad</Link>.
-        </p>
-      </section>
-      {uploadState?.kind === "error" && createPortal(
-        <div className="toast toast--upload-error" role="alert">{uploadState.message}</div>,
-        document.body,
-      )}
     </div>
   );
 }
