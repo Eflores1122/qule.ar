@@ -211,10 +211,12 @@ export async function checkMinorSignals(
 }
 
 // ---------- Nombres y descripciones de grupos que no se permiten ----------
-// Un grupo no se puede crear ni editar con un nombre o una descripción que apunte a menores, a vender cosas o
-// servicios (incluidos masajes y servicios sexuales) o a drogas. Ver los Términos (punto 4) y docs/MODERACION.md.
+// Un grupo no se puede crear ni editar con un nombre o una descripción que apunte a menores o a vender cosas o
+// servicios (incluidos masajes y servicios sexuales). Ver los Términos (punto 4) y docs/MODERACION.md.
+// Las drogas no se filtran por palabras: hablar de consumo cuidado y de reducción de daños está permitido.
+// Vender u ofrecer drogas se reporta a mano ("venta o drogas").
 
-type ForbiddenKind = "menores" | "venta" | "servicios" | "drogas";
+type ForbiddenKind = "menores" | "venta" | "servicios";
 
 const FORBIDDEN_GROUP: { kind: ForbiddenKind; message: string; patterns: RegExp[] }[] = [
   {
@@ -233,15 +235,6 @@ const FORBIDDEN_GROUP: { kind: ForbiddenKind; message: string; patterns: RegExp[
     patterns: [
       /\bvend(?:o|e|emos|en|er|edor\w*)\b/, /\bventas?\b/, /\bcompr(?:o|amos|a y venta)\b/, /\bprecios?\b/,
       /\$\s?\d/, /\bofertas?\b/, /\bcobr(?:o|amos)\b/, /\bdelivery\b/, /\bstock\b/, /\bmayorista\w*/,
-    ],
-  },
-  {
-    kind: "drogas",
-    message: "No se pueden crear grupos sobre consumo ni venta de drogas.",
-    patterns: [
-      /\btina\b/, /\bmerca\b/, /\bfaso\b/, /\bporros?\b/, /\bpepas?\b/, /\bpoppers?\b/, /\bghb\b/, /\bchems(?:ex)?\b/,
-      /\bpnp\b/, /\bparty (?:and|&|n) play\b/, /\bfiestas? quimica\w*/, /\bcocaina\b/, /\bmdma\b/, /\bketa(?:mina)?\b/,
-      /\bcristal\b/, /💊/u,
     ],
   },
 ];

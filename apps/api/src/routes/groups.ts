@@ -135,7 +135,7 @@ function parse<T>(schema: z.ZodType<T>, input: unknown): T {
 // ---------- Nombres que no se permiten ----------
 
 /**
- * Corta con 400 si el nombre o la descripción apunta a menores, venta, masajes o servicios sexuales, o drogas.
+ * Corta con 400 si el nombre o la descripción apunta a menores, venta, masajes o servicios sexuales.
  * Si es por menores, además le avisa a moderación quién lo intentó.
  */
 async function rejectForbidden(u: { id: string; name: string }, name: string, description: string | null | undefined) {
