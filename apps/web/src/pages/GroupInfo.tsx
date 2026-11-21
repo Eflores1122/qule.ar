@@ -5,6 +5,10 @@ import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { BackIcon, PlusIcon } from "../components/Icons";
 import { InvitePeopleSheet } from "../components/Invite";
+import { ReportDialog } from "../components/ReportDialog";
+import { slowModeText } from "../features/groups/groupRules";
+import { GroupPhotoSetting } from "../components/GroupPhoto";
+import { GroupAvatar } from "../components/GroupAvatar";
 
 export function GroupInfo() {
   const { id = "" } = useParams();
@@ -18,6 +22,7 @@ export function GroupInfo() {
   const [error, setError] = useState("");
   const [memberMenu, setMemberMenu] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<null | "leave" | "delete">(null);
+  const [reporting, setReporting] = useState(false);
 
   const isMod = info?.role === "owner" || info?.role === "moderator";
   const isOwner = info?.role === "owner";
@@ -81,11 +86,18 @@ export function GroupInfo() {
         <h1 className="topbar__title topbar__title--sm">{info.isGeneral ? "# " : ""}{info.name}</h1>
       </header>
 
+      <section className="section group-head">
+        <GroupAvatar name={info.name} photo={info.photo} general={info.isGeneral} size="big" />
+        {isOwner && !info.isGeneral && <GroupPhotoSetting groupId={id} photo={info.photo} onChange={(photo) => setInfo({ ...info, photo })} />}
+      </section>
+
       <section className="section">
-        {info.description && <p className="profile__about">{info.description}</p>}
+        <h2 className="section__title">Sobre el grupo</h2>
+        {info.description && <p className="profile__about group-description">{info.description}</p>}
         <p className="muted small hint">
           {info.memberCount} {info.memberCount === 1 ? "miembro" : "miembros"} · Tu rol: {ROLE_LABEL[info.role!]}
         </p>
+        <p className="muted small">{slowModeText(info.rules)}</p>
       </section>
 
       <section className="section">
@@ -230,11 +242,16 @@ export function GroupInfo() {
               <>
                 <button className="btn" onClick={() => setConfirm("leave")}>Salir del grupo</button>
                 {isOwner && <button className="btn btn--ghost btn--dangertext" onClick={() => setConfirm("delete")}>Borrar grupo</button>}
+                {!isOwner && (
+                  <button className="btn btn--ghost btn--dangertext" onClick={() => setReporting(true)}>Reportar este grupo</button>
+                )}
               </>
             )}
           </div>
         </section>
       )}
+
+      {reporting && <ReportDialog groupId={id} name={info.name} onClose={() => setReporting(false)} />}
 
       {info.isGeneral && (
         <section className="section">

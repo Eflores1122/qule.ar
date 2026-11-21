@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { api, type InvitableGroup, type InviteCandidate, type InviteCandidates, type InviteState, type MyInvite } from "../api";
 import { Avatar } from "./Avatar";
+import { GroupAvatar } from "./GroupAvatar";
 import { GroupIcon } from "./Icons";
 
 /**
@@ -231,7 +232,7 @@ export function InviteToGroups({ userId, name }: { userId: string; name: string 
               {groups.map((g) => (
                 <li key={g.id} className="member">
                   <span className="member__who">
-                    <span className="gcard__icon gcard__icon--sm" aria-hidden>{g.name.charAt(0).toUpperCase()}</span>
+                    <GroupAvatar name={g.name} photo={g.photo} size="sm" />
                     <b>{g.name}</b>
                   </span>
                   <InviteAction state={g.state} onInvite={() => invite(g)} />
@@ -276,7 +277,7 @@ export function MyInvites({ invites, onChange }: { invites: MyInvite[]; onChange
         {invites.map((inv) => (
           <li key={inv.id} className="req">
             <div className="req__who">
-              <span className="gcard__icon" aria-hidden>{inv.group.name.charAt(0).toUpperCase()}</span>
+              <GroupAvatar name={inv.group.name} photo={inv.group.photo} />
               <span>
                 <b>{inv.group.name}</b>
                 <span className="gcard__meta">

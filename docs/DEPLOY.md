@@ -99,51 +99,50 @@ Si se pierde el servidor, los backups siguen estando. Si se pierde **la contrase
 
 ### Una sola vez
 
-1. **Almacenamiento:** un bucket privado en Cloudflare R2 (ya usamos Cloudflare; 10 GB gratis), por ejemplo `qule-backups`. Un token de API de R2 con permiso de lectura y escritura **solo sobre ese bucket**. Sirve cualquier S3 compatible (Backblaze B2, etc.).
-2. **restic 0.17 o más nuevo** en el servidor (el de `apt` puede ser más viejo, por eso se actualiza):
-
-   ```bash
-   apt install -y restic && restic self-update && restic version
-   ```
+1. Creá un bucket privado en Cloudflare R2, por ejemplo `qule-backups`. Creá un token **solo para ese bucket**, con permisos para subir, leer y borrar objetos. Para usar otro servicio compatible con S3, verificá también el borrado de versiones anteriores.
+2. Instalá el [binario oficial de restic](https://github.com/restic/restic/releases) 0.17 o más nuevo en `~/mortero/bin/restic`, con permisos de ejecución, usando la misma cuenta que hace el deploy. Para las fotos, el script usa Docker con el volumen montado en modo de solo lectura.
 
 3. **Configuración y contraseña:**
 
    ```bash
-   cp /opt/mortero/src/deploy/backup.env.example /opt/mortero/backup.env
-   nano /opt/mortero/backup.env          # repositorio y token de R2
-   openssl rand -base64 32 > /opt/mortero/restic-password
-   chmod 600 /opt/mortero/backup.env /opt/mortero/restic-password
+   umask 077
+   cp "$HOME/mortero/src/deploy/backup.env.example" "$HOME/mortero/backup.env"
+   nano "$HOME/mortero/backup.env"          # repositorio y token de R2
+   (set -o noclobber; openssl rand -base64 32 > "$HOME/mortero/restic-password")
+   chmod 600 "$HOME/mortero/backup.env" "$HOME/mortero/restic-password"
    ```
 
-   **Guardá la contraseña** (`cat /opt/mortero/restic-password`) en un gestor de contraseñas, que la tengan al menos dos personas del equipo. No va al repo ni a las Discusiones.
+   **Guardá la contraseña fuera del servidor** en un gestor de contraseñas. Sin ella no vas a poder restaurar los backups.
 
 4. **Crear el repositorio y probar:**
 
    ```bash
-   set -a; . /opt/mortero/backup.env; set +a
-   restic init
-   /opt/mortero/src/deploy/backup.sh
-   restic snapshots                       # tiene que mostrar uno "db" y uno "fotos"
+   set -a; . "$HOME/mortero/backup.env"; set +a
+   "${RESTIC_BIN:-$HOME/mortero/bin/restic}" init
+   "$HOME/mortero/src/deploy/backup.sh"
+   "${RESTIC_BIN:-$HOME/mortero/bin/restic}" snapshots  # uno "db" y uno "fotos"
    ```
 
-5. **Cron** (como root, `crontab -e`):
+5. **Cron** con la cuenta que hace el deploy (`crontab -e`):
 
    ```
-   0 4 * * * /opt/mortero/src/deploy/backup.sh >> /var/log/qule-backup.log 2>&1
+   0 4 * * * "$HOME/mortero/src/deploy/backup.sh" >> "$HOME/mortero/backup.log" 2>&1
    ```
 
-6. **Borrar los backups viejos sin cifrar**, una vez que el primero cifrado funcionó: `rm -rf /opt/mortero/backups`.
+6. Después de probar la restauración de los backups cifrados, revisá las copias viejas sin cifrar en `~/mortero/backups` y purgalas según su antigüedad.
 
 ### Restaurar
 
 ```bash
-set -a; . /opt/mortero/backup.env; set +a
-restic snapshots                                        # elegir la fecha
+set -o pipefail
+set -a; . "$HOME/mortero/backup.env"; set +a
+restic_bin="${RESTIC_BIN:-$HOME/mortero/bin/restic}"
+"$restic_bin" snapshots                                 # elegir la fecha
 # Base (latest = la última; o el ID de un snapshot):
-restic dump --tag db latest /db.dump | docker exec -i mortero-db pg_restore -U mortero -d mortero --clean --if-exists
+"$restic_bin" dump --tag db latest /db.dump | docker exec -i mortero-db pg_restore -U mortero -d mortero --clean --if-exists
 # Fotos (se restauran en una carpeta aparte y después se copian al volumen):
-restic restore --tag fotos latest --target /tmp/restore
-# quedan con la ruta completa: /tmp/restore/var/lib/docker/volumes/mortero-data/_data/uploads
+"$restic_bin" restore --tag fotos latest --target /tmp/restore
+# Las fotos quedan en /tmp/restore/data/uploads.
 ```
 
 Las miniaturas no se guardan: la app las vuelve a generar sola.

@@ -6,6 +6,7 @@
     "dev": "node scripts/dev.mjs",
     "start": "tsx --env-file-if-exists=../../.env src/index.ts",
     "db:generate": "drizzle-kit generate",
+    "test": "tsx --test src/antispam.test.ts",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {

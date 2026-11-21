@@ -1,4 +1,4 @@
-# Revisa cada PR: que respete la marca, que tipe y que la web compile.
+# Revisa cada PR: que respete la marca, que tipe, que pasen las pruebas y que la web compile.
 name: CI
 
 on:
@@ -20,6 +20,8 @@ jobs:
         run: npm run lint
       - name: Tipos (API y web)
         run: npm run typecheck
+      - name: Pruebas del API
+        run: npm test
       - name: Build de la web
         run: npm run build
 

@@ -74,6 +74,8 @@ export const profile = pgTable("profile", {
   showDistance: boolean("show_distance").notNull().default(true),
   // Incógnito: no aparecés en la grilla, no se ve si estás en línea y tus visitas no quedan registradas
   incognito: boolean("incognito").notNull().default(false),
+  // Qué avisos quiere recibir. Lo que no está guardado cuenta como "sí" (ver NOTIFY_KINDS en push.ts).
+  notifyPrefs: jsonb("notify_prefs").$type<Partial<Record<string, boolean>>>().notNull().default({}),
   // Moderación: una cuenta suspendida no puede usar la app y no aparece en ningún lado
   suspendedAt: timestamp("suspended_at", { withTimezone: true }),
   suspendReason: text("suspend_reason"),
@@ -97,7 +99,12 @@ export const photo = pgTable("photo", {
   posterKey: text("poster_key"),
   seconds: integer("seconds"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [index("photo_user_idx").on(t.userId, t.position)]);
+}, (t) => [
+  index("photo_user_idx").on(t.userId, t.position),
+  // /files/:key busca la foto por archivo en cada imagen que se muestra
+  index("photo_key_idx").on(t.key),
+  index("photo_poster_key_idx").on(t.posterKey),
+]);
 
 /** A quién le compartiste tu álbum privado. Se puede revocar en cualquier momento. */
 export const albumGrant = pgTable("album_grant", {
@@ -127,7 +134,7 @@ export const block = pgTable("block", {
   blockerId: text("blocker_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   blockedId: text("blocked_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [primaryKey({ columns: [t.blockerId, t.blockedId] })]);
+}, (t) => [primaryKey({ columns: [t.blockerId, t.blockedId] }), index("block_blocked_idx").on(t.blockedId)]);
 
 export const report = pgTable("report", {
   id: text("id").primaryKey(),
@@ -137,6 +144,8 @@ export const report = pgTable("report", {
   targetUserId: text("target_user_id").references(() => user.id, { onDelete: "set null" }),
   messageId: text("message_id"),
   messageKind: text("message_kind"), // "group" | "dm"
+  // Reporte de un grupo (por su nombre, su descripción o lo que pasa adentro). Si el grupo se purga, queda la copia.
+  groupId: text("group_id").references(() => group.id, { onDelete: "set null" }),
   // Copia al momento del reporte: el nombre visible, el texto del mensaje y los archivos (la foto del mensaje
   // o, si se reporta un perfil por algo urgente, sus fotos públicas). Esos archivos no se borran mientras
   // el reporte esté abierto o haya terminado en una medida; si se descarta, se liberan.
@@ -190,8 +199,14 @@ export const group = pgTable("group", {
   description: text("description"),
   ownerId: text("owner_id").references(() => user.id, { onDelete: "set null" }),
   isGeneral: boolean("is_general").notNull().default(false),
+  // Foto del grupo (la pone el dueño). El general no tiene: muestra el logo de la app.
+  photoKey: text("photo_key"),
   spamRules: jsonb("spam_rules").$type<SpamRules>().notNull().default(DEFAULT_SPAM_RULES),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  // Dado de baja (por moderación, o por su dueño si tenía reportes): desaparece para todo el mundo pero queda
+  // guardado 90 días como prueba (ver moderation.ts y docs/MODERACION.md). null = activo.
+  removedAt: timestamp("removed_at", { withTimezone: true }),
+  removedReason: text("removed_reason"),
 });
 
 export const groupMember = pgTable("group_member", {
@@ -201,7 +216,7 @@ export const groupMember = pgTable("group_member", {
   // Silenciado: no llegan avisos de mensajes nuevos (las respuestas a tus mensajes sí)
   muted: boolean("muted").notNull().default(false),
   joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [primaryKey({ columns: [t.groupId, t.userId] })]);
+}, (t) => [primaryKey({ columns: [t.groupId, t.userId] }), index("group_member_user_idx").on(t.userId)]);
 
 /**
  * Solicitudes de ingreso. Nadie puede meter a otra persona en un grupo: se entra pidiendo o aceptando una invitación (group_invite).
@@ -262,7 +277,7 @@ export const conversation = pgTable("conversation", {
   userB: text("user_b").notNull().references(() => user.id, { onDelete: "cascade" }),
   lastMessageAt: timestamp("last_message_at", { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [uniqueIndex("conv_pair_idx").on(t.userA, t.userB)]);
+}, (t) => [uniqueIndex("conv_pair_idx").on(t.userA, t.userB), index("conv_user_b_idx").on(t.userB)]);
 
 export const directMessage = pgTable("direct_message", {
   id: text("id").primaryKey(),
@@ -276,7 +291,11 @@ export const directMessage = pgTable("direct_message", {
   openedAt: timestamp("opened_at", { withTimezone: true }),
   readAt: timestamp("read_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [index("dm_conv_idx").on(t.conversationId, t.createdAt)]);
+}, (t) => [
+  index("dm_conv_idx").on(t.conversationId, t.createdAt),
+  // /files/:key busca si el archivo es foto de un mensaje privado
+  index("dm_photo_key_idx").on(t.photoKey),
+]);
 
 // ---------- Toques y reacciones ----------
 

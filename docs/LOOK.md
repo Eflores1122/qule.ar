@@ -76,12 +76,12 @@ No hay modo claro "blanco": rompería lo discreto de la app. Hay dos oscuros:
 - **Oscuro** (por defecto): casi negro con el toque violeta, para la noche y el colectivo.
 - **Penumbra**: un oscuro más suave para usar de día o con mucho brillo.
 
-Se elige en **Yo → Tema** y se guarda en el dispositivo. Solo cambian los colores de la tabla de arriba: el acento y los colores de estado son los mismos. Para sumar un tema se agrega en `themes` (`packages/brand`) con los mismos siete colores.
+Se elige en **Yo → Configuración → Apariencia** y se guarda en el dispositivo. Solo cambian los colores de la tabla de arriba: el acento y los colores de estado son los mismos. Para sumar un tema se agrega en `themes` (`packages/brand`) con los mismos siete colores.
 
 ## Tipografía
 
 - **Bricolage Grotesque** (`var(--display)`, 800) para el logo en texto y los títulos grandes.
-- **Inter** (`var(--font)`) para todo lo demás. Texto base de 15 px.
+- **Inter** (`var(--font)`) para todo lo demás. Texto base de 15 px. Los campos donde se escribe van en 16 px (`--text-input`): con menos, el iPhone hace zoom al tocarlos y la pantalla queda ampliada.
 
 Tamaños (`font-size: var(--…)`):
 
@@ -94,6 +94,7 @@ Tamaños (`font-size: var(--…)`):
 | `--text-base` | 15 px | `--title-xl` | 28 px | | |
 | `--text-lg` | 16 px | `--title-2xl` | 32 px | | |
 | `--text-xl` | 18 px | `--title-3xl` | 34 px | | |
+| `--text-input` | 16 px (campos donde se escribe) | | | | |
 
 ## Formas
 
@@ -130,7 +131,7 @@ El mate culo: un mate con su bombilla en el que el cuenco es una cola. Hay conte
 Antes de abrir un PR que toque la pantalla:
 
 - [ ] Usa clases y variables que ya existen. Si inventa una, la agrega en `packages/brand` y en esta guía.
-- [ ] Se ve bien en los dos temas (Yo → Tema).
+- [ ] Se ve bien en los dos temas (Yo → Configuración → Apariencia).
 - [ ] Se ve bien en 375 px de ancho.
 - [ ] Los textos siguen el tono de arriba.
 - [ ] `npm run lint` pasa.

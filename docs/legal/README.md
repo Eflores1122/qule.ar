@@ -18,6 +18,8 @@ Son Markdown simple: títulos `#` y `##`, párrafos, listas con `-` (un nivel de
 
 Un arreglo de redacción no necesita cambiar la versión.
 
+**Lenguaje de los textos legales:** sin lenguaje inclusivo con "e" (usuarie, todes, bienvenide…), por indicación legal. Se usa español estándar o formas neutras ("las personas", "quien usa la app"), y "el Usuario" como término definido. El resto de la app sigue la guía de tono de `docs/LOOK.md`.
+
 ## Lo que falta completar
 
 Esta es una versión beta, escrita con lo que sabemos hoy. Pendiente:

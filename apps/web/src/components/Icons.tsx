@@ -45,6 +45,9 @@ export const LockIcon = () => (
 export const EyeIcon = () => (
   <svg {...base} width={18} height={18}><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg>
 );
+export const EyeOffIcon = () => (
+  <svg {...base} width={18} height={18}><path d="M3 3l18 18M10.6 5.1A9 9 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-2.7 3.5M6.1 6.1A17 17 0 0 0 2 12s3.6 7 10 7a9 9 0 0 0 5.9-2.1M10 10a3 3 0 0 0 4 4" /></svg>
+);
 export const TimerIcon = () => (
   <svg {...base} width={18} height={18}><circle cx="12" cy="13" r="8" /><path d="M12 9v4l2 2M9 2h6" /></svg>
 );
@@ -53,4 +56,19 @@ export const InfoIcon = () => (
 );
 export const PlusIcon = () => (
   <svg {...base}><path d="M12 5v14M5 12h14" /></svg>
+);
+export const RefreshIcon = () => (
+  <svg {...base}><path d="M20 4v6h-6m6 0a8 8 0 1 0-.7 6" /></svg>
+);
+export const CheckIcon = () => (
+  <svg {...base}><path d="m5 12 4 4L19 6" /></svg>
+);
+export const EditIcon = () => (
+  <svg {...base}><path d="m14 6 4 4M4 20l4.5-1 11-11a2.8 2.8 0 0 0-4-4l-11 11L4 20Z" /></svg>
+);
+export const SettingsIcon = () => (
+  <svg {...base}><path d="M9.5 3h5l.7 2.4 2 .9 2.3-.8 2.5 4.3-1.7 1.8v2l1.7 1.8-2.5 4.3-2.3-.8-2 .9-.7 2.2h-5l-.7-2.2-2-.9-2.3.8L2 15.4l1.7-1.8v-2L2 9.8l2.5-4.3 2.3.8 2-.9L9.5 3Z" /><circle cx="12" cy="12.5" r="3" /></svg>
+);
+export const ChevronRightIcon = () => (
+  <svg {...base}><path d="m9 5 7 7-7 7" /></svg>
 );
