@@ -12,7 +12,6 @@ import { deleteImage, MAX_UPLOAD_BYTES, saveImage } from "../storage.js";
 import { albumAccessUntil, recordView } from "./premium.js";
 import { myRecentToque } from "./toques.js";
 import { pushTo } from "../push.js";
-import { APP_NAME } from "../brand.js";
 import { EXPIRING_GRACE_MS, EXPIRING_SECONDS } from "../expiring.js";
 import { deleteImageUnlessEvidence, isUrgent, notifyModeratorsUrgent, REPORT_REASONS } from "../moderation.js";
 import { limit } from "../ratelimit.js";
@@ -240,7 +239,7 @@ socialRoutes.post("/conversations/:id/messages", async (c) => {
   // Notificación discreta (sin nombre ni contenido). Se manda siempre: si la app está abierta y a la vista,
   // el service worker no la muestra. Antes se salteaba si "estaba en línea", y en el celu con la app
   // minimizada la conexión queda abierta un rato y el aviso nunca llegaba.
-  pushTo(otherId, { title: APP_NAME, body: "Tenés un mensaje nuevo", url: `/mensajes/${conv.id}`, tag: `dm-${conv.id}`, kind: "mensajes" }).catch(() => {});
+  pushTo(otherId, { title: "Te llegó un mensaje", body: "Abrí el chat para leerlo.", url: `/mensajes/${conv.id}`, tag: `dm-${conv.id}`, kind: "mensajes" }).catch(() => {});
   return c.json(msg);
 });
 
