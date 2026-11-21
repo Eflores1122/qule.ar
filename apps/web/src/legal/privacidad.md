@@ -1,6 +1,6 @@
 # Política de privacidad
 
-**Versión beta · 20 de noviembre de 2026**
+**Versión beta · 21 de noviembre de 2026**
 
 En qule.ar tratamos datos muy personales: quién sos, qué buscás y, si lo contás, cosas sobre tu salud. Por eso esta política intenta decir **exactamente** qué guardamos, dónde y quién lo puede ver, sin letra chica. Sigue la **Ley 25.326 de Protección de Datos Personales**.
 
@@ -78,7 +78,7 @@ Solo para que la app funcione: mostrar tu perfil, la gente cerca y los grupos, m
 - Mientras tengas la cuenta.
 - **Si borrás tu cuenta**, se borran en el momento tu perfil, fotos, videos, mensajes, favoritos y todo lo asociado, salvo lo que forme parte de un reporte de moderación (mirá abajo). Puede quedar una copia en los backups hasta **14 días**, y después se borra sola.
 - **Si desenviás un mensaje privado**, se borra para las dos personas.
-- **Si borrás un mensaje en un grupo**, se borra: deja de verse para todes y el texto se elimina.
+- **Si borrás un mensaje en un grupo**, se borra: deja de verse para todas las personas y el texto se elimina.
 - **Las fotos temporales** se borran del servidor después de verse.
 - **Si moderación da de baja un grupo**, desaparece para todo el mundo pero queda guardado **90 días** como prueba, y solo lo ve moderación. Después se borra del todo. Lo mismo pasa si su dueño lo borra mientras tiene reportes.
 - **Si alguien reporta un mensaje o un perfil**, guardamos una copia de lo reportado (el texto y las fotos) para que moderación lo pueda revisar aunque después se borre.

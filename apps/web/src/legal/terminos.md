@@ -1,14 +1,16 @@
 # Términos y condiciones
 
-**Versión beta · 20 de noviembre de 2026**
+**Versión beta · 21 de noviembre de 2026**
 
-Bienvenide a qule.ar. Al crear tu cuenta aceptás estos términos y la [Política de privacidad](/privacidad). Los escribimos en criollo para que se entiendan.
+Te damos la bienvenida a qule.ar. Al crear tu cuenta aceptás estos términos y la [Política de privacidad](/privacidad). Los escribimos en criollo para que se entiendan.
 
 > **En corto:** qule.ar está en **beta**. Te registrás y la usás **bajo tu propia responsabilidad**. Quienes la desarrollamos respondemos **solo por el funcionamiento del servicio de la app**: no por lo que hagan otras personas, ni por lo que pase en un encuentro, ni por lo que publiques vos. Leé todo antes de aceptar.
 
 ## 1. Qué es qule.ar
 
 qule.ar es una app comunitaria, gratuita y de código abierto para conocer gente y charlar en grupos. La hace un grupo de personas voluntarias, no una empresa, y el código está publicado en [GitHub](https://github.com/RGabrielR/qule.ar) bajo la licencia AGPL-3.0.
+
+En estos términos, **el Usuario** es toda persona que se registra en qule.ar o la usa.
 
 **Contacto:** por ahora, en las [Discusiones del proyecto](https://github.com/RGabrielR/qule.ar/discussions). Pronto vamos a sumar un mail.
 
@@ -32,7 +34,7 @@ qule.ar es una app comunitaria, gratuita y de código abierto para conocer gente
 
 ## 4. Cómo nos tratamos
 
-qule.ar es un espacio para la comunidad LGBTIQ+ y sus aliades. Al usarla te comprometés a:
+qule.ar es un espacio para la comunidad LGBTIQ+ y las personas aliadas. Al usarla te comprometés a:
 
 - Tratar bien a las demás personas. Nada de acoso, amenazas, discriminación ni discursos de odio, incluidos los que apuntan a la identidad de género, la orientación sexual, el estado serológico, el cuerpo, el origen o la clase.
 - Respetar el nombre y los pronombres de cada persona.
@@ -40,6 +42,8 @@ qule.ar es un espacio para la comunidad LGBTIQ+ y sus aliades. Al usarla te comp
 - No hacerte pasar por otra persona ni crear perfiles falsos.
 - No mandar spam, publicidad, estafas ni pedidos de plata.
 - No ofrecer ni pedir servicios sexuales pagos ni nada ilegal.
+- **No ofrecer, pedir, vender ni promover drogas.** Es tolerancia cero: la cuenta se suspende.
+- No usar la app ni los grupos para vender o comprar cosas o servicios, incluidos los masajes.
 - No publicar contenido sexual de menores, contenido sexual sin consentimiento ni violencia. Esto lo denunciamos a las autoridades.
 - No intentar romper la app, entrar a cuentas ajenas ni sacar datos de forma automática.
 
@@ -82,7 +86,7 @@ Nada de esto limita los derechos que te dan la Ley de Defensa del Consumidor (24
 
 Podés borrar tu cuenta cuando quieras desde **Yo**. Se borran tu perfil, tus fotos, tus mensajes y todo lo asociado. Los detalles, incluido qué pasa con los backups, están en la [Política de privacidad](/privacidad).
 
-También podemos dar de baja qule.ar o cerrarla. Si pasa, vamos a avisar con tiempo para que puedas irte tranquile, salvo que sea por una urgencia.
+También podemos dar de baja qule.ar o cerrarla. Si pasa, vamos a avisar con tiempo para que puedas irte con tranquilidad, salvo que sea por una urgencia.
 
 ## 10. Cambios en estos términos
 
