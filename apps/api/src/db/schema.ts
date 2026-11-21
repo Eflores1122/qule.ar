@@ -74,6 +74,8 @@ export const profile = pgTable("profile", {
   showDistance: boolean("show_distance").notNull().default(true),
   // Incógnito: no aparecés en la grilla, no se ve si estás en línea y tus visitas no quedan registradas
   incognito: boolean("incognito").notNull().default(false),
+  // Qué avisos quiere recibir. Lo que no está guardado cuenta como "sí" (ver NOTIFY_KINDS en push.ts).
+  notifyPrefs: jsonb("notify_prefs").$type<Partial<Record<string, boolean>>>().notNull().default({}),
   // Moderación: una cuenta suspendida no puede usar la app y no aparece en ningún lado
   suspendedAt: timestamp("suspended_at", { withTimezone: true }),
   suspendReason: text("suspend_reason"),

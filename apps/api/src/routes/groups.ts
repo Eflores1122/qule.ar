@@ -316,7 +316,7 @@ groupRoutes.post("/groups/:id/requests", async (c) => {
   await db.insert(groupJoinRequest).values({ id, groupId: g.id, userId: u.id, message: message || null });
   const mods = await notifyMods(g.id, "group:request", { groupId: g.id });
   for (const m of mods) {
-    pushTo(m, { title: APP_NAME, body: "Tenés una solicitud nueva en un grupo", url: `/grupos/${g.id}/info`, tag: `req-${g.id}` }).catch(() => {});
+    pushTo(m, { title: APP_NAME, body: "Tenés una solicitud nueva en un grupo", url: `/grupos/${g.id}/info`, tag: `req-${g.id}`, kind: "solicitudes" }).catch(() => {});
   }
   return c.json({ id });
 });
@@ -371,7 +371,7 @@ groupRoutes.post("/groups/:id/requests/:rid/:decision{accept|reject}", async (c)
   if (accept) {
     await joinGroup(g, req.userId, u.id); // también cierra una invitación que tuviera pendiente
     emitToUser(req.userId, "group:accepted", { groupId: g.id, name: g.name });
-    pushTo(req.userId, { title: APP_NAME, body: "Te aceptaron en un grupo", url: `/grupos/${g.id}`, tag: `acc-${g.id}` }).catch(() => {});
+    pushTo(req.userId, { title: APP_NAME, body: "Te aceptaron en un grupo", url: `/grupos/${g.id}`, tag: `acc-${g.id}`, kind: "solicitudes" }).catch(() => {});
   } else {
     emitToUser(req.userId, "group:rejected", { groupId: g.id, name: g.name });
     await notifyMods(g.id, "group:request", { groupId: g.id });
@@ -480,7 +480,7 @@ groupRoutes.post("/groups/:id/invites", async (c) => {
     // Ya había pedido entrar: invitarle es lo mismo que aceptarle
     await joinGroup(g, target, u.id);
     emitToUser(target, "group:accepted", { groupId: g.id, name: g.name });
-    pushTo(target, { title: APP_NAME, body: "Te aceptaron en un grupo", url: `/grupos/${g.id}`, tag: `acc-${g.id}` }).catch(() => {});
+    pushTo(target, { title: APP_NAME, body: "Te aceptaron en un grupo", url: `/grupos/${g.id}`, tag: `acc-${g.id}`, kind: "solicitudes" }).catch(() => {});
     return c.json({ joined: true });
   }
 
@@ -494,7 +494,7 @@ groupRoutes.post("/groups/:id/invites", async (c) => {
   const id = newId();
   await db.insert(groupInvite).values({ id, groupId: g.id, userId: target, invitedBy: u.id });
   emitToUser(target, "group:invite", { groupId: g.id, name: g.name });
-  pushTo(target, { title: APP_NAME, body: "Te invitaron a un grupo", url: "/grupos", tag: `inv-${g.id}` }).catch(() => {});
+  pushTo(target, { title: APP_NAME, body: "Te invitaron a un grupo", url: "/grupos", tag: `inv-${g.id}`, kind: "solicitudes" }).catch(() => {});
   await notifyMods(g.id, "group:request", { groupId: g.id });
   return c.json({ id });
 });

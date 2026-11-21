@@ -160,7 +160,7 @@ premiumRoutes.put("/album/grants/:userId", async (c) => {
     };
     emitToUser(u.id, "dm:message", msg);
     emitToUser(target, "dm:message", msg);
-    pushTo(target, { title: APP_NAME, body: "Tenés un mensaje nuevo", url: `/mensajes/${conv.id}`, tag: `dm-${conv.id}` }).catch(() => {});
+    pushTo(target, { title: APP_NAME, body: "Tenés un mensaje nuevo", url: `/mensajes/${conv.id}`, tag: `dm-${conv.id}`, kind: "mensajes" }).catch(() => {});
   }
   return c.json({ ok: true, expiresAt: expiresAt?.toISOString() ?? null });
 });

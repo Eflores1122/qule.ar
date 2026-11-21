@@ -404,6 +404,8 @@ a.gcard:hover { background: var(--surface); }
 .switch span { width: 24px; height: 24px; border-radius: var(--radius-pill); background: var(--text); transition: transform 0.15s; }
 .switch--on { background: var(--accent); }
 .switch--on span { transform: translateX(22px); background: var(--accent-ink); }
+.prefs__lead { margin-top: 16px; }
+.prefs { list-style: none; margin: 10px 0 0; padding: 0; display: flex; flex-direction: column; gap: 14px; }
 .quicklink--wide { grid-column: span 2; color: var(--accent-2); }
 .kpis { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin: 0; padding: 14px 16px 4px; }
 .kpis > div { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-lg); padding: 10px; }

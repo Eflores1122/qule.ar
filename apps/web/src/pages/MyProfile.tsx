@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router";
-import { api, authClient, closeSocket, upload, type AlbumGrant, type Author, type Profile } from "../api";
+import { api, authClient, closeSocket, upload, type AlbumGrant, type Author, type NotifyKind, type Profile } from "../api";
 import { useMe } from "../App";
 import { APP_NAME, THEME_LABELS, themes, type ThemeName } from "../brand";
 import { AlbumViewer, duration, untilLabel } from "../components/AlbumViewer";
@@ -51,7 +51,58 @@ function MultiChips({ label, value, options, onChange, max = 10 }: { label: stri
 
 const numOrNull = (s: string) => (s === "" ? null : Number(s));
 
-function NotificationsSetting() {
+const NOTICES: { kind: NotifyKind; label: string; hint?: string }[] = [
+  { kind: "mensajes", label: "Mensajes privados" },
+  { kind: "toques", label: "Toques" },
+  { kind: "respuestas", label: "Respuestas en grupos", hint: "Cuando alguien responde un mensaje tuyo." },
+  { kind: "grupos", label: "Mensajes nuevos en grupos", hint: "Como mucho uno cada 10 minutos por grupo. También podés silenciar un grupo solo." },
+  { kind: "solicitudes", label: "Solicitudes e invitaciones", hint: "Pedidos para entrar a tus grupos, invitaciones y cuando te aceptan." },
+];
+
+/** Qué avisos le llegan. Se guarda en la cuenta, así vale para todos los dispositivos. */
+function NoticePrefs({ initial }: { initial: Partial<Record<NotifyKind, boolean>> }) {
+  const [prefs, setPrefs] = useState(initial);
+  const [error, setError] = useState("");
+
+  async function toggle(kind: NotifyKind) {
+    const on = prefs[kind] !== false;
+    const before = prefs;
+    setPrefs({ ...prefs, [kind]: !on });
+    setError("");
+    try {
+      const r = await api<{ notifyPrefs: Partial<Record<NotifyKind, boolean>> }>("/me/notificaciones", { method: "PUT", json: { [kind]: !on } });
+      setPrefs(r.notifyPrefs);
+    } catch {
+      setPrefs(before);
+      setError("No pudimos guardar el cambio. Probá de nuevo.");
+    }
+  }
+
+  return (
+    <>
+      <p className="muted small prefs__lead">¿Qué avisos querés recibir?</p>
+      <ul className="prefs">
+        {NOTICES.map((n) => {
+          const on = prefs[n.kind] !== false;
+          return (
+            <li key={n.kind} className="setting">
+              <div>
+                <p>{n.label}</p>
+                {n.hint && <p className="muted small">{n.hint}</p>}
+              </div>
+              <button className={`switch ${on ? "switch--on" : ""}`} role="switch" aria-checked={on} aria-label={n.label} onClick={() => toggle(n.kind)}>
+                <span />
+              </button>
+            </li>
+          );
+        })}
+      </ul>
+      {error && <p className="error small hint" role="alert">{error}</p>}
+    </>
+  );
+}
+
+function NotificationsSetting({ prefs }: { prefs: Partial<Record<NotifyKind, boolean>> }) {
   const [state, setState] = useState<PushState | null>(null);
   const [busy, setBusy] = useState(false);
   const [test, setTest] = useState("");
@@ -94,10 +145,13 @@ function NotificationsSetting() {
         )}
       </div>
       {state === "on" && (
-        <p className="small hint">
-          <button className="linkbtn" onClick={sendTest} disabled={busy}>Mandarme una de prueba</button>
-          {test && <span className="muted" role="status"> · {test}</span>}
-        </p>
+        <>
+          <p className="small hint">
+            <button className="linkbtn" onClick={sendTest} disabled={busy}>Mandarme una de prueba</button>
+            {test && <span className="muted" role="status"> · {test}</span>}
+          </p>
+          <NoticePrefs initial={prefs} />
+        </>
       )}
     </section>
   );
@@ -328,7 +382,7 @@ export function MyProfile() {
         {me.user.isAdmin && <Link to="/admin" className="quicklink quicklink--wide">Moderación</Link>}
       </nav>
 
-      <NotificationsSetting />
+      <NotificationsSetting prefs={me.profile?.notifyPrefs ?? {}} />
       <ThemeSetting />
 
       <section className="section">

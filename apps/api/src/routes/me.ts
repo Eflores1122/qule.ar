@@ -17,6 +17,7 @@ import { expiringIsOver } from "../expiring.js";
 import { checkMinorSignals, deleteImageUnlessEvidence, isEvidence } from "../moderation.js";
 import { limit } from "../ratelimit.js";
 import { TERMS_VERSION } from "../legal.js";
+import { NOTIFY_KINDS } from "../push.js";
 
 const { profile, photo, user, group, groupMember, directMessage, conversation } = schema;
 const MAX_PHOTOS = 6;
@@ -169,6 +170,17 @@ meRoutes.put("/me/terms", requireUser, requireProfile, async (c) => {
   if (version !== TERMS_VERSION) throw new HTTPException(409, { message: "Los términos cambiaron. Recargá la página para leer la versión nueva." });
   await db.update(profile).set({ termsVersion: TERMS_VERSION, termsAcceptedAt: new Date() }).where(eq(profile.userId, u.id));
   return c.json({ termsVersion: TERMS_VERSION });
+});
+
+/** Qué avisos quiere recibir. Se manda solo lo que cambia; lo demás queda como estaba. */
+const notifyInput = z.object(Object.fromEntries(NOTIFY_KINDS.map((k) => [k, z.boolean().optional()]))).strict();
+meRoutes.put("/me/notificaciones", requireUser, requireProfile, async (c) => {
+  const u = c.get("user");
+  const parsed = notifyInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) throw new HTTPException(400, { message: "Esos avisos no existen" });
+  const prefs = { ...c.get("profile")!.notifyPrefs, ...parsed.data };
+  await db.update(profile).set({ notifyPrefs: prefs }).where(eq(profile.userId, u.id));
+  return c.json({ notifyPrefs: prefs });
 });
 
 /** Hasta cuántas fotos y videos puede tener el álbum privado. */
