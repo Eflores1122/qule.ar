@@ -1,17 +1,19 @@
-import { and, asc, desc, eq, inArray, isNull, ne } from "drizzle-orm";
+import { and, asc, between, desc, eq, gte, inArray, isNotNull, isNull, lte, ne, notInArray, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db, schema } from "../db/index.js";
-import { distanceLabel, snapToCell, visibleKm } from "../geo.js";
+import { boundingBox, distanceLabel, snapToCell, visibleKm } from "../geo.js";
 import { ageFrom, blockedWith, thumbUrl, requireProfile, requireUser, type AppEnv } from "../lib.js";
 import { autoHiddenUsers } from "../moderation.js";
 import { isOnline } from "../realtime.js";
 
 const { profile, photo } = schema;
 
-/** Radio máximo de búsqueda de la grilla. */
 const PAGE = 60;
+const MAX_CANDIDATES = 3000;
+const REGIONAL_LIMIT = MAX_CANDIDATES / 2;
+const REGIONAL_KM = 150;
 /** Cuánto tiempo después de cerrar la app se te sigue mostrando como "hace un rato". */
 const RECENT_MS = 15 * 60_000;
 
@@ -51,7 +53,11 @@ nearbyRoutes.put("/me/location", async (c) => {
   await db
     .update(profile)
     .set({ cellLat: cell.lat, cellLng: cell.lng, locationUpdatedAt: new Date() })
-    .where(eq(profile.userId, u.id));
+    // Si la persona borró la ubicación mientras llegaba el pedido, tampoco la volvemos a guardar.
+    .where(and(
+      eq(profile.userId, u.id),
+      r.data.auto ? and(isNotNull(profile.cellLat), isNotNull(profile.cellLng)) : undefined,
+    ));
   return c.json({ ok: true });
 });
 
@@ -83,17 +89,23 @@ const filtersSchema = z.object({
   online: z.enum(["1"]).optional(),
   withPhoto: z.enum(["1"]).optional(),
   favorites: z.enum(["1"]).optional(),
-  offset: z.coerce.number().int().min(0).max(2000).default(0),
+  offset: z.coerce.number().int().min(0).max(MAX_CANDIDATES).default(0),
 });
 
 export type NearbyFilters = z.infer<typeof filtersSchema>;
+
+function longitudeWindow(minLng: number, maxLng: number) {
+  if (maxLng - minLng >= 360) return isNotNull(profile.cellLng);
+  if (minLng < -180) return or(gte(profile.cellLng, minLng + 360), lte(profile.cellLng, maxLng));
+  if (maxLng > 180) return or(gte(profile.cellLng, minLng), lte(profile.cellLng, maxLng - 360));
+  return between(profile.cellLng, minLng, maxLng);
+}
 
 /** Grilla de gente cerca, de la más cercana a la más lejana. */
 nearbyRoutes.get("/nearby", async (c) => {
   const u = c.get("user");
   const me = c.get("profile")!;
-  // Mostramos a todes, sin límite de distancia: al principio somos pocas personas y la idea es que se encuentren.
-  // Con ubicación, se ordena de más cerca a más lejos; sin ubicación, por quién está en línea.
+  // Las distancias visibles dan prioridad a la zona. La grilla también incluye actividad de otras zonas.
   const meHasLoc = me.cellLat != null && me.cellLng != null;
   const f = filtersSchema.parse(c.req.query());
   const blocked = await blockedWith(u.id);
@@ -103,16 +115,29 @@ nearbyRoutes.get("/nearby", async (c) => {
     (await db.select({ id: schema.favorite.favoriteId }).from(schema.favorite).where(eq(schema.favorite.userId, u.id))).map((r) => r.id),
   );
 
-  const rows = await db
+  const discoverable = and(ne(profile.userId, u.id), eq(profile.incognito, false), isNull(profile.suspendedAt));
+  const order = [desc(profile.lastSeenAt), asc(profile.userId)] as const;
+  const localBox = me.showDistance && me.cellLat != null && me.cellLng != null
+    ? boundingBox(me.cellLat, me.cellLng, REGIONAL_KM)
+    : null;
+  // Reservá parte de la grilla para los perfiles cercanos que sí eligen mostrar distancia.
+  const regional = localBox
+    ? await db.select().from(profile).where(and(
+      discoverable, eq(profile.showDistance, true),
+      between(profile.cellLat, localBox.minLat, localBox.maxLat),
+      longitudeWindow(localBox.minLng, localBox.maxLng),
+    )).orderBy(...order).limit(REGIONAL_LIMIT)
+    : [];
+  const recent = await db
     .select()
     .from(profile)
     .where(and(
-      ne(profile.userId, u.id),
-      eq(profile.incognito, false), // en incógnito no se aparece en la grilla
-      isNull(profile.suspendedAt),
+      discoverable,
+      regional.length ? notInArray(profile.userId, regional.map((row) => row.userId)) : undefined,
     ))
-    .orderBy(desc(profile.lastSeenAt))
-    .limit(3000);
+    .orderBy(...order)
+    .limit(MAX_CANDIDATES - regional.length);
+  const rows = [...regional, ...recent];
 
   const anyOf = (wanted: string[], value: string | null) => !wanted.length || (value != null && wanted.includes(value));
   const overlap = (wanted: string[], values: string[]) => !wanted.length || values.some((v) => wanted.includes(v));
@@ -162,6 +187,7 @@ nearbyRoutes.get("/nearby", async (c) => {
   return c.json({
     needLocation: false,
     hasLocation: meHasLoc,
+    locationUpdatedAt: meHasLoc ? me.locationUpdatedAt?.toISOString() ?? null : null,
     hasMore: filtered.length > f.offset + PAGE,
     total: filtered.length,
     people: page.map(({ p, km, age, online, recent }) => ({

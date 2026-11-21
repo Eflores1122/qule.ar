@@ -1,5 +1,6 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { MIN_PASSWORD_LENGTH } from "../../../packages/security/password.js";
 import { db, schema } from "./db/index.js";
 import { env } from "./env.js";
 import { resetMail, sendMail, welcomeMail } from "./mail.js";
@@ -39,7 +40,7 @@ export const auth = betterAuth({
   }),
   emailAndPassword: {
     enabled: true,
-    minPasswordLength: 8,
+    minPasswordLength: MIN_PASSWORD_LENGTH,
     resetPasswordTokenExpiresIn: 60 * 60,
     // Al cambiar la contraseña se cierran las demás sesiones abiertas
     revokeSessionsOnPasswordReset: true,

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { Link, useSearchParams } from "react-router";
 import { api, authClient, closeSocket, upload, type AlbumGrant, type Author, type Profile } from "../api";
@@ -179,7 +179,10 @@ export function MyProfile() {
   const [deleteText, setDeleteText] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const nextPrivate = useRef(false);
-  const [grants, setGrants] = useState<AlbumGrant[]>([]);
+  const [grants, setGrants] = useState<AlbumGrant[] | null>(null);
+  const [grantBusy, setGrantBusy] = useState(false);
+  const [grantFeedback, setGrantFeedback] = useState<{ error: boolean; message: string } | null>(null);
+  const grantHeading = useRef<HTMLHeadingElement>(null);
   const [viewing, setViewing] = useState<number | null>(null);
   const [toquesNew, setToquesNew] = useState(0);
 
@@ -194,11 +197,20 @@ export function MyProfile() {
     }
   }, [me?.profile]);
 
+  const loadGrants = useCallback(async () => {
+    setGrantFeedback(null);
+    try {
+      setGrants(await api<AlbumGrant[]>("/album/grants"));
+    } catch {
+      setGrantFeedback({ error: true, message: "No pudimos cargar los accesos. Probá de nuevo." });
+    }
+  }, []);
+
   useEffect(() => {
     api<Author[]>("/blocks").then(setBlocked).catch(() => {});
     api<{ count: number }>("/toques/unseen").then((r) => setToquesNew(r.count)).catch(() => {});
-    api<AlbumGrant[]>("/album/grants").then(setGrants).catch(() => {});
-  }, []);
+    void loadGrants();
+  }, [loadGrants]);
 
   useEffect(() => {
     if (uploadState?.kind !== "error") return;
@@ -242,16 +254,40 @@ export function MyProfile() {
     await reload();
   }
 
-  async function revoke(userId: string) {
-    await api(`/album/grants/${userId}`, { method: "DELETE" });
-    setGrants((g) => g.filter((x) => x.id !== userId));
+  async function revoke(userId?: string) {
+    if (grantBusy) return;
+    if (!userId && !confirm("¿Quitar el acceso al álbum privado a todas las personas?")) return;
+    setGrantBusy(true);
+    setGrantFeedback(null);
+    try {
+      const endpoint = userId ? `/album/grants/${userId}` : "/album/grants";
+      await api(endpoint, { method: "DELETE" });
+      setGrants((previous) => userId ? (previous ?? []).filter((grant) => grant.id !== userId) : []);
+      setGrantFeedback({ error: false, message: userId ? "Acceso quitado." : "Quitaste todos los accesos." });
+      grantHeading.current?.focus();
+    } catch {
+      setGrantFeedback({ error: true, message: "No pudimos quitar el acceso. Probá de nuevo." });
+    } finally {
+      setGrantBusy(false);
+    }
   }
 
   async function blockFromAlbum(g: AlbumGrant) {
+    if (grantBusy) return;
     if (!confirm(`¿Bloquear a ${g.name}? Pierde el acceso a tu álbum y no van a poder verse ni escribirse.`)) return;
-    await api("/blocks", { method: "POST", json: { userId: g.id } });
-    setGrants((x) => x.filter((y) => y.id !== g.id));
-    setBlocked((b) => [{ id: g.id, name: g.name, age: g.age, photo: g.photo }, ...b]);
+    setGrantBusy(true);
+    setGrantFeedback(null);
+    try {
+      await api("/blocks", { method: "POST", json: { userId: g.id } });
+      setGrants((previous) => (previous ?? []).filter((grant) => grant.id !== g.id));
+      setBlocked((b) => [{ id: g.id, name: g.name, age: g.age, photo: g.photo }, ...b]);
+      setGrantFeedback({ error: false, message: "Bloqueaste a esta persona y quitaste su acceso." });
+      grantHeading.current?.focus();
+    } catch {
+      setGrantFeedback({ error: true, message: "No pudimos bloquear a esta persona. Probá de nuevo." });
+    } finally {
+      setGrantBusy(false);
+    }
   }
 
   /** Sube varios archivos seguidos (de a uno, así el servidor procesa los videos sin trabarse). */
@@ -377,9 +413,23 @@ export function MyProfile() {
           )}
         </div>
         <UploadProgress upload={uploadState?.isPrivate ? uploadState : null} />
-        {grants.length > 0 && (
-          <>
-            <h3 className="subhead subhead--spaced">Lo pueden ver</h3>
+        <div className="album-access">
+          <div className="album-access__heading">
+            <h3 className="subhead" ref={grantHeading} tabIndex={-1}>Acceso al álbum</h3>
+            {Boolean(grants?.length) && (
+              <button type="button" className="btn btn--small btn--ghost btn--dangertext" onClick={() => revoke()} disabled={grantBusy}>
+                Quitar todos los accesos
+              </button>
+            )}
+          </div>
+          {grantFeedback && <p className={grantFeedback.error ? "error" : "muted small"} role="status">{grantFeedback.message}</p>}
+          {grants === null ? (
+            grantFeedback?.error
+              ? <button type="button" className="linkbtn" onClick={loadGrants}>Reintentar</button>
+              : <p className="muted small" role="status">Cargando accesos…</p>
+          ) : grants.length === 0 ? (
+            <p className="muted small">Solo vos podés ver el álbum.</p>
+          ) : (
             <ul className="blocked grants">
               {grants.map((g) => (
                 <li key={g.id}>
@@ -388,13 +438,13 @@ export function MyProfile() {
                     <Link to={`/perfil/${g.id}`}>{g.name}</Link>
                     <small className="muted">{untilLabel(g.expiresAt)}</small>
                   </span>
-                  <button className="linkbtn" onClick={() => revoke(g.id)}>Quitar</button>
-                  <button className="linkbtn linkbtn--danger" onClick={() => blockFromAlbum(g)}>Bloquear</button>
+                  <button type="button" className="linkbtn" aria-label={`Quitar acceso a ${g.name}`} onClick={() => revoke(g.id)} disabled={grantBusy}>Quitar</button>
+                  <button type="button" className="linkbtn linkbtn--danger" aria-label={`Bloquear a ${g.name}`} onClick={() => blockFromAlbum(g)} disabled={grantBusy}>Bloquear</button>
                 </li>
               ))}
             </ul>
-          </>
-        )}
+          )}
+        </div>
         <input
           ref={fileRef}
           type="file"

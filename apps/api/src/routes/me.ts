@@ -72,16 +72,12 @@ meRoutes.get("/files/:key", requireUser, async (c) => {
   }
   const buf = await readImage(key, c.req.query("s") === "thumb");
   if (!buf) return c.notFound();
-  return c.body(new Uint8Array(buf), 200, {
-    "Content-Type": "image/webp",
-    // Las privadas no se cachean, así revocar el acceso tiene efecto
-    "Cache-Control": ph?.isPrivate || dm?.expiring ? "no-store" : "private, max-age=31536000, immutable",
-  });
+  return c.body(new Uint8Array(buf), 200, { "Content-Type": "image/webp" });
 });
 
 /** Sirve un video por partes (Range): Safari no reproduce videos sin esto, y así se puede adelantar. */
 function serveVideo(range: string | undefined, v: { file: string; size: number }) {
-  const headers: Record<string, string> = { "Content-Type": "video/mp4", "Accept-Ranges": "bytes", "Cache-Control": "no-store" };
+  const headers: Record<string, string> = { "Content-Type": "video/mp4", "Accept-Ranges": "bytes" };
   let start = 0;
   let end = v.size - 1;
   let status = 200;

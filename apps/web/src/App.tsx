@@ -7,6 +7,7 @@ import { NotifyBanner } from "./components/NotifyBanner";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { TermsBanner } from "./components/TermsBanner";
 import { Legal } from "./pages/Legal";
+import { CountrySafety } from "./pages/CountrySafety";
 import { Wordmark } from "./components/Wordmark";
 import { Logo } from "./components/Logo";
 import { APP_NAME } from "./brand";
@@ -60,6 +61,7 @@ export function App() {
         {/* Públicas: se leen con o sin cuenta (y también si la cuenta está suspendida) */}
         <Route path="/terminos" element={<Legal doc="terminos" />} />
         <Route path="/privacidad" element={<Legal doc="privacidad" />} />
+        <Route path="/seguridad-por-pais" element={<CountrySafety />} />
         <Route path="/bienvenida" element={<RequireAuth><Onboarding /></RequireAuth>} />
         <Route element={<RequireAuth needProfile><Shell /></RequireAuth>}>
           <Route path="/" element={<Navigate to="/cerca" replace />} />

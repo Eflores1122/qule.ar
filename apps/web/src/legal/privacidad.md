@@ -16,7 +16,7 @@ Las personas voluntarias que mantienen qule.ar. El código es abierto: cualquier
 
 **Para tener una cuenta (obligatorios):**
 
-- Tu mail y tu contraseña. La contraseña no la guardamos tal cual: guardamos una versión cifrada que no se puede revertir. Si entrás con Google, recibimos tu mail y tu nombre de Google.
+- Tu mail y un hash de tu contraseña. Usamos ese hash para comprobar tu contraseña al entrar. Si entrás con Google, recibimos tu mail y tu nombre de Google.
 - El nombre con el que querés que te vean y tu fecha de nacimiento. Solo mostramos tu edad, nunca la fecha.
 - Qué versión de estos términos aceptaste y cuándo.
 
@@ -26,7 +26,7 @@ Las personas voluntarias que mantienen qule.ar. El código es abierto: cualquier
 - **Estado serológico y fecha del último test.** Es un dato de salud: mirá el punto 3.
 - Fotos y videos. Al subirlos les borramos los metadatos, incluida la ubicación GPS.
 
-**Tu ubicación:** para mostrarte gente cerca, el celu nos manda tu ubicación, pero **nunca guardamos la posición exacta**: la redondeamos al centro de una zona de unos 500 metros. Mientras tenés la app abierta, esa zona se actualiza cada unos minutos para que la grilla siga donde estás; con la app cerrada no nos llega nada. Podés ocultar la distancia o usar el modo incógnito. Si la ocultás, no se usa para nada: ni para mostrarla, ni para ordenar la grilla, ni para filtrar por kilómetros.
+**Tu ubicación:** para mostrarte gente cerca, el navegador redondea tu posición al centro de una zona de unos 500 metros y nos manda solo ese centro. Mientras tenés la app en pantalla, la zona se actualiza cada unos minutos si el navegador consigue una lectura con suficiente precisión. Podés ocultar la distancia o usar el modo incógnito. Si ocultás la distancia, la grilla deja de mostrarla y de usarla para ordenar o filtrar.
 
 **Lo que hacés en la app:**
 
@@ -85,7 +85,7 @@ Solo para que la app funcione: mostrar tu perfil, la gente cerca y los grupos, m
 ## 7. Cómo los cuidamos
 
 - La conexión siempre va cifrada (HTTPS).
-- Las contraseñas se guardan cifradas.
+- Las contraseñas se protegen con un hash scrypt y una sal aleatoria para cada una.
 - La base de datos no es accesible desde internet: solo la ve la app.
 - Al servidor solo se entra con clave SSH, con bloqueo de intentos fallidos y actualizaciones de seguridad automáticas.
 - A las fotos y los videos les borramos los metadatos y la ubicación.

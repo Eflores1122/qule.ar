@@ -46,6 +46,12 @@ const app = new Hono<AppEnv>();
 const indexPath = path.join(env.WEB_DIST, "index.html");
 app.use("*", securityHeaders(env.APP_URL, existsSync(indexPath) ? readFileSync(indexPath, "utf8") : null));
 
+// Las respuestas del API pueden incluir sesiones, datos de perfil o archivos sujetos a permisos.
+app.use("/api/*", async (c, next) => {
+  await next();
+  c.header("Cache-Control", "no-store");
+});
+
 // Si entran por otra dirección (www, el túnel provisorio viejo), los mandamos al dominio principal.
 // Solo en producción (APP_URL con https) y nunca para localhost, así no molesta en desarrollo ni en los chequeos del server.
 const canonical = new URL(env.APP_URL);

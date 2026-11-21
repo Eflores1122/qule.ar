@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
+import { MIN_PASSWORD_LENGTH } from "../../../../packages/security/password.js";
 import { authClient } from "../api";
 import { Wordmark } from "../components/Wordmark";
 import { Logo } from "../components/Logo";
@@ -71,7 +72,9 @@ export function ResetPassword() {
     setError("");
     const res = await authClient.resetPassword({ newPassword: password, token });
     setBusy(false);
-    if (res.error) setError(res.error.code === "INVALID_TOKEN" ? "El link venció o ya se usó. Pedí uno nuevo." : "No se pudo. Probá de nuevo.");
+    if (res.error?.code === "INVALID_TOKEN") setError("El link venció o ya se usó. Pedí uno nuevo.");
+    else if (res.error?.code === "PASSWORD_TOO_SHORT") setError(`Usá al menos ${MIN_PASSWORD_LENGTH} caracteres.`);
+    else if (res.error) setError("No se pudo. Probá de nuevo.");
     else setDone(true);
   }
 
@@ -92,12 +95,12 @@ export function ResetPassword() {
           <form onSubmit={submit} className="form">
             <label className="field">
               <span>Contraseña nueva</span>
-              <input className="input" type="password" required minLength={8} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
-              <small className="muted">Mínimo 8 caracteres.</small>
+              <input className="input" type="password" required minLength={MIN_PASSWORD_LENGTH} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
+              <small className="muted">Usá al menos {MIN_PASSWORD_LENGTH} caracteres.</small>
             </label>
             <label className="field">
               <span>Repetila</span>
-              <input className="input" type="password" required minLength={8} value={repeat} onChange={(e) => setRepeat(e.target.value)} autoComplete="new-password" />
+              <input className="input" type="password" required minLength={MIN_PASSWORD_LENGTH} value={repeat} onChange={(e) => setRepeat(e.target.value)} autoComplete="new-password" />
             </label>
             {error && <p className="error" role="alert">{error}</p>}
             <button className="btn btn--primary" disabled={busy || !token}>{busy ? "Un toque…" : "Guardar"}</button>

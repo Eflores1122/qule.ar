@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
+import { MIN_PASSWORD_LENGTH } from "../../../../packages/security/password.js";
 import { api, authClient } from "../api";
 import { useMe } from "../App";
 import { Wordmark } from "../components/Wordmark";
@@ -92,7 +93,7 @@ export function Login() {
                 className="input"
                 type={showPassword ? "text" : "password"}
                 required
-                minLength={8}
+                minLength={mode === "up" ? MIN_PASSWORD_LENGTH : undefined}
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete={mode === "up" ? "new-password" : "current-password"}
@@ -109,7 +110,7 @@ export function Login() {
                 {showPassword ? <EyeOffIcon /> : <EyeIcon />}
               </button>
             </div>
-            {mode === "up" && <small className="muted">Mínimo 8 caracteres.</small>}
+            {mode === "up" && <small className="muted">Usá al menos {MIN_PASSWORD_LENGTH} caracteres.</small>}
             {mode === "in" && canReset && <Link to="/recuperar" className="linkbtn small forgot">¿Te olvidaste la contraseña?</Link>}
           </div>
           {error && <p className="error" role="alert">{error}</p>}
@@ -121,6 +122,7 @@ export function Login() {
           Solo para mayores de 18. {APP_NAME} está en beta: la usás bajo tu propia responsabilidad. Al registrarte vas a
           leer y aceptar los <Link to="/terminos">Términos</Link> y la <Link to="/privacidad">Política de privacidad</Link>.
         </p>
+        <p className="fineprint country-safety__link"><Link to="/seguridad-por-pais">Avisos de seguridad por país</Link></p>
       </div>
     </div>
   );
@@ -131,7 +133,7 @@ function translate(code: string | undefined, fallback: string | undefined) {
     case "INVALID_EMAIL_OR_PASSWORD": return "Email o contraseña incorrectos.";
     case "USER_ALREADY_EXISTS":
     case "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL": return "Ya hay una cuenta con ese email.";
-    case "PASSWORD_TOO_SHORT": return "La contraseña es muy corta.";
+    case "PASSWORD_TOO_SHORT": return `Usá al menos ${MIN_PASSWORD_LENGTH} caracteres.`;
     case "INVALID_EMAIL": return "Ese email no parece válido.";
     default: return fallback ?? "No se pudo. Probá de nuevo.";
   }
