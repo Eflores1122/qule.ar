@@ -81,7 +81,7 @@ Se elige en **Yo → Tema** y se guarda en el dispositivo. Solo cambian los colo
 ## Tipografía
 
 - **Bricolage Grotesque** (`var(--display)`, 800) para el logo en texto y los títulos grandes.
-- **Inter** (`var(--font)`) para todo lo demás. Texto base de 15 px.
+- **Inter** (`var(--font)`) para todo lo demás. Texto base de 15 px. Los campos donde se escribe van en 16 px (`--text-input`): con menos, el iPhone hace zoom al tocarlos y la pantalla queda ampliada.
 
 Tamaños (`font-size: var(--…)`):
 
@@ -94,6 +94,7 @@ Tamaños (`font-size: var(--…)`):
 | `--text-base` | 15 px | `--title-xl` | 28 px | | |
 | `--text-lg` | 16 px | `--title-2xl` | 32 px | | |
 | `--text-xl` | 18 px | `--title-3xl` | 34 px | | |
+| `--text-input` | 16 px (campos donde se escribe) | | | | |
 
 ## Formas
 
