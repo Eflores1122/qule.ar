@@ -8,7 +8,6 @@ import { db, schema } from "../db/index.js";
 import { env } from "../env.js";
 import { authorsFor, newId, requireProfile, requireUser, type AppEnv } from "../lib.js";
 import { pushEnabled, pushTo, vapidPublicKey } from "../push.js";
-import { APP_NAME } from "../brand.js";
 import { disconnectUser, emitToGroup } from "../realtime.js";
 import { deleteImage } from "../storage.js";
 import { AUTO_DETAILS_PREFIX, autoHiddenGroups, autoHiddenUsers, deleteImageUnlessEvidence, isUrgent, releaseEvidence, REMOVED_GROUP_DAYS } from "../moderation.js";
@@ -56,7 +55,7 @@ adminRoutes.post("/push/subscribe", requireUser, requireProfile, async (c) => {
 /** Manda una notificación de prueba a todos tus dispositivos. Devuelve a cuántos llegó. */
 adminRoutes.post("/push/test", requireUser, async (c) => {
   const u = c.get("user");
-  const sent = await pushTo(u.id, { title: APP_NAME, body: "¡Listo! Así te van a llegar los avisos.", url: "/yo", tag: "prueba", always: true });
+  const sent = await pushTo(u.id, { title: "Notificación de prueba", body: "¡Listo! Así te van a llegar los avisos.", url: "/yo", tag: "prueba", always: true });
   return c.json({ sent });
 });
 

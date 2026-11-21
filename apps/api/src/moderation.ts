@@ -2,7 +2,6 @@ import { and, eq, inArray, or, sql } from "drizzle-orm";
 import { db, schema } from "./db/index.js";
 import { env } from "./env.js";
 import { pushTo } from "./push.js";
-import { APP_NAME } from "./brand.js";
 import { deleteImage } from "./storage.js";
 
 const { report, user } = schema;
@@ -43,7 +42,7 @@ export async function moderatorIds(): Promise<string[]> {
 /** Aviso a moderación de un reporte urgente. Discreto, como todas las notificaciones: no dice quién ni por qué. */
 export async function notifyModeratorsUrgent() {
   for (const id of await moderatorIds()) {
-    pushTo(id, { title: APP_NAME, body: "Hay un reporte urgente para revisar", url: "/admin", tag: "reporte-urgente" }).catch(() => {});
+    pushTo(id, { title: "Reporte urgente", body: "Abrí Moderación para revisarlo.", url: "/admin", tag: "reporte-urgente" }).catch(() => {});
   }
 }
 
