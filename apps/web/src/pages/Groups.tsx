@@ -8,6 +8,7 @@ import { PlusIcon } from "../components/Icons";
 import { MyInvites } from "../components/Invite";
 import { JoinButton } from "../components/JoinButton";
 import { ReportDialog } from "../components/ReportDialog";
+import { DialogFocus } from "../components/DialogFocus";
 
 export function Groups() {
   const [params, setParams] = useSearchParams();
@@ -154,6 +155,7 @@ function CreateGroup({ onClose }: { onClose: () => void }) {
   return (
     <div className="sheet-backdrop" onClick={onClose}>
       <form className="sheet" role="dialog" aria-modal aria-labelledby="create-title" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+        <DialogFocus onClose={onClose} />
         <h2 id="create-title">Crear un grupo</h2>
         <PhotoPicker name={name || "?"} file={photo} onPick={setPhoto} />
         <label className="field">

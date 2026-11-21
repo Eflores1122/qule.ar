@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router";
 import { api, type Author } from "../api";
 import { Avatar } from "../components/Avatar";
 import { BackIcon } from "../components/Icons";
+import { DialogFocus } from "../components/DialogFocus";
 
 type ReportedGroup = {
   // id null: el grupo ya se purgó (pasaron los 90 días); queda el nombre que tenía al reportarlo
@@ -268,6 +269,7 @@ function SuspendDialog({ report, onClose, onDone }: { report: Report; onClose: (
   return (
     <div className="sheet-backdrop" onClick={onClose}>
       <div className="sheet" role="dialog" aria-modal aria-labelledby="suspend-title" onClick={(e) => e.stopPropagation()}>
+        <DialogFocus onClose={onClose} />
         <h2 id="suspend-title">Suspender a {report.target?.name}</h2>
         <p className="muted small">Se cierran sus sesiones, deja de aparecer en la app y se cierran sus reportes abiertos. Se puede reactivar después.</p>
         <label className="field">
@@ -302,6 +304,7 @@ function RemoveGroupDialog({ report, onClose, onDone }: { report: Report; onClos
   return (
     <div className="sheet-backdrop" onClick={onClose}>
       <div className="sheet" role="dialog" aria-modal aria-labelledby="remove-title" onClick={(e) => e.stopPropagation()}>
+        <DialogFocus onClose={onClose} />
         <h2 id="remove-title">Dar de baja «{report.group?.name}»</h2>
         <p className="muted small">
           El grupo desaparece para todo el mundo y nadie de la app lo puede ver. Queda guardado 90 días como prueba y después se borra del todo. Se
