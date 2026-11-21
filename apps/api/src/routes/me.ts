@@ -14,9 +14,10 @@ import { hasAlbumAccess } from "./premium.js";
 import { isAdmin } from "./admin.js";
 import { APP_NAME } from "../brand.js";
 import { expiringIsOver } from "../expiring.js";
-import { deleteImageUnlessEvidence, isEvidence } from "../moderation.js";
+import { checkMinorSignals, deleteImageUnlessEvidence, isEvidence } from "../moderation.js";
 import { limit } from "../ratelimit.js";
 import { TERMS_VERSION } from "../legal.js";
+import { NOTIFY_KINDS } from "../push.js";
 
 const { profile, photo, user, group, groupMember, directMessage, conversation } = schema;
 const MAX_PHOTOS = 6;
@@ -60,9 +61,13 @@ meRoutes.get("/files/:key", requireUser, async (c) => {
   }
   // Foto de mensaje privado: solo las dos personas de la charla; si es temporal, solo quien la recibe tras abrirla
   const [dm] = await db.select().from(directMessage).where(eq(directMessage.photoKey, key));
-  // Archivo que ya no usa ningún mensaje ni perfil (desenviado, borrado): solo existe como prueba de un reporte,
+  // Foto de un grupo: la ve cualquiera con sesión, igual que el nombre del grupo al explorar
+  // (la de un grupo dado de baja solo la ve moderación)
+  const [grp] = ph || dm ? [] : await db.select({ removedAt: group.removedAt }).from(group).where(eq(group.photoKey, key)).limit(1);
+  const gr = grp && (!grp.removedAt || isAdmin(c.get("user")));
+  // Archivo que ya no usa ningún mensaje, perfil ni grupo (desenviado, borrado): solo existe como prueba de un reporte,
   // y solo moderación lo puede pedir
-  if (!ph && !dm && !(isAdmin(c.get("user")) && (await isEvidence(key)))) return c.notFound();
+  if (!ph && !dm && !gr && !(isAdmin(c.get("user")) && (await isEvidence(key)))) return c.notFound();
   if (dm) {
     const [conv] = await db.select().from(conversation).where(eq(conversation.id, dm.conversationId));
     const inConv = conv && (conv.userA === viewer || conv.userB === viewer);
@@ -141,6 +146,8 @@ meRoutes.put("/me/profile", requireUser, async (c) => {
       termsVersion: TERMS_VERSION,
       termsAcceptedAt: new Date(),
     });
+    checkMinorSignals({ userId: u.id, name: fields.displayName }, { "el nombre": fields.displayName, "la descripción": fields.about })
+      .catch((e) => console.error("checkMinorSignals", e));
     // Todo el mundo entra al chat general
     const [general] = await db.select().from(group).where(eq(group.isGeneral, true));
     if (general) {
@@ -151,6 +158,8 @@ meRoutes.put("/me/profile", requireUser, async (c) => {
     // La fecha de nacimiento no se puede cambiar después del alta
     const { birthdate: _ignored, acceptTerms: _a, ...rest } = data;
     await db.update(profile).set({ ...rest, updatedAt: new Date() }).where(eq(profile.userId, u.id));
+    checkMinorSignals({ userId: u.id, name: rest.displayName }, { "el nombre": rest.displayName, "la descripción": rest.about })
+      .catch((e) => console.error("checkMinorSignals", e));
   }
   return c.json({ ok: true });
 });
@@ -165,6 +174,17 @@ meRoutes.put("/me/terms", requireUser, requireProfile, async (c) => {
   if (version !== TERMS_VERSION) throw new HTTPException(409, { message: "Los términos cambiaron. Recargá la página para leer la versión nueva." });
   await db.update(profile).set({ termsVersion: TERMS_VERSION, termsAcceptedAt: new Date() }).where(eq(profile.userId, u.id));
   return c.json({ termsVersion: TERMS_VERSION });
+});
+
+/** Qué avisos quiere recibir. Se manda solo lo que cambia; lo demás queda como estaba. */
+const notifyInput = z.object(Object.fromEntries(NOTIFY_KINDS.map((k) => [k, z.boolean().optional()]))).strict();
+meRoutes.put("/me/notificaciones", requireUser, requireProfile, async (c) => {
+  const u = c.get("user");
+  const parsed = notifyInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) throw new HTTPException(400, { message: "Esos avisos no existen" });
+  const prefs = { ...c.get("profile")!.notifyPrefs, ...parsed.data };
+  await db.update(profile).set({ notifyPrefs: prefs }).where(eq(profile.userId, u.id));
+  return c.json({ notifyPrefs: prefs });
 });
 
 /** Hasta cuántas fotos y videos puede tener el álbum privado. */

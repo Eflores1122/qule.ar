@@ -9,6 +9,7 @@ import { TermsBanner } from "./components/TermsBanner";
 import { Legal } from "./pages/Legal";
 import { Wordmark } from "./components/Wordmark";
 import { Logo } from "./components/Logo";
+import { TAB_PATHS, useTabSwipe } from "./features/navigation/useTabSwipe";
 import { APP_NAME } from "./brand";
 import { ForgotPassword, ResetPassword } from "./pages/Password";
 import { Onboarding } from "./pages/Onboarding";
@@ -128,6 +129,7 @@ function Shell() {
   const [pending, setPending] = useState(0);
   const [toast, setToast] = useState<Toast | null>(null);
   const loc = useLocation();
+  const { main, enabled: canSwipeTabs, ...swipeHandlers } = useTabSwipe();
   const { me } = useMe();
 
   // Si compartiste tu ubicación, se mantiene al día mientras usás la app (por si te moviste o te fuiste de viaje)
@@ -202,8 +204,8 @@ function Shell() {
   const inThread = /^\/mensajes\/.+/.test(loc.pathname);
 
   return (
-    <div className={`shell ${inThread ? "shell--thread" : ""}`}>
-      <main className="shell__main">
+    <div className={`shell${inThread ? " shell--thread" : ""}${canSwipeTabs ? " shell--swipe" : ""}`}>
+      <main className="shell__main" ref={main} {...swipeHandlers}>
         <Outlet />
       </main>
       {!inThread && <TermsBanner />}
@@ -215,18 +217,18 @@ function Shell() {
       )}
       {!inThread && (
         <nav className="tabbar" aria-label="Secciones">
-          <NavLink to="/cerca" className="tabbar__item">
+          <NavLink to={TAB_PATHS[0]} className="tabbar__item">
             <GridIcon /> <span>Gente</span>
           </NavLink>
-          <NavLink to="/grupos" className="tabbar__item">
+          <NavLink to={TAB_PATHS[1]} className="tabbar__item">
             <GroupIcon /> <span>Grupos</span>
             {pending > 0 && <b className="badge">{pending > 99 ? "99+" : pending}</b>}
           </NavLink>
-          <NavLink to="/mensajes" className="tabbar__item">
+          <NavLink to={TAB_PATHS[2]} className="tabbar__item">
             <ChatIcon /> <span>Mensajes</span>
             {unread > 0 && <b className="badge">{unread > 99 ? "99+" : unread}</b>}
           </NavLink>
-          <NavLink to="/yo" className="tabbar__item">
+          <NavLink to={TAB_PATHS[3]} className="tabbar__item">
             <UserIcon /> <span>Yo</span>
           </NavLink>
         </nav>

@@ -7,11 +7,12 @@ import { db, schema } from "../db/index.js";
 import { DEFAULT_SPAM_RULES } from "../db/schema.js";
 import { ageFrom, authorsFor, blockedWith, newId, requireProfile, requireUser, thumbUrl, type AppEnv } from "../lib.js";
 import { distanceLabel, visibleKm } from "../geo.js";
-import { autoHiddenUsers } from "../moderation.js";
+import { autoHiddenGroups, autoHiddenUsers, deleteImageUnlessEvidence, forbiddenGroupText, groupIsEvidence, reportMinorGroupAttempt } from "../moderation.js";
+import { limit } from "../ratelimit.js";
+import { MAX_UPLOAD_BYTES, saveImage } from "../storage.js";
 import { emitToGroup, emitToUser, isOnline, serializeGroupMessages, syncGroupRoom } from "../realtime.js";
 import { pushTo } from "../push.js";
 import { notifyGroupMessage } from "../groupNotify.js";
-import { APP_NAME } from "../brand.js";
 
 const { group, groupMember, groupMessage, groupJoinRequest, groupInvite } = schema;
 
@@ -31,7 +32,8 @@ groupRoutes.use("/groups", requireUser, requireProfile);
 
 async function membership(groupId: string, userId: string) {
   const [g] = await db.select().from(group).where(eq(group.id, groupId));
-  if (!g) throw new HTTPException(404, { message: "Ese grupo no existe" });
+  // Dado de baja: no existe para nadie de la app (queda guardado solo como prueba para moderación)
+  if (!g || g.removedAt) throw new HTTPException(404, { message: "Ese grupo no existe" });
   const [m] = await db
     .select()
     .from(groupMember)
@@ -71,7 +73,7 @@ async function pendingCounts(ids: string[]) {
 
 /** Estado de una persona respecto de varios grupos: solicitud pendiente o período de espera. */
 async function requestStateFor(userId: string, ids: string[]) {
-  const map = new Map<string, { pending: boolean; cooldownUntil: string | null }>();
+  const map = new Map<string, { pending: boolean; pendingMessage: string | null; cooldownUntil: string | null }>();
   if (!ids.length) return map;
   const since = new Date(Date.now() - REAPPLY_DAYS * 86_400_000);
   const rows = await db
@@ -86,8 +88,11 @@ async function requestStateFor(userId: string, ids: string[]) {
       ),
     ));
   for (const r of rows) {
-    const cur = map.get(r.groupId) ?? { pending: false, cooldownUntil: null };
-    if (r.status === "pending") cur.pending = true;
+    const cur = map.get(r.groupId) ?? { pending: false, pendingMessage: null, cooldownUntil: null };
+    if (r.status === "pending") {
+      cur.pending = true;
+      cur.pendingMessage = r.message;
+    }
     else if (r.resolvedAt) {
       const until = new Date(r.resolvedAt.getTime() + REAPPLY_DAYS * 86_400_000).toISOString();
       if (!cur.cooldownUntil || until > cur.cooldownUntil) cur.cooldownUntil = until;
@@ -127,30 +132,72 @@ function parse<T>(schema: z.ZodType<T>, input: unknown): T {
   return r.data;
 }
 
+// ---------- Nombres que no se permiten ----------
+
+/**
+ * Corta con 400 si el nombre o la descripción apunta a menores, venta, masajes o servicios sexuales.
+ * Si es por menores, además le avisa a moderación quién lo intentó.
+ */
+async function rejectForbidden(u: { id: string; name: string }, name: string, description: string | null | undefined) {
+  const bad = forbiddenGroupText(name, description);
+  if (!bad) return;
+  if (bad.kind === "menores") {
+    await reportMinorGroupAttempt(u, bad.hit, [name, description].filter(Boolean).join("\n"))
+      .catch((e) => console.error("reportMinorGroupAttempt", e));
+  }
+  throw new HTTPException(400, { message: bad.message });
+}
+
+// ---------- Cerrar y dar de baja ----------
+
+/** Saca a todo el mundo de la sala en vivo del grupo y les avisa que ya no está. */
+async function kickAll(groupId: string) {
+  const members = await db.select({ userId: groupMember.userId }).from(groupMember).where(eq(groupMember.groupId, groupId));
+  for (const m of members) {
+    syncGroupRoom(m.userId, groupId, false);
+    emitToUser(m.userId, "group:gone", { groupId });
+  }
+}
+
+/** Da de baja un grupo: desaparece para todo el mundo y queda guardado 90 días como prueba (ver moderation.ts). */
+export async function removeGroup(groupId: string, reason: string) {
+  await kickAll(groupId);
+  await db.update(group).set({ removedAt: new Date(), removedReason: reason }).where(eq(group.id, groupId));
+}
+
+/** El dueño cierra el grupo: si es prueba de un reporte, se da de baja (no se pierde); si no, se borra. */
+async function closeGroup(groupId: string, reason: string) {
+  if (await groupIsEvidence(groupId)) return removeGroup(groupId, reason);
+  await kickAll(groupId);
+  await db.delete(group).where(eq(group.id, groupId));
+}
+
 // ---------- Listados ----------
 
 /** Mis grupos (el general primero), con solicitudes pendientes si modero. */
 groupRoutes.get("/groups", async (c) => {
   const u = c.get("user");
   const rows = await db
-    .select({ id: group.id, name: group.name, description: group.description, isGeneral: group.isGeneral, role: groupMember.role })
+    .select({ id: group.id, name: group.name, description: group.description, isGeneral: group.isGeneral, photoKey: group.photoKey, role: groupMember.role })
     .from(groupMember)
     .innerJoin(group, eq(group.id, groupMember.groupId))
-    .where(eq(groupMember.userId, u.id))
+    .where(and(eq(groupMember.userId, u.id), isNull(group.removedAt)))
     .orderBy(desc(group.isGeneral), asc(group.name));
   const ids = rows.map((r) => r.id);
   const counts = await memberCounts(ids);
   const pending = await pendingCounts(rows.filter((r) => canModerate(r.role)).map((r) => r.id));
-  return c.json(rows.map((r) => ({ ...r, memberCount: counts.get(r.id) ?? 0, pendingCount: pending.get(r.id) ?? 0 })));
+  return c.json(rows.map(({ photoKey, ...r }) => ({ ...r, photo: thumbUrl(photoKey), memberCount: counts.get(r.id) ?? 0, pendingCount: pending.get(r.id) ?? 0 })));
 });
 
 /** Todos los grupos, para explorar y pedir ingreso. */
 groupRoutes.get("/groups/all", async (c) => {
   const u = c.get("user");
   const q = (c.req.query("q") ?? "").trim().slice(0, 40);
-  const conds = [eq(group.isGeneral, false)];
+  const conds = [eq(group.isGeneral, false), isNull(group.removedAt)];
   if (q) conds.push(or(ilike(group.name, `%${q}%`), ilike(group.description, `%${q}%`))!);
-  const rows = await db.select().from(group).where(and(...conds)).orderBy(desc(group.createdAt)).limit(200);
+  const hiddenGroups = await autoHiddenGroups();
+  const rows = (await db.select().from(group).where(and(...conds)).orderBy(desc(group.createdAt)).limit(200))
+    .filter((g) => !hiddenGroups.has(g.id)); // ocultos por precaución: varios reportes urgentes sin revisar
   const ids = rows.map((r) => r.id);
   const counts = await memberCounts(ids);
   const mine = ids.length
@@ -162,6 +209,7 @@ groupRoutes.get("/groups/all", async (c) => {
     id: g.id,
     name: g.name,
     description: g.description,
+    photo: thumbUrl(g.photoKey),
     memberCount: counts.get(g.id) ?? 0,
     role: roles.get(g.id) ?? null,
     pending: states.get(g.id)?.pending ?? false,
@@ -177,6 +225,7 @@ groupRoutes.get("/groups/all", async (c) => {
 groupRoutes.post("/groups", async (c) => {
   const u = c.get("user");
   const data = parse(groupInput, await c.req.json());
+  await rejectForbidden(u, data.name, data.description);
   const [{ owned }] = await db
     .select({ owned: sql<number>`count(*)::int` })
     .from(groupMember)
@@ -199,11 +248,13 @@ groupRoutes.get("/groups/:id", async (c) => {
     id: g.id,
     name: g.name,
     description: g.description,
+    photo: thumbUrl(g.photoKey),
     isGeneral: g.isGeneral,
     rules: g.spamRules,
     role: member?.role ?? null,
     memberCount: counts.get(g.id) ?? 0,
     pending: state?.pending ?? false,
+    pendingMessage: state?.pendingMessage ?? null,
     cooldownUntil: state?.cooldownUntil ?? null,
     pendingCount: pending,
     muted: member?.muted ?? false,
@@ -227,6 +278,7 @@ groupRoutes.patch("/groups/:id", async (c) => {
   if (member?.role !== "owner") throw new HTTPException(403, { message: "Solo el dueño puede editar el grupo" });
   const body = await c.req.json();
   const data = parse(groupInput.partial().extend({ rules: rulesInput.optional() }), body);
+  await rejectForbidden(u, data.name ?? g.name, data.description !== undefined ? data.description : g.description);
   await db
     .update(group)
     .set({
@@ -238,17 +290,46 @@ groupRoutes.patch("/groups/:id", async (c) => {
   return c.json({ ok: true });
 });
 
+/** Poner o cambiar la foto del grupo (solo el dueño; el general muestra el logo de la app). */
+groupRoutes.post("/groups/:id/photo", async (c) => {
+  const u = c.get("user");
+  const { group: g, member } = await membership(c.req.param("id"), u.id);
+  if (g.isGeneral) throw new HTTPException(400, { message: "El chat general usa el logo de la app" });
+  if (member?.role !== "owner") throw new HTTPException(403, { message: "Solo el dueño puede cambiar la foto del grupo" });
+  limit(u.id, "upload");
+  const file = (await c.req.parseBody()).file;
+  if (!(file instanceof File)) throw new HTTPException(400, { message: "Falta la foto" });
+  if (file.type.startsWith("video/")) throw new HTTPException(400, { message: "La foto del grupo no puede ser un video" });
+  if (file.size > MAX_UPLOAD_BYTES) throw new HTTPException(413, { message: "La foto pesa demasiado (máx. 12 MB)" });
+  let key: string;
+  try {
+    key = await saveImage(await file.arrayBuffer());
+  } catch {
+    throw new HTTPException(400, { message: "No pudimos leer esa imagen" });
+  }
+  await db.update(group).set({ photoKey: key }).where(eq(group.id, g.id));
+  if (g.photoKey) await deleteImageUnlessEvidence(g.photoKey);
+  return c.json({ photo: thumbUrl(key) });
+});
+
+/** Sacar la foto del grupo (vuelve a mostrar la inicial). */
+groupRoutes.delete("/groups/:id/photo", async (c) => {
+  const u = c.get("user");
+  const { group: g, member } = await membership(c.req.param("id"), u.id);
+  if (member?.role !== "owner") throw new HTTPException(403, { message: "Solo el dueño puede cambiar la foto del grupo" });
+  if (g.photoKey) {
+    await db.update(group).set({ photoKey: null }).where(eq(group.id, g.id));
+    await deleteImageUnlessEvidence(g.photoKey);
+  }
+  return c.json({ photo: null });
+});
+
 groupRoutes.delete("/groups/:id", async (c) => {
   const u = c.get("user");
   const { group: g, member } = await membership(c.req.param("id"), u.id);
   if (g.isGeneral) throw new HTTPException(400, { message: "El chat general no se puede borrar" });
   if (member?.role !== "owner") throw new HTTPException(403, { message: "Solo el dueño puede borrar el grupo" });
-  const members = await db.select({ userId: groupMember.userId }).from(groupMember).where(eq(groupMember.groupId, g.id));
-  await db.delete(group).where(eq(group.id, g.id));
-  for (const m of members) {
-    syncGroupRoom(m.userId, g.id, false);
-    emitToUser(m.userId, "group:gone", { groupId: g.id });
-  }
+  await closeGroup(g.id, "Borrado por su dueño");
   return c.json({ ok: true });
 });
 
@@ -258,6 +339,7 @@ groupRoutes.post("/groups/:id/requests", async (c) => {
   const u = c.get("user");
   const { group: g, member } = await membership(c.req.param("id"), u.id);
   if (g.isGeneral) throw new HTTPException(400, { message: "Al general ya pertenecés" });
+  if ((await autoHiddenGroups()).has(g.id)) throw new HTTPException(403, { message: "Este grupo está en revisión. Probá más adelante." });
   if (member) throw new HTTPException(400, { message: "Ya sos parte de este grupo" });
   // Si ya te habían invitado, pedir entrar es aceptar la invitación
   if ((await inviteStateFor(u.id, [g.id])).get(g.id) === "invited") {
@@ -275,7 +357,7 @@ groupRoutes.post("/groups/:id/requests", async (c) => {
   await db.insert(groupJoinRequest).values({ id, groupId: g.id, userId: u.id, message: message || null });
   const mods = await notifyMods(g.id, "group:request", { groupId: g.id });
   for (const m of mods) {
-    pushTo(m, { title: APP_NAME, body: "Tenés una solicitud nueva en un grupo", url: `/grupos/${g.id}/info`, tag: `req-${g.id}` }).catch(() => {});
+    pushTo(m, { title: "Nueva solicitud de ingreso", body: "Abrí el grupo para revisarla.", url: `/grupos/${g.id}/info`, tag: `req-${g.id}`, kind: "solicitudes" }).catch(() => {});
   }
   return c.json({ id });
 });
@@ -330,7 +412,7 @@ groupRoutes.post("/groups/:id/requests/:rid/:decision{accept|reject}", async (c)
   if (accept) {
     await joinGroup(g, req.userId, u.id); // también cierra una invitación que tuviera pendiente
     emitToUser(req.userId, "group:accepted", { groupId: g.id, name: g.name });
-    pushTo(req.userId, { title: APP_NAME, body: "Te aceptaron en un grupo", url: `/grupos/${g.id}`, tag: `acc-${g.id}` }).catch(() => {});
+    pushTo(req.userId, { title: "Te aceptaron en un grupo", body: "Ya podés entrar al chat.", url: `/grupos/${g.id}`, tag: `acc-${g.id}`, kind: "solicitudes" }).catch(() => {});
   } else {
     emitToUser(req.userId, "group:rejected", { groupId: g.id, name: g.name });
     await notifyMods(g.id, "group:request", { groupId: g.id });
@@ -411,20 +493,21 @@ groupRoutes.get("/groups/invitable/:uid", async (c) => {
   const u = c.get("user");
   const target = c.req.param("uid");
   const rows = await db
-    .select({ id: group.id, name: group.name })
+    .select({ id: group.id, name: group.name, photoKey: group.photoKey })
     .from(groupMember)
     .innerJoin(group, eq(group.id, groupMember.groupId))
-    .where(and(eq(groupMember.userId, u.id), inArray(groupMember.role, ["owner", "moderator"]), eq(group.isGeneral, false)))
+    .where(and(eq(groupMember.userId, u.id), inArray(groupMember.role, ["owner", "moderator"]), eq(group.isGeneral, false), isNull(group.removedAt)))
     .orderBy(asc(group.name));
   if (target === u.id || (await blockedWith(u.id)).has(target)) return c.json([]);
   const states = await inviteStateFor(target, rows.map((r) => r.id));
-  return c.json(rows.map((r) => ({ ...r, state: states.get(r.id) ?? null })));
+  return c.json(rows.map(({ photoKey, ...r }) => ({ ...r, photo: thumbUrl(photoKey), state: states.get(r.id) ?? null })));
 });
 
 groupRoutes.post("/groups/:id/invites", async (c) => {
   const u = c.get("user");
   const { group: g } = await requireMod(c.req.param("id"), u.id);
   if (g.isGeneral) throw new HTTPException(400, { message: "Al general ya pertenece todo el mundo" });
+  if ((await autoHiddenGroups()).has(g.id)) throw new HTTPException(403, { message: "Este grupo está en revisión. Por ahora no se puede invitar." });
   const { userId: target } = parse(z.object({ userId: z.string().min(1) }), await c.req.json().catch(() => ({})));
   if (target === u.id) throw new HTTPException(400, { message: "Ya sos parte de este grupo" });
   const [p] = await db.select({ userId: schema.profile.userId }).from(schema.profile).where(eq(schema.profile.userId, target));
@@ -438,7 +521,7 @@ groupRoutes.post("/groups/:id/invites", async (c) => {
     // Ya había pedido entrar: invitarle es lo mismo que aceptarle
     await joinGroup(g, target, u.id);
     emitToUser(target, "group:accepted", { groupId: g.id, name: g.name });
-    pushTo(target, { title: APP_NAME, body: "Te aceptaron en un grupo", url: `/grupos/${g.id}`, tag: `acc-${g.id}` }).catch(() => {});
+    pushTo(target, { title: "Te aceptaron en un grupo", body: "Ya podés entrar al chat.", url: `/grupos/${g.id}`, tag: `acc-${g.id}`, kind: "solicitudes" }).catch(() => {});
     return c.json({ joined: true });
   }
 
@@ -452,7 +535,7 @@ groupRoutes.post("/groups/:id/invites", async (c) => {
   const id = newId();
   await db.insert(groupInvite).values({ id, groupId: g.id, userId: target, invitedBy: u.id });
   emitToUser(target, "group:invite", { groupId: g.id, name: g.name });
-  pushTo(target, { title: APP_NAME, body: "Te invitaron a un grupo", url: "/grupos", tag: `inv-${g.id}` }).catch(() => {});
+  pushTo(target, { title: "Te invitaron a un grupo", body: "Abrí Grupos para ver la invitación.", url: "/grupos", tag: `inv-${g.id}`, kind: "solicitudes" }).catch(() => {});
   await notifyMods(g.id, "group:request", { groupId: g.id });
   return c.json({ id });
 });
@@ -585,10 +668,10 @@ groupRoutes.delete("/groups/:id/invites/:iid", async (c) => {
 groupRoutes.get("/invites", requireUser, requireProfile, async (c) => {
   const u = c.get("user");
   const rows = await db
-    .select({ id: groupInvite.id, invitedBy: groupInvite.invitedBy, createdAt: groupInvite.createdAt, groupId: group.id, name: group.name, description: group.description })
+    .select({ id: groupInvite.id, invitedBy: groupInvite.invitedBy, createdAt: groupInvite.createdAt, groupId: group.id, name: group.name, description: group.description, photoKey: group.photoKey })
     .from(groupInvite)
     .innerJoin(group, eq(group.id, groupInvite.groupId))
-    .where(and(eq(groupInvite.userId, u.id), eq(groupInvite.status, "pending")))
+    .where(and(eq(groupInvite.userId, u.id), eq(groupInvite.status, "pending"), isNull(group.removedAt)))
     .orderBy(desc(groupInvite.createdAt));
   const blocked = await blockedWith(u.id);
   const visible = rows.filter((r) => !r.invitedBy || !blocked.has(r.invitedBy));
@@ -597,7 +680,7 @@ groupRoutes.get("/invites", requireUser, requireProfile, async (c) => {
   return c.json(visible.map((r) => ({
     id: r.id,
     createdAt: r.createdAt.toISOString(),
-    group: { id: r.groupId, name: r.name, description: r.description, memberCount: counts.get(r.groupId) ?? 0 },
+    group: { id: r.groupId, name: r.name, description: r.description, photo: thumbUrl(r.photoKey), memberCount: counts.get(r.groupId) ?? 0 },
     invitedBy: (r.invitedBy && authors.get(r.invitedBy)) || null,
   })));
 });
@@ -611,7 +694,7 @@ groupRoutes.post("/invites/:iid/:decision{accept|decline}", requireUser, require
     .where(and(eq(groupInvite.id, c.req.param("iid")), eq(groupInvite.userId, u.id), eq(groupInvite.status, "pending")));
   if (!inv) throw new HTTPException(409, { message: "Esa invitación ya no está disponible" });
   const [g] = await db.select().from(group).where(eq(group.id, inv.groupId));
-  if (!g) throw new HTTPException(404, { message: "Ese grupo ya no existe" });
+  if (!g || g.removedAt) throw new HTTPException(404, { message: "Ese grupo ya no existe" });
   if (accept) {
     await joinGroup(g, u.id, inv.invitedBy);
   } else {
@@ -709,7 +792,7 @@ groupRoutes.post("/groups/:id/leave", async (c) => {
       await db.update(group).set({ ownerId: heir.userId }).where(eq(group.id, g.id));
       emitToUser(heir.userId, "group:role", { groupId: g.id, role: "owner" });
     } else {
-      await db.delete(group).where(eq(group.id, g.id)); // nadie más: el grupo se cierra
+      await closeGroup(g.id, "Se fue la última persona"); // nadie más: el grupo se cierra
     }
   }
   return c.json({ ok: true });
