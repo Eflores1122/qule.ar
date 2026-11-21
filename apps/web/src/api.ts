@@ -72,12 +72,17 @@ export type Profile = {
   lastTested: string | null;
 };
 
+/** Tipos de aviso que se pueden apagar. Tienen que coincidir con NOTIFY_KINDS de la API (push.ts). */
+export type NotifyKind = "mensajes" | "toques" | "respuestas" | "grupos" | "solicitudes";
+
 export type Me = {
   user: { id: string; email: string; name: string; isAdmin: boolean };
   profile: (Profile & {
     hasLocation: boolean;
     showDistance: boolean;
     incognito: boolean;
+    /** Avisos que apagó (false). Lo que no está cuenta como prendido. */
+    notifyPrefs: Partial<Record<NotifyKind, boolean>>;
     suspendedAt: string | null;
     suspendReason: string | null;
     /** Versión de los términos que aceptó (null: cuenta anterior a los términos) */

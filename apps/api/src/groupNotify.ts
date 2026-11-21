@@ -46,12 +46,12 @@ export async function notifyGroupMessage(msg: typeof groupMessage.$inferSelect) 
     const key = `${m.userId}:${msg.groupId}`;
     if (m.userId === repliedTo) {
       lastGroupPush.set(key, now);
-      pushTo(m.userId, { title: APP_NAME, body: "Te respondieron en un grupo", url, tag: `grp-${msg.groupId}` }).catch(() => {});
+      pushTo(m.userId, { title: APP_NAME, body: "Te respondieron en un grupo", url, kind: "respuestas", tag: `grp-${msg.groupId}` }).catch(() => {});
       continue;
     }
     if (m.muted) continue;
     if (now - (lastGroupPush.get(key) ?? 0) < GROUP_PUSH_EVERY_MS) continue;
     lastGroupPush.set(key, now);
-    pushTo(m.userId, { title: APP_NAME, body: "Hay mensajes nuevos en un grupo", url, tag: `grp-${msg.groupId}` }).catch(() => {});
+    pushTo(m.userId, { title: APP_NAME, body: "Hay mensajes nuevos en un grupo", url, kind: "grupos", tag: `grp-${msg.groupId}` }).catch(() => {});
   }
 }

@@ -50,7 +50,7 @@ toqueRoutes.post("/users/:id/toques", async (c) => {
   const [author] = (await authorsFor([me.id])).values();
   emitToUser(to, "toque", { id, kind: r.data.kind, from: author, createdAt: now.toISOString() });
   // Discreto, como los mensajes: no dice quién ni qué
-  pushTo(to, { title: APP_NAME, body: "Te mandaron un toque", url: "/toques", tag: "toques" }).catch(() => {});
+  pushTo(to, { title: APP_NAME, body: "Te mandaron un toque", url: "/toques", tag: "toques", kind: "toques" }).catch(() => {});
   return c.json({ kind: r.data.kind, at: now.toISOString() });
 });
 
