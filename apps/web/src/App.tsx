@@ -206,6 +206,7 @@ function Shell() {
   // En una conversación abierta, la barra de abajo se esconde para dejar lugar al teclado
   const inThread = /^\/mensajes\/.+/.test(loc.pathname);
   const inMyProfile = /^\/yo(?:\/|$)/.test(loc.pathname);
+  const nearbyEntry = loc.pathname.startsWith("/perfil/") ? loc.state?.nearbyEntry : undefined;
 
   return (
     <div className={`shell${inThread ? " shell--thread" : ""}${canSwipeTabs ? " shell--swipe" : ""}`}>
@@ -221,7 +222,7 @@ function Shell() {
       )}
       {!inThread && (
         <nav className="tabbar" aria-label="Secciones">
-          <NavLink to={TAB_PATHS[0]} className="tabbar__item">
+          <NavLink to={TAB_PATHS[0]} state={nearbyEntry ? { nearbyEntry } : undefined} className="tabbar__item">
             <GridIcon /> <span>Gente</span>
           </NavLink>
           <NavLink to={TAB_PATHS[1]} className="tabbar__item">
