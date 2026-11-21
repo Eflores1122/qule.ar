@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useEffect, useState } from "react";
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from "react";
 import { Navigate, NavLink, Outlet, Route, Routes, useLocation } from "react-router";
 import { api, ApiError, authClient, closeSocket, getSocket, type Me } from "./api";
 import { Admin } from "./pages/Admin";
@@ -24,6 +24,7 @@ import { ChatIcon, GridIcon, GroupIcon, UserIcon } from "./components/Icons";
 import { Nearby } from "./pages/Nearby";
 import { Favorites, Toques, Views } from "./pages/People";
 import { useLocationSync } from "./location";
+import { DiscreetButton, DiscreetScreen, DiscreetScreenContext } from "./components/DiscreetScreen";
 
 type MeState = { me: Me | null; loading: boolean; reload: () => Promise<void> };
 const MeContext = createContext<MeState>({ me: null, loading: true, reload: async () => {} });
@@ -129,8 +130,28 @@ function Shell() {
   const [unread, setUnread] = useState(0);
   const [pending, setPending] = useState(0);
   const [toast, setToast] = useState<Toast | null>(null);
+  const [discreet, setDiscreet] = useState(false);
+  const discreetDialog = useRef<HTMLDialogElement>(null);
   const loc = useLocation();
   const { me } = useMe();
+
+  const openDiscreet = useCallback(() => {
+    const dialog = discreetDialog.current;
+    if (!dialog || dialog.open) return;
+    dialog.showModal();
+    setDiscreet(true);
+  }, []);
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.code === "KeyP" && e.altKey && e.shiftKey && !e.ctrlKey && !e.metaKey) {
+        e.preventDefault();
+        openDiscreet();
+      }
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [openDiscreet]);
 
   // Si compartiste tu ubicación, se mantiene al día mientras usás la app (por si te moviste o te fuiste de viaje)
   useLocationSync(!!me?.profile?.hasLocation);
@@ -193,46 +214,52 @@ function Shell() {
 
   // Contador en la pestaña del navegador y en el ícono de la app instalada
   useEffect(() => {
-    const n = unread + pending;
-    document.title = n ? `(${n}) ${APP_NAME}` : APP_NAME;
+    const n = discreet ? 0 : unread + pending;
+    document.title = discreet ? "Pausa" : n ? `(${n}) ${APP_NAME}` : APP_NAME;
     const nav = navigator as Navigator & { setAppBadge?: (n?: number) => Promise<void>; clearAppBadge?: () => Promise<void> };
     if (n) nav.setAppBadge?.(n).catch(() => {});
     else nav.clearAppBadge?.().catch(() => {});
-  }, [unread, pending]);
+  }, [discreet, unread, pending]);
 
   // En una conversación abierta, la barra de abajo se esconde para dejar lugar al teclado
   const inThread = /^\/mensajes\/.+/.test(loc.pathname);
 
   return (
-    <div className={`shell ${inThread ? "shell--thread" : ""}`}>
-      <main className="shell__main">
-        <Outlet />
-      </main>
-      {!inThread && <TermsBanner />}
-      {!inThread && <NotifyBanner />}
-      {toast && (
-        <div className="toast" role="status" key={toast.id}>
-          {toast.to ? <NavLink to={toast.to} onClick={() => setToast(null)}>{toast.text} →</NavLink> : <span>{toast.text}</span>}
-        </div>
-      )}
-      {!inThread && (
-        <nav className="tabbar" aria-label="Secciones">
-          <NavLink to="/cerca" className="tabbar__item">
-            <GridIcon /> <span>Gente</span>
-          </NavLink>
-          <NavLink to="/grupos" className="tabbar__item">
-            <GroupIcon /> <span>Grupos</span>
-            {pending > 0 && <b className="badge">{pending > 99 ? "99+" : pending}</b>}
-          </NavLink>
-          <NavLink to="/mensajes" className="tabbar__item">
-            <ChatIcon /> <span>Mensajes</span>
-            {unread > 0 && <b className="badge">{unread > 99 ? "99+" : unread}</b>}
-          </NavLink>
-          <NavLink to="/yo" className="tabbar__item">
-            <UserIcon /> <span>Yo</span>
-          </NavLink>
-        </nav>
-      )}
-    </div>
+    <DiscreetScreenContext.Provider value={openDiscreet}>
+      <div className={`shell ${inThread ? "shell--thread" : ""}`}>
+        <main className="shell__main">
+          <Outlet />
+        </main>
+        {!inThread && <TermsBanner />}
+        {!inThread && <NotifyBanner />}
+        {toast && (
+          <div className="toast" role="status" key={toast.id}>
+            {toast.to ? <NavLink to={toast.to} onClick={() => setToast(null)}>{toast.text} →</NavLink> : <span>{toast.text}</span>}
+          </div>
+        )}
+        {!inThread && (
+          <div className="shell__navigation">
+            <nav className="tabbar" aria-label="Secciones">
+              <NavLink to="/cerca" className="tabbar__item">
+                <GridIcon /> <span>Gente</span>
+              </NavLink>
+              <NavLink to="/grupos" className="tabbar__item">
+                <GroupIcon /> <span>Grupos</span>
+                {pending > 0 && <b className="badge">{pending > 99 ? "99+" : pending}</b>}
+              </NavLink>
+              <NavLink to="/mensajes" className="tabbar__item">
+                <ChatIcon /> <span>Mensajes</span>
+                {unread > 0 && <b className="badge">{unread > 99 ? "99+" : unread}</b>}
+              </NavLink>
+              <NavLink to="/yo" className="tabbar__item">
+                <UserIcon /> <span>Yo</span>
+              </NavLink>
+            </nav>
+            <DiscreetButton />
+          </div>
+        )}
+        <DiscreetScreen dialog={discreetDialog} onClose={() => setDiscreet(false)} />
+      </div>
+    </DiscreetScreenContext.Provider>
   );
 }

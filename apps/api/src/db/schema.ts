@@ -105,6 +105,7 @@ export const albumGrant = pgTable("album_grant", {
   granteeId: text("grantee_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   // Hasta cuándo lo puede ver. null = sin límite.
   expiresAt: timestamp("expires_at", { withTimezone: true }),
+  acceptedAt: timestamp("accepted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.ownerId, t.granteeId] })]);
 
@@ -188,11 +189,13 @@ export const group = pgTable("group", {
   id: text("id").primaryKey(),
   name: text("name").notNull(),
   description: text("description"),
+  communityCountry: text("community_country").$type<"AR" | "MX">(),
+  communityCity: text("community_city"),
   ownerId: text("owner_id").references(() => user.id, { onDelete: "set null" }),
   isGeneral: boolean("is_general").notNull().default(false),
   spamRules: jsonb("spam_rules").$type<SpamRules>().notNull().default(DEFAULT_SPAM_RULES),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [index("group_community_idx").on(t.communityCountry, t.communityCity)]);
 
 export const groupMember = pgTable("group_member", {
   groupId: text("group_id").notNull().references(() => group.id, { onDelete: "cascade" }),

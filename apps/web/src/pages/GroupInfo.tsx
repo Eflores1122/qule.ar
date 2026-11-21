@@ -5,6 +5,7 @@ import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { BackIcon, PlusIcon } from "../components/Icons";
 import { InvitePeopleSheet } from "../components/Invite";
+import { communityLabel, GroupCommunityFields } from "../components/GroupCommunity";
 
 export function GroupInfo() {
   const { id = "" } = useParams();
@@ -83,6 +84,7 @@ export function GroupInfo() {
 
       <section className="section">
         {info.description && <p className="profile__about">{info.description}</p>}
+        {info.community && <p className="muted small">{communityLabel(info.community)}</p>}
         <p className="muted small hint">
           {info.memberCount} {info.memberCount === 1 ? "miembro" : "miembros"} · Tu rol: {ROLE_LABEL[info.role!]}
         </p>
@@ -248,6 +250,7 @@ export function GroupInfo() {
 function GroupSettings({ info, onSaved }: { info: Info; onSaved: () => void }) {
   const [name, setName] = useState(info.name);
   const [description, setDescription] = useState(info.description ?? "");
+  const [community, setCommunity] = useState(info.community);
   const [rules, setRules] = useState<SpamRules>(info.rules);
   const [state, setState] = useState<"idle" | "saving" | "ok">("idle");
   const [error, setError] = useState("");
@@ -262,7 +265,7 @@ function GroupSettings({ info, onSaved }: { info: Info; onSaved: () => void }) {
     setState("saving");
     setError("");
     try {
-      await api(`/groups/${info.id}`, { method: "PATCH", json: { name, description: description || null, rules } });
+      await api(`/groups/${info.id}`, { method: "PATCH", json: { name, description: description || null, community, rules } });
       setState("ok");
       onSaved();
     } catch (err) {
@@ -282,6 +285,8 @@ function GroupSettings({ info, onSaved }: { info: Info; onSaved: () => void }) {
         <span>Descripción</span>
         <textarea className="input" rows={3} maxLength={300} value={description} onChange={(e) => { setDescription(e.target.value); setState("idle"); }} />
       </label>
+
+      <GroupCommunityFields value={community} onChange={(updated) => { setCommunity(updated); setState("idle"); }} />
 
       <h3 className="subhead">Antispam</h3>
       <p className="muted small">

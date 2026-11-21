@@ -107,10 +107,20 @@ async function notifyMods(groupId: string, event: string, payload: unknown) {
   return mods.map((m) => m.userId);
 }
 
+const communityCountry = z.enum(["AR", "MX"]);
+const communityInput = z.object({
+  country: communityCountry,
+  city: z.string().trim().min(2, "Ingresá una ciudad").max(60, "Máximo 60 caracteres"),
+});
 const groupInput = z.object({
   name: z.string().trim().min(3, "El nombre tiene que tener al menos 3 letras").max(40, "Máximo 40 caracteres"),
   description: z.string().trim().max(300, "Máximo 300 caracteres").nullish(),
+  community: communityInput.nullish(),
 });
+
+function communityOf({ communityCountry, communityCity }: Pick<typeof group.$inferSelect, "communityCountry" | "communityCity">) {
+  return communityCountry && communityCity ? { country: communityCountry, city: communityCity } : null;
+}
 
 const rulesInput = z.object({
   intervalSeconds: z.number().int().min(5).max(3600),
@@ -133,7 +143,10 @@ function parse<T>(schema: z.ZodType<T>, input: unknown): T {
 groupRoutes.get("/groups", async (c) => {
   const u = c.get("user");
   const rows = await db
-    .select({ id: group.id, name: group.name, description: group.description, isGeneral: group.isGeneral, role: groupMember.role })
+    .select({
+      id: group.id, name: group.name, description: group.description, isGeneral: group.isGeneral,
+      role: groupMember.role, communityCountry: group.communityCountry, communityCity: group.communityCity,
+    })
     .from(groupMember)
     .innerJoin(group, eq(group.id, groupMember.groupId))
     .where(eq(groupMember.userId, u.id))
@@ -141,15 +154,22 @@ groupRoutes.get("/groups", async (c) => {
   const ids = rows.map((r) => r.id);
   const counts = await memberCounts(ids);
   const pending = await pendingCounts(rows.filter((r) => canModerate(r.role)).map((r) => r.id));
-  return c.json(rows.map((r) => ({ ...r, memberCount: counts.get(r.id) ?? 0, pendingCount: pending.get(r.id) ?? 0 })));
+  return c.json(rows.map(({ communityCountry, communityCity, ...r }) => ({
+    ...r, community: communityOf({ communityCountry, communityCity }),
+    memberCount: counts.get(r.id) ?? 0, pendingCount: pending.get(r.id) ?? 0,
+  })));
 });
 
 /** Todos los grupos, para explorar y pedir ingreso. */
 groupRoutes.get("/groups/all", async (c) => {
   const u = c.get("user");
   const q = (c.req.query("q") ?? "").trim().slice(0, 40);
+  const country = parse(communityCountry.optional(), c.req.query("country"));
+  const city = parse(z.string().trim().max(60).optional(), c.req.query("city"));
   const conds = [eq(group.isGeneral, false)];
   if (q) conds.push(or(ilike(group.name, `%${q}%`), ilike(group.description, `%${q}%`))!);
+  if (country) conds.push(eq(group.communityCountry, country));
+  if (city) conds.push(sql`strpos(lower(${group.communityCity}), lower(${city})) > 0`);
   const rows = await db.select().from(group).where(and(...conds)).orderBy(desc(group.createdAt)).limit(200);
   const ids = rows.map((r) => r.id);
   const counts = await memberCounts(ids);
@@ -162,6 +182,7 @@ groupRoutes.get("/groups/all", async (c) => {
     id: g.id,
     name: g.name,
     description: g.description,
+    community: communityOf(g),
     memberCount: counts.get(g.id) ?? 0,
     role: roles.get(g.id) ?? null,
     pending: states.get(g.id)?.pending ?? false,
@@ -183,7 +204,10 @@ groupRoutes.post("/groups", async (c) => {
     .where(and(eq(groupMember.userId, u.id), eq(groupMember.role, "owner")));
   if (owned >= MAX_OWNED) throw new HTTPException(400, { message: `Podés ser dueño de hasta ${MAX_OWNED} grupos` });
   const id = newId();
-  await db.insert(group).values({ id, name: data.name, description: data.description ?? null, ownerId: u.id });
+  await db.insert(group).values({
+    id, name: data.name, description: data.description ?? null, ownerId: u.id,
+    communityCountry: data.community?.country ?? null, communityCity: data.community?.city ?? null,
+  });
   await db.insert(groupMember).values({ groupId: id, userId: u.id, role: "owner" });
   syncGroupRoom(u.id, id, true);
   return c.json({ id });
@@ -199,6 +223,7 @@ groupRoutes.get("/groups/:id", async (c) => {
     id: g.id,
     name: g.name,
     description: g.description,
+    community: communityOf(g),
     isGeneral: g.isGeneral,
     rules: g.spamRules,
     role: member?.role ?? null,
@@ -232,6 +257,10 @@ groupRoutes.patch("/groups/:id", async (c) => {
     .set({
       ...(data.name !== undefined && { name: data.name }),
       ...(data.description !== undefined && { description: data.description ?? null }),
+      ...(data.community !== undefined && {
+        communityCountry: data.community?.country ?? null,
+        communityCity: data.community?.city ?? null,
+      }),
       ...(data.rules && { spamRules: { ...DEFAULT_SPAM_RULES, ...data.rules } }),
     })
     .where(eq(group.id, g.id));

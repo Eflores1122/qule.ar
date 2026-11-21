@@ -1,5 +1,5 @@
 // Lo que en otras apps es "premium", acá es gratis para todo el mundo.
-import { and, desc, eq, gt, isNull, lte, or } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, lte, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -91,20 +91,16 @@ const activeGrant = (now = new Date()) => or(isNull(albumGrant.expiresAt), gt(al
 
 export async function hasAlbumAccess(ownerId: string, viewerId: string) {
   if (ownerId === viewerId) return true;
-  const [g] = await db
-    .select()
-    .from(albumGrant)
-    .where(and(eq(albumGrant.ownerId, ownerId), eq(albumGrant.granteeId, viewerId), activeGrant()));
-  return Boolean(g);
+  const grant = await currentAlbumGrant(ownerId, viewerId);
+  return Boolean(grant?.acceptedAt) && !(await isBlocked(ownerId, viewerId));
 }
 
-/** Hasta cuándo `viewerId` puede ver el álbum de `ownerId` (undefined = no puede; null = sin límite). */
-export async function albumAccessUntil(ownerId: string, viewerId: string): Promise<Date | null | undefined> {
+export async function currentAlbumGrant(ownerId: string, viewerId: string) {
   const [g] = await db
     .select()
     .from(albumGrant)
     .where(and(eq(albumGrant.ownerId, ownerId), eq(albumGrant.granteeId, viewerId), activeGrant()));
-  return g ? g.expiresAt : undefined;
+  return g;
 }
 
 /** Con quién compartí mi álbum privado (solo los accesos vigentes). */
@@ -116,7 +112,7 @@ premiumRoutes.get("/album/grants", async (c) => {
   const authors = await authorsFor(rows.map((r) => r.granteeId));
   return c.json(rows.flatMap((r) => {
     const a = authors.get(r.granteeId);
-    return a ? [{ ...a, expiresAt: r.expiresAt?.toISOString() ?? null }] : [];
+    return a ? [{ ...a, expiresAt: r.expiresAt?.toISOString() ?? null, pending: !r.acceptedAt }] : [];
   }));
 });
 
@@ -135,15 +131,22 @@ premiumRoutes.put("/album/grants/:userId", async (c) => {
   const [p] = await db.select().from(profile).where(eq(profile.userId, target));
   if (!p) throw new HTTPException(404, { message: "Perfil no disponible" });
 
-  const hadAccess = (await albumAccessUntil(u.id, target)) !== undefined;
+  const previous = await currentAlbumGrant(u.id, target);
   const now = new Date();
   const expiresAt = hours == null ? null : new Date(now.getTime() + hours * 3_600_000);
-  await db
+  const [grant] = await db
     .insert(albumGrant)
     .values({ ownerId: u.id, granteeId: target, expiresAt, createdAt: now })
-    .onConflictDoUpdate({ target: [albumGrant.ownerId, albumGrant.granteeId], set: { expiresAt, createdAt: now } });
+    .onConflictDoUpdate({
+      target: [albumGrant.ownerId, albumGrant.granteeId],
+      set: {
+        expiresAt,
+        createdAt: now,
+        acceptedAt: sql`case when ${albumGrant.expiresAt} <= ${now.toISOString()}::timestamptz then null else ${albumGrant.acceptedAt} end`,
+      },
+    }).returning({ acceptedAt: albumGrant.acceptedAt });
 
-  if (!hadAccess) {
+  if (!previous) {
     // Aviso en la conversación (la crea si no existe). El cuerpo dice por cuánto tiempo.
     const key = u.id < target ? { userA: u.id, userB: target } : { userA: target, userB: u.id };
     await db.insert(conversation).values({ id: newId(), ...key }).onConflictDoNothing();
@@ -162,7 +165,27 @@ premiumRoutes.put("/album/grants/:userId", async (c) => {
     emitToUser(target, "dm:message", msg);
     pushTo(target, { title: APP_NAME, body: "Tenés un mensaje nuevo", url: `/mensajes/${conv.id}`, tag: `dm-${conv.id}` }).catch(() => {});
   }
-  return c.json({ ok: true, expiresAt: expiresAt?.toISOString() ?? null });
+  return c.json({ ok: true, expiresAt: expiresAt?.toISOString() ?? null, pending: !grant.acceptedAt });
+});
+
+/** La persona invitada elige si habilita el acceso. Un reintento conserva la primera aceptación. */
+premiumRoutes.put("/album/invitations/:ownerId", async (c) => {
+  const viewer = c.get("user").id;
+  const owner = c.req.param("ownerId");
+  if (await isBlocked(owner, viewer)) return c.notFound();
+  const [accepted] = await db.update(albumGrant)
+    .set({ acceptedAt: sql`coalesce(${albumGrant.acceptedAt}, now())` })
+    .where(and(eq(albumGrant.ownerId, owner), eq(albumGrant.granteeId, viewer), activeGrant()))
+    .returning({ ownerId: albumGrant.ownerId });
+  if (!accepted) return c.notFound();
+  return c.json({ ok: true });
+});
+
+premiumRoutes.delete("/album/invitations/:ownerId", async (c) => {
+  await db.delete(albumGrant).where(and(
+    eq(albumGrant.ownerId, c.req.param("ownerId")), eq(albumGrant.granteeId, c.get("user").id), isNull(albumGrant.acceptedAt),
+  ));
+  return c.json({ ok: true });
 });
 
 premiumRoutes.delete("/album/grants/:userId", async (c) => {

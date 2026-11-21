@@ -72,6 +72,7 @@ export function Nearby() {
   const [people, setPeople] = useState<NearbyPerson[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [status, setStatus] = useState<Status>("loading");
+  const [loadingMore, setLoadingMore] = useState(false);
   const [loc, setLoc] = useState<LocState>("ok");
   const [showFilters, setShowFilters] = useState(false);
   const [showLocation, setShowLocation] = useState(false);
@@ -79,11 +80,16 @@ export function Nearby() {
   const [locationBusy, setLocationBusy] = useState(false);
   const [locationFeedback, setLocationFeedback] = useState<LocationFeedback | null>(null);
   const requestVersion = useRef(0);
+  const gridRequestPending = useRef(false);
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
 
   const load = useCallback(async (f: Filters, offset = 0) => {
+    if (offset && gridRequestPending.current) return;
+    gridRequestPending.current = true;
     const request = ++requestVersion.current;
+    setLoadingMore(Boolean(offset));
+    if (!offset) setHasMore(false);
     try {
       const d = await api<{ hasLocation: boolean; locationUpdatedAt: string | null; people: NearbyPerson[]; hasMore: boolean }>(`/nearby?${toQuery(f, offset)}`);
       if (request !== requestVersion.current) return;
@@ -95,6 +101,11 @@ export function Nearby() {
       setStatus("ready");
     } catch {
       if (request === requestVersion.current) setStatus("error");
+    } finally {
+      if (request === requestVersion.current) {
+        gridRequestPending.current = false;
+        setLoadingMore(false);
+      }
     }
   }, []);
 
@@ -209,7 +220,7 @@ export function Nearby() {
             {locationUpdatedAt && (
               <p className="muted small">
                 Última actualización · <time dateTime={locationUpdatedAt}>
-                  {new Intl.DateTimeFormat(navigator.language, { dateStyle: "medium", timeStyle: "short" }).format(new Date(locationUpdatedAt))}
+                  {new Intl.DateTimeFormat("es-AR", { dateStyle: "medium", timeStyle: "short" }).format(new Date(locationUpdatedAt))}
                 </time>
               </p>
             )}
@@ -283,7 +294,7 @@ export function Nearby() {
           </ul>
           {hasMore && (
             <div className="center">
-              <button className="btn btn--small" onClick={() => load(filters, people.length)}>Ver más</button>
+              <button className="btn btn--small" disabled={loadingMore} onClick={() => load(filters, people.length)}>{loadingMore ? "Cargando…" : "Ver más"}</button>
             </div>
           )}
         </>

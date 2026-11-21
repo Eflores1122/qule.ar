@@ -47,7 +47,7 @@ test("accesos al álbum privado", async (t) => {
   app.route("/api", premiumRoutes);
 
   type Account = { id: string; cookie: string };
-  type Album = { privateAlbum: { count: number; items: Array<{ url: string; thumb: string }> | null } };
+  type Album = { privateAlbum: { count: number; pending: boolean; items: Array<{ url: string; thumb: string }> | null } };
 
   function request(url: string, account?: Account, init?: RequestInit) {
     const headers = new Headers(init?.headers);
@@ -104,9 +104,16 @@ test("accesos al álbum privado", async (t) => {
   const [photoItem, videoItem] = ownerAlbum.items;
   const fileUrls = [photoItem.url, photoItem.thumb, videoItem.thumb, videoItem.url];
 
-  async function giveAccess(from: Account, to: Account, hours: number | null = null) {
+  async function invite(from: Account, to: Account, hours: number | null = null) {
     const res = await request(`/api/album/grants/${to.id}`, from, json("PUT", { hours }));
     assert.equal(res.status, 200);
+    return (await res.json()) as { pending: boolean };
+  }
+
+  async function giveAccess(from: Account, to: Account, hours: number | null = null) {
+    await invite(from, to, hours);
+    const accepted = await request(`/api/album/invitations/${from.id}`, to, { method: "PUT" });
+    assert.equal(accepted.status, 200);
   }
 
   async function grants(from: Account): Promise<string[]> {
@@ -140,14 +147,32 @@ test("accesos al álbum privado", async (t) => {
     await assertHidden(person);
   });
 
-  await t.test("compartir habilita los archivos; el vencimiento los cierra", async () => {
-    await giveAccess(owner, person, 1);
+  await t.test("solo la persona invitada puede aceptar y ver los archivos", async () => {
+    assert.equal((await invite(owner, person, 1)).pending, true);
+    assert.equal((await albumFor(person)).pending, true);
+    await assertHidden(person);
+    const invitation = `/api/album/invitations/${owner.id}`;
+    assert.equal((await request(invitation, other, { method: "PUT" })).status, 404);
+    assert.equal((await request(invitation, person, { method: "PUT" })).status, 200);
+    assert.equal((await request(invitation, person, { method: "PUT" })).status, 200);
+    assert.equal((await albumFor(person)).pending, false);
+    assert.equal((await invite(owner, person, 1)).pending, false);
     await assertVisible(person);
     await assertHidden(other);
+  });
+
+  await t.test("una invitación vencida no da acceso y renovarla exige otra aceptación", async () => {
     await db.update(schema.albumGrant).set({ expiresAt: new Date(0) }).where(and(
       eq(schema.albumGrant.ownerId, owner.id), eq(schema.albumGrant.granteeId, person.id),
     ));
     await assertHidden(person);
+    const invitation = `/api/album/invitations/${owner.id}`;
+    assert.equal((await request(invitation, person, { method: "PUT" })).status, 404);
+    assert.equal((await invite(owner, person)).pending, true);
+    await assertHidden(person);
+    assert.equal((await request(invitation, person, { method: "DELETE" })).status, 200);
+    assert.equal((await albumFor(person)).pending, false);
+    assert.equal((await request(invitation, person, { method: "PUT" })).status, 404);
     assert.deepEqual(await grants(owner), []);
   });
 

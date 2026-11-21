@@ -53,7 +53,7 @@ export type ReactionEvent = { scope: "dm" | "group"; messageId: string; conversa
 export type Media = { url: string; kind: "photo" | "video"; thumb: string | null; seconds: number | null };
 
 /** Alguien con acceso a mi álbum. expiresAt null = sin límite. */
-export type AlbumGrant = Author & { expiresAt: string | null };
+export type AlbumGrant = Author & { expiresAt: string | null; pending: boolean };
 
 export type Profile = {
   displayName: string;
@@ -95,8 +95,9 @@ export type PublicProfile = Omit<Profile, "birthdate"> & {
   distance: string | null;
   favorite: boolean;
   // items es null si no te lo compartieron; expiresAt es hasta cuándo lo podés ver (null = sin límite)
-  privateAlbum: { count: number; videos: number; items: Media[] | null; expiresAt: string | null } | null;
+  privateAlbum: { count: number; videos: number; items: Media[] | null; expiresAt: string | null; pending: boolean } | null;
   iSharedAlbum: boolean;
+  sharedPending: boolean;
   sharedUntil: string | null;
   // El último toque que le mandé, si fue hace menos de 12 horas
   myToque: { kind: string; at: string } | null;
@@ -150,10 +151,13 @@ export type SpamRules = {
   maxQueued: number;
 };
 
+export type GroupCommunity = { country: "AR" | "MX"; city: string };
+
 export type MyGroup = {
   id: string;
   name: string;
   description: string | null;
+  community: GroupCommunity | null;
   isGeneral: boolean;
   role: Role;
   memberCount: number;
@@ -164,6 +168,7 @@ export type GroupListing = {
   id: string;
   name: string;
   description: string | null;
+  community: GroupCommunity | null;
   memberCount: number;
   role: Role | null;
   pending: boolean;

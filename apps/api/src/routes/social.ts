@@ -9,7 +9,7 @@ import {
 import { emitToUser, isOnline } from "../realtime.js";
 import { distanceLabel, visibleKm } from "../geo.js";
 import { deleteImage, MAX_UPLOAD_BYTES, saveImage } from "../storage.js";
-import { albumAccessUntil, recordView } from "./premium.js";
+import { currentAlbumGrant, recordView } from "./premium.js";
 import { myRecentToque } from "./toques.js";
 import { pushTo } from "../push.js";
 import { APP_NAME } from "../brand.js";
@@ -35,8 +35,8 @@ socialRoutes.get("/users/:id", async (c) => {
   const allPhotos = await db.select().from(photo).where(eq(photo.userId, id)).orderBy(asc(photo.position));
   const photos = allPhotos.filter((x) => !x.isPrivate);
   const privatePhotos = allPhotos.filter((x) => x.isPrivate);
-  // undefined = no tiene acceso; null = sin límite; Date = hasta esa fecha
-  const albumUntil = privatePhotos.length > 0 ? (id === me.id ? null : await albumAccessUntil(id, me.id)) : undefined;
+  const albumGrant = id === me.id ? null : await currentAlbumGrant(id, me.id);
+  const pendingAlbum = Boolean(albumGrant && !albumGrant.acceptedAt);
   // Lista explícita de campos públicos: nunca la fecha de nacimiento ni la celda de ubicación
   const mine = c.get("profile")!;
   await recordView(me.id, mine.incognito, id);
@@ -46,7 +46,7 @@ socialRoutes.get("/users/:id", async (c) => {
   const [fav] = await db.select().from(schema.favorite)
     .where(and(eq(schema.favorite.userId, me.id), eq(schema.favorite.favoriteId, id)));
   // Si yo le compartí mi álbum y hasta cuándo
-  const myGrant = id === me.id ? undefined : await albumAccessUntil(me.id, id);
+  const myGrant = id === me.id ? null : await currentAlbumGrant(me.id, id);
   return c.json({
     id,
     displayName: p.displayName,
@@ -68,18 +68,20 @@ socialRoutes.get("/users/:id", async (c) => {
     recent: !p.incognito && (on || Date.now() - p.lastSeenAt.getTime() < 15 * 60_000),
     favorite: Boolean(fav),
     // Álbum privado: cuántas fotos y videos hay y, si te lo compartieron, el contenido y hasta cuándo lo ves
-    privateAlbum: privatePhotos.length
+    privateAlbum: privatePhotos.length || pendingAlbum
       ? {
           count: privatePhotos.length,
           videos: privatePhotos.filter((x) => x.kind === "video").length,
-          items: albumUntil !== undefined ? privatePhotos.map(mediaOut) : null,
-          expiresAt: albumUntil ? albumUntil.toISOString() : null,
+          items: id === me.id || albumGrant?.acceptedAt ? privatePhotos.map(mediaOut) : null,
+          expiresAt: albumGrant?.expiresAt?.toISOString() ?? null,
+          pending: pendingAlbum,
         }
       : null,
-    iSharedAlbum: myGrant !== undefined,
+    iSharedAlbum: Boolean(myGrant),
+    sharedPending: Boolean(myGrant && !myGrant.acceptedAt),
     // El último toque que le mandé, si fue hace menos de 12 horas
     myToque: id === me.id ? null : await myRecentToque(me.id, id),
-    sharedUntil: myGrant ? myGrant.toISOString() : null,
+    sharedUntil: myGrant?.expiresAt?.toISOString() ?? null,
     distance: km != null ? distanceLabel(km) : null,
   });
 });

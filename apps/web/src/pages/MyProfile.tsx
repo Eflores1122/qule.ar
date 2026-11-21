@@ -436,7 +436,7 @@ export function MyProfile() {
                   <Avatar src={g.photo} name={g.name} size={36} />
                   <span className="grants__who">
                     <Link to={`/perfil/${g.id}`}>{g.name}</Link>
-                    <small className="muted">{untilLabel(g.expiresAt)}</small>
+                    <small className="muted">{g.pending ? "Invitación pendiente · " : ""}{untilLabel(g.expiresAt)}</small>
                   </span>
                   <button type="button" className="linkbtn" aria-label={`Quitar acceso a ${g.name}`} onClick={() => revoke(g.id)} disabled={grantBusy}>Quitar</button>
                   <button type="button" className="linkbtn linkbtn--danger" aria-label={`Bloquear a ${g.name}`} onClick={() => blockFromAlbum(g)} disabled={grantBusy}>Bloquear</button>

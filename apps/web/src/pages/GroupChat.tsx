@@ -7,6 +7,7 @@ import { Avatar } from "../components/Avatar";
 import { BackIcon, ClockIcon, DotsIcon, InfoIcon, SendIcon } from "../components/Icons";
 import { JoinButton } from "../components/JoinButton";
 import { ReportDialog } from "../components/ReportDialog";
+import { communityLabel } from "../components/GroupCommunity";
 
 const fmtTime = (iso: string) =>
   new Date(iso).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
@@ -261,6 +262,7 @@ export function GroupChat() {
           <span className="gcard__icon gcard__icon--big" aria-hidden>{info.name.charAt(0).toUpperCase()}</span>
           <h2>{info.name}</h2>
           {info.description && <p className="muted">{info.description}</p>}
+          {info.community && <p className="muted small">{communityLabel(info.community)}</p>}
           <p className="muted small">{info.memberCount} {info.memberCount === 1 ? "miembro" : "miembros"} · {rulesText}</p>
           <p className="small">Los mensajes de este grupo solo los ven sus miembros.</p>
           <JoinButton g={info} onChange={() => setInfoTick((t) => t + 1)} />

@@ -70,6 +70,8 @@ export function ProfilePage() {
   // ?album=1 (desde el mensaje del chat) abre el álbum directo
   const [viewing, setViewing] = useState<number | null>(null);
   const [sharing, setSharing] = useState(false);
+  const [inviteBusy, setInviteBusy] = useState(false);
+  const [inviteMessage, setInviteMessage] = useState("");
   const [toquePicker, setToquePicker] = useState(false);
   const [toqueMsg, setToqueMsg] = useState("");
 
@@ -77,6 +79,8 @@ export function ProfilePage() {
     setP(null);
     setMissing(false);
     setPhotoIdx(0);
+    setInviteBusy(false);
+    setInviteMessage("");
     api<PublicProfile>(`/users/${id}`).then((x) => {
       setP(x);
       if (params.get("album") === "1" && x.privateAlbum?.items?.length) setViewing(0);
@@ -103,15 +107,31 @@ export function ProfilePage() {
 
   async function shareAlbum(hours: number | null) {
     if (!p) return;
-    const r = await api<{ expiresAt: string | null }>(`/album/grants/${id}`, { method: "PUT", json: { hours } });
-    setP({ ...p, iSharedAlbum: true, sharedUntil: r.expiresAt });
+    const r = await api<{ expiresAt: string | null; pending: boolean }>(`/album/grants/${id}`, { method: "PUT", json: { hours } });
+    setP({ ...p, iSharedAlbum: true, sharedUntil: r.expiresAt, sharedPending: r.pending });
     setSharing(false);
   }
 
   async function unshareAlbum() {
     if (!p) return;
     await api(`/album/grants/${id}`, { method: "DELETE" });
-    setP({ ...p, iSharedAlbum: false, sharedUntil: null });
+    setP({ ...p, iSharedAlbum: false, sharedUntil: null, sharedPending: false });
+  }
+
+  async function decideAlbum(accept: boolean) {
+    if (inviteBusy) return;
+    setInviteBusy(true);
+    setInviteMessage("");
+    try {
+      await api(`/album/invitations/${id}`, { method: accept ? "PUT" : "DELETE" });
+      const updated = await api<PublicProfile>(`/users/${id}`);
+      setP((current) => current?.id === updated.id ? updated : current);
+      setInviteMessage(accept ? "Aceptaste la invitación." : "Rechazaste la invitación.");
+    } catch {
+      setInviteMessage("No pudimos actualizar la invitación. Probá de nuevo.");
+    } finally {
+      setInviteBusy(false);
+    }
   }
 
   /** Mandar un toque: a la otra persona le llega un aviso. Uno cada 12 horas por persona. */
@@ -221,11 +241,20 @@ export function ProfilePage() {
                 {!p.isMe && <p className="muted small album__until">Lo podés ver {untilLabel(p.privateAlbum.expiresAt)}.</p>}
                 <AlbumGrid items={p.privateAlbum.items} onOpen={setViewing} />
               </>
+            ) : p.privateAlbum.pending ? (
+              <div className="stack">
+                <p className="muted small">{p.displayName} te invitó a ver su álbum privado {untilLabel(p.privateAlbum.expiresAt)}.</p>
+                <div className="row">
+                  <button className="btn btn--small btn--ghost" disabled={inviteBusy} onClick={() => decideAlbum(false)}>Rechazar</button>
+                  <button className="btn btn--small btn--primary" disabled={inviteBusy} onClick={() => decideAlbum(true)}>Aceptar invitación</button>
+                </div>
+              </div>
             ) : (
               <p className="muted small">{p.displayName} todavía no te compartió su álbum.</p>
             )}
           </section>
         )}
+        {inviteMessage && <p className="page-note muted small" role="status">{inviteMessage}</p>}
 
         <ProfileStats p={p} />
 
@@ -233,7 +262,7 @@ export function ProfilePage() {
           <div className="share-album">
             {p.iSharedAlbum ? (
               <>
-                <p className="small"><LockIcon /> Le compartiste tu álbum · {untilLabel(p.sharedUntil)}</p>
+                <p className="small"><LockIcon /> {p.sharedPending ? "Invitación pendiente" : "Le compartiste tu álbum"} · {untilLabel(p.sharedUntil)}</p>
                 <div className="row">
                   <button className="btn btn--ghost" onClick={() => setSharing(!sharing)}>Cambiar plazo</button>
                   <button className="btn btn--ghost" onClick={unshareAlbum}>Dejar de compartir</button>

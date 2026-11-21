@@ -6,6 +6,7 @@ import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { BackIcon, ImageIcon, LockIcon, SendIcon, TimerIcon } from "../components/Icons";
 import { useSectionBack } from "../useSectionBack";
+import { DiscreetButton } from "../components/DiscreetScreen";
 
 export function Conversation() {
   const { id = "" } = useParams();
@@ -189,6 +190,7 @@ export function Conversation() {
             </span>
           </Link>
         )}
+        <DiscreetButton />
       </header>
 
       <div className="chat__list chat__list--dm" ref={listRef} onScroll={onListScroll} onClick={() => setMsgMenu(null)}>
@@ -201,7 +203,7 @@ export function Conversation() {
                   <p><LockIcon /> Le compartiste tu álbum privado{m.body ? ` por ${m.body}` : ""}</p>
                 ) : (
                   <Link to={`/perfil/${m.senderId}?album=1`} className="album-msg">
-                    <LockIcon /> Te compartió su álbum privado{m.body ? ` por ${m.body}` : ""} · <u>Ver</u>
+                    <LockIcon /> Te invitó a ver su álbum privado{m.body ? ` por ${m.body}` : ""} · <u>Abrir álbum</u>
                   </Link>
                 )
               ) : m.expiring ? (

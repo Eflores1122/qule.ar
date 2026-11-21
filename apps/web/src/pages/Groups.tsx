@@ -1,9 +1,10 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { api, getSocket, ROLE_LABEL, type GroupListing, type MyGroup, type MyInvite } from "../api";
+import { api, getSocket, ROLE_LABEL, type GroupCommunity, type GroupListing, type MyGroup, type MyInvite } from "../api";
 import { PlusIcon } from "../components/Icons";
 import { MyInvites } from "../components/Invite";
 import { JoinButton } from "../components/JoinButton";
+import { communityLabel, GroupCommunityFields, GroupCountrySelect } from "../components/GroupCommunity";
 
 export function Groups() {
   const [params, setParams] = useSearchParams();
@@ -11,6 +12,10 @@ export function Groups() {
   const [mine, setMine] = useState<MyGroup[] | null>(null);
   const [all, setAll] = useState<GroupListing[] | null>(null);
   const [q, setQ] = useState("");
+  const [country, setCountry] = useState<GroupCommunity["country"] | "">("");
+  const [city, setCity] = useState("");
+  const [directoryError, setDirectoryError] = useState("");
+  const directoryRequest = useRef<AbortController | null>(null);
   const [creating, setCreating] = useState(false);
 
   const [invites, setInvites] = useState<MyInvite[]>([]);
@@ -18,13 +23,22 @@ export function Groups() {
     api<MyGroup[]>("/groups").then(setMine).catch(() => {});
     api<MyInvite[]>("/invites").then(setInvites).catch(() => {});
   }, []);
-  const loadAll = useCallback(
-    (query = q) => api<GroupListing[]>(`/groups/all?q=${encodeURIComponent(query)}`).then(setAll).catch(() => {}),
-    [q],
-  );
+  const loadAll = useCallback(() => {
+    directoryRequest.current?.abort();
+    const request = new AbortController();
+    directoryRequest.current = request;
+    const filters = new URLSearchParams({ q });
+    if (country) filters.set("country", country);
+    if (city.trim()) filters.set("city", city.trim());
+    setDirectoryError("");
+    api<GroupListing[]>(`/groups/all?${filters}`, { signal: request.signal })
+      .then((groups) => { if (!request.signal.aborted) setAll(groups); })
+      .catch(() => { if (!request.signal.aborted) setDirectoryError("No pudimos cargar los grupos."); });
+  }, [q, country, city]);
+
+  useEffect(loadMine, [loadMine]);
 
   useEffect(() => {
-    loadMine();
     const s = getSocket();
     const refresh = () => {
       loadMine();
@@ -38,9 +52,14 @@ export function Groups() {
 
   useEffect(() => {
     if (tab !== "all") return;
-    const t = setTimeout(() => loadAll(q), 250);
-    return () => clearTimeout(t);
-  }, [tab, q, loadAll]);
+    setAll(null);
+    setDirectoryError("");
+    const t = setTimeout(loadAll, 250);
+    return () => {
+      clearTimeout(t);
+      directoryRequest.current?.abort();
+    };
+  }, [tab, loadAll]);
 
   return (
     <div className="page">
@@ -68,6 +87,7 @@ export function Groups() {
                     {g.role !== "member" && <span className="pill">{ROLE_LABEL[g.role]}</span>}
                   </div>
                   <p className="gcard__desc">{g.description}</p>
+                  {g.community && <p className="gcard__meta">{communityLabel(g.community)}</p>}
                   <p className="gcard__meta">{g.memberCount} {g.memberCount === 1 ? "miembro" : "miembros"}</p>
                 </div>
                 {g.pendingCount > 0 && <span className="badge badge--inline" title="Solicitudes pendientes">{g.pendingCount}</span>}
@@ -85,11 +105,26 @@ export function Groups() {
         <>
           <div className="searchbar">
             <input className="input" type="search" placeholder="Buscar grupos…" value={q} onChange={(e) => setQ(e.target.value)} aria-label="Buscar grupos" />
+            <div className="grid2 group-locality">
+              <label className="field">
+                <span>Filtrar por país</span>
+                <GroupCountrySelect value={country} onChange={setCountry} emptyLabel="Todos los países" />
+              </label>
+              <label className="field">
+                <span>Filtrar por ciudad</span>
+                <input className="input" type="search" maxLength={60} value={city} onChange={(e) => setCity(e.target.value)} />
+              </label>
+            </div>
           </div>
-          {all && all.length === 0 ? (
+          {directoryError && (
             <div className="empty">
-              <p className="empty__title">{q ? "No encontramos grupos con eso" : "Todavía no hay grupos"}</p>
-              <p className="muted">¿Por qué no creás el primero?</p>
+              <p role="alert">{directoryError}</p>
+              <button className="btn" onClick={loadAll}>Reintentar</button>
+            </div>
+          )}
+          {all?.length === 0 ? (
+            <div className="empty">
+              <p className="empty__title">{q || country || city.trim() ? "No hay grupos que coincidan" : "Todavía no hay grupos"}</p>
             </div>
           ) : (
             <ul className="glist">
@@ -99,6 +134,7 @@ export function Groups() {
                   <div className="gcard__text">
                     <b>{g.name}</b>
                     {g.description && <p className="gcard__desc">{g.description}</p>}
+                    {g.community && <p className="gcard__meta">{communityLabel(g.community)}</p>}
                     <p className="gcard__meta">{g.memberCount} {g.memberCount === 1 ? "miembro" : "miembros"}</p>
                   </div>
                   <div className="gcard__action">
@@ -120,6 +156,7 @@ function CreateGroup({ onClose }: { onClose: () => void }) {
   const nav = useNavigate();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
+  const [community, setCommunity] = useState<GroupCommunity | null>(null);
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
@@ -128,7 +165,7 @@ function CreateGroup({ onClose }: { onClose: () => void }) {
     setBusy(true);
     setError("");
     try {
-      const { id } = await api<{ id: string }>("/groups", { method: "POST", json: { name, description: description || null } });
+      const { id } = await api<{ id: string }>("/groups", { method: "POST", json: { name, description: description || null, community } });
       nav(`/grupos/${id}`);
     } catch (err) {
       setError((err as Error).message);
@@ -138,7 +175,7 @@ function CreateGroup({ onClose }: { onClose: () => void }) {
 
   return (
     <div className="sheet-backdrop" onClick={onClose}>
-      <form className="sheet" role="dialog" aria-modal aria-labelledby="create-title" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
+      <form className="sheet sheet--scroll" role="dialog" aria-modal aria-labelledby="create-title" onClick={(e) => e.stopPropagation()} onSubmit={submit}>
         <h2 id="create-title">Crear un grupo</h2>
         <label className="field">
           <span>Nombre</span>
@@ -148,6 +185,7 @@ function CreateGroup({ onClose }: { onClose: () => void }) {
           <span>Descripción</span>
           <textarea className="input" rows={3} maxLength={300} value={description} onChange={(e) => setDescription(e.target.value)} placeholder="¿De qué va el grupo?" />
         </label>
+        <GroupCommunityFields value={community} onChange={setCommunity} />
         <p className="muted small">Vas a ser el dueño. Se entra pidiendo ingreso o aceptando una invitación tuya o de tus moderadores.</p>
         {error && <p className="error" role="alert">{error}</p>}
         <div className="row">
