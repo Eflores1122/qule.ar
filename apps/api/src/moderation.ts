@@ -151,7 +151,7 @@ export async function purgeRemovedGroups() {
 const MINOR_SIGNALS: RegExp[] = [
   /(?:^|[^\d+])[-−]\s?18\b/, // "-18"
   /\+\s?1[0-7]\b/, // "+14", "+16" (el "+18" de adultos no cuenta)
-  /\b1[0-7]\s?(?:anos|anitos|a)\b/, // "15 años", "16a"
+  /\b1[0-7]\s?(?:anos|anitos)\b|\b1[0-7]a\b/, // "15 años", "16a" (pero no "de 15 a 18", que es un horario)
   /\bsub\s?-?\s?1[0-8]\b/, // "sub 18", "sub-16"
   /\bmenores\b|\bmenor de edad\b|\bmenorcit[oa]s?\b/,
   /\bteens?\b|\bsecundari[oa]s?\b|\bliceo\b/,
@@ -263,8 +263,18 @@ export function forbiddenGroupText(...texts: (string | null | undefined)[]) {
   return null;
 }
 
-/** Quien intentó crear o editar un grupo que sugiere menores: alerta urgente sobre esa persona. */
+/** Quien intentó crear o editar un grupo que sugiere menores: alerta urgente sobre esa persona (una sola mientras esté abierta). */
 export async function reportMinorGroupAttempt(user: { id: string; name: string }, hit: string, text: string) {
+  // No repite: si ya hay una alerta abierta por esto sobre la misma persona, no crea otra en cada intento
+  const [dup] = await db.select({ id: report.id }).from(report)
+    .where(and(
+      sql`${report.reporterId} is null`,
+      eq(report.targetUserId, user.id),
+      eq(report.status, "open"),
+      sql`${report.details} like ${AUTO_DETAILS_PREFIX + ": intentó crear o editar un grupo%"}`,
+    ))
+    .limit(1);
+  if (dup) return;
   await db.insert(report).values({
     id: crypto.randomUUID(),
     reporterId: null,
