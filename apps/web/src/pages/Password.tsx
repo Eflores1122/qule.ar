@@ -1,55 +1,56 @@
 import { useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
 import { MIN_PASSWORD_LENGTH } from "../../../../packages/security/password.js";
+import { accessCopy as copy } from "../access";
 import { authClient } from "../api";
-import { Wordmark } from "../components/Wordmark";
-import { Logo } from "../components/Logo";
+import { AccessLayout } from "../components/AccessLayout";
 
 /** Pedir el mail para recuperar la contraseña. */
 export function ForgotPassword() {
   const [email, setEmail] = useState("");
   const [sent, setSent] = useState(false);
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+  const [failed, setFailed] = useState(false);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
     setBusy(true);
-    setError("");
-    const res = await authClient.requestPasswordReset({ email, redirectTo: "/nueva-clave" });
-    setBusy(false);
-    // Siempre decimos lo mismo, exista o no la cuenta, para no revelar quién está registrado
-    if (res.error && res.error.status !== 404) setError("No se pudo. Probá de nuevo en un rato.");
-    else setSent(true);
+    setFailed(false);
+    try {
+      const res = await authClient.requestPasswordReset({ email, redirectTo: "/nueva-clave" });
+      // Mismo mensaje para cualquier dirección, aunque no tenga cuenta.
+      if (res.error && res.error.status !== 404) setFailed(true);
+      else setSent(true);
+    } catch {
+      setFailed(true);
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
-    <div className="auth">
-      <div className="auth__hero">
-        <Logo className="auth__logo" />
-        <Wordmark big />
-      </div>
-      <div className="auth__card">
-        <h2 className="auth__title">Recuperar contraseña</h2>
+    <AccessLayout compact>
+      <section className="access__form">
+        <h1 className="access__title">{copy.recoverTitle}</h1>
         {sent ? (
-          <>
-            <p className="muted">Si hay una cuenta con <b>{email}</b>, te mandamos un mail con un link para elegir una contraseña nueva. Vence en 1 hora.</p>
-            <p className="muted small">¿No llega? Fijate en spam o promociones.</p>
-          </>
+          <div className="stack" role="status">
+            <p>{copy.recoverSent(email)}</p>
+            <p className="muted small">{copy.recoverInbox}</p>
+          </div>
         ) : (
           <form onSubmit={submit} className="form">
-            <p className="muted">Escribí el email con el que te registraste y te mandamos un link.</p>
+            <p className="muted">{copy.recoverHelp}</p>
             <label className="field">
-              <span>Email</span>
+              <span>{copy.email}</span>
               <input className="input" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
             </label>
-            {error && <p className="error" role="alert">{error}</p>}
-            <button className="btn btn--primary" disabled={busy}>{busy ? "Un toque…" : "Mandar link"}</button>
+            {failed && <p className="error" role="alert">{copy.failed}</p>}
+            <button className="btn btn--primary" type="submit" disabled={busy}>{busy ? copy.busy : copy.sendLink}</button>
           </form>
         )}
-        <Link to="/entrar" className="linkbtn center-link">Volver a entrar</Link>
-      </div>
-    </div>
+        <Link to="/entrar" className="linkbtn">{copy.back}</Link>
+      </section>
+    </AccessLayout>
   );
 }
 
@@ -61,53 +62,59 @@ export function ResetPassword() {
   const [password, setPassword] = useState("");
   const [repeat, setRepeat] = useState("");
   const [busy, setBusy] = useState(false);
-  const [error, setError] = useState(params.get("error") ? "El link venció o ya se usó. Pedí uno nuevo." : "");
+  const [error, setError] = useState<"invalidLink" | "mismatch" | "tooShort" | "failed" | null>(null);
   const [done, setDone] = useState(false);
+  const message = error === "tooShort" ? copy.minimum(MIN_PASSWORD_LENGTH) : error && copy[error];
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
-    if (password !== repeat) return setError("Las contraseñas no coinciden.");
-    if (!token) return setError("Falta el link del mail. Pedí uno nuevo.");
+    if (password !== repeat) return setError("mismatch");
+    if (!token) return setError("invalidLink");
     setBusy(true);
-    setError("");
-    const res = await authClient.resetPassword({ newPassword: password, token });
-    setBusy(false);
-    if (res.error?.code === "INVALID_TOKEN") setError("El link venció o ya se usó. Pedí uno nuevo.");
-    else if (res.error?.code === "PASSWORD_TOO_SHORT") setError(`Usá al menos ${MIN_PASSWORD_LENGTH} caracteres.`);
-    else if (res.error) setError("No se pudo. Probá de nuevo.");
-    else setDone(true);
+    setError(null);
+    try {
+      const res = await authClient.resetPassword({ newPassword: password, token });
+      if (res.error?.code === "INVALID_TOKEN") setError("invalidLink");
+      else if (res.error?.code === "PASSWORD_TOO_SHORT") setError("tooShort");
+      else if (res.error) setError("failed");
+      else setDone(true);
+    } catch {
+      setError("failed");
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
-    <div className="auth">
-      <div className="auth__hero">
-        <Logo className="auth__logo" />
-        <Wordmark big />
-      </div>
-      <div className="auth__card">
-        <h2 className="auth__title">Contraseña nueva</h2>
+    <AccessLayout compact>
+      <section className="access__form">
+        <h1 className="access__title">{copy.newPassword}</h1>
         {done ? (
           <>
-            <p className="muted">Listo, ya podés entrar con tu contraseña nueva.</p>
-            <button className="btn btn--primary" onClick={() => nav("/entrar", { replace: true })}>Entrar</button>
+            <p role="status">{copy.resetDone}</p>
+            <button className="btn btn--primary" type="button" onClick={() => nav("/entrar", { replace: true })}>{copy.signIn}</button>
+          </>
+        ) : !token || params.has("error") || error === "invalidLink" ? (
+          <>
+            <p className="muted" role="status">{copy.invalidLink}</p>
+            <Link to="/recuperar" className="linkbtn">{copy.requestNew}</Link>
           </>
         ) : (
           <form onSubmit={submit} className="form">
             <label className="field">
-              <span>Contraseña nueva</span>
-              <input className="input" type="password" required minLength={MIN_PASSWORD_LENGTH} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" />
-              <small className="muted">Usá al menos {MIN_PASSWORD_LENGTH} caracteres.</small>
+              <span>{copy.newPassword}</span>
+              <input className="input" type="password" required minLength={MIN_PASSWORD_LENGTH} value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" aria-describedby="reset-password-minimum" />
+              <small className="muted" id="reset-password-minimum">{copy.minimum(MIN_PASSWORD_LENGTH)}</small>
             </label>
             <label className="field">
-              <span>Repetila</span>
+              <span>{copy.repeat}</span>
               <input className="input" type="password" required minLength={MIN_PASSWORD_LENGTH} value={repeat} onChange={(e) => setRepeat(e.target.value)} autoComplete="new-password" />
             </label>
-            {error && <p className="error" role="alert">{error}</p>}
-            <button className="btn btn--primary" disabled={busy || !token}>{busy ? "Un toque…" : "Guardar"}</button>
-            {!token && <Link to="/recuperar" className="linkbtn center-link">Pedir un link nuevo</Link>}
+            {message && <p className="error" role="alert">{message}</p>}
+            <button className="btn btn--primary" type="submit" disabled={busy}>{busy ? copy.busy : copy.savePassword}</button>
           </form>
         )}
-      </div>
-    </div>
+      </section>
+    </AccessLayout>
   );
 }

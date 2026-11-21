@@ -1,11 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router";
 import { MIN_PASSWORD_LENGTH } from "../../../../packages/security/password.js";
+import { accessCopy as copy } from "../access";
 import { api, authClient } from "../api";
 import { useMe } from "../App";
-import { Wordmark } from "../components/Wordmark";
-import { Logo } from "../components/Logo";
-import { APP_NAME, APP_SLOGAN } from "../brand";
+import { AccessLayout } from "../components/AccessLayout";
 import { GoogleMark } from "../components/GoogleMark";
 import { EyeIcon, EyeOffIcon } from "../components/Icons";
 
@@ -27,6 +26,7 @@ export function Login() {
 
   function selectMode(next: "in" | "up") {
     if (next === mode) return;
+    setError("");
     setShowPassword(false);
     setMode(next);
   }
@@ -35,58 +35,52 @@ export function Login() {
     e.preventDefault();
     setError("");
     setBusy(true);
-    const res =
-      mode === "up"
-        ? await authClient.signUp.email({ name: name || email.split("@")[0], email, password })
-        : await authClient.signIn.email({ email, password });
-    setBusy(false);
-    if (res.error) {
-      setError(translate(res.error.code, res.error.message));
-      return;
+    try {
+      const res =
+        mode === "up"
+          ? await authClient.signUp.email({ name: name || email.split("@")[0], email, password })
+          : await authClient.signIn.email({ email, password });
+      if (res.error) setError(translate(res.error.code));
+      else await reload();
+    } catch {
+      setError(copy.failed);
+    } finally {
+      setBusy(false);
     }
-    await reload();
   }
 
   return (
-    <div className="auth">
-      <div className="auth__hero">
-        <Logo className="auth__logo" />
-        <Wordmark big />
-        <p className="auth__slogan">{APP_SLOGAN}</p>
-        <p className="auth__tag">Gente cerca, grupos y charla. Gratis y de código abierto, para siempre.</p>
-      </div>
-
-      <div className="auth__card">
+    <AccessLayout>
+      <section className="access__form" aria-label={copy.account}>
+        <div className="access__modes" role="group" aria-label={copy.account} data-mode={mode}>
+          <button type="button" aria-pressed={mode === "in"} disabled={busy} onClick={() => selectMode("in")}>{copy.signIn}</button>
+          <button type="button" aria-pressed={mode === "up"} disabled={busy} onClick={() => selectMode("up")}>{copy.signUp}</button>
+        </div>
         {google && (
           <>
             <button
               className="btn btn--google"
               onClick={() => authClient.signIn.social({ provider: "google", callbackURL: "/" })}
             >
-              <GoogleMark /> Seguir con Google
+              <GoogleMark /> {copy.google}
             </button>
-            <div className="divider"><span>o con tu email</span></div>
+            <div className="divider"><span>{copy.emailAlternative}</span></div>
           </>
         )}
-
-        <div className="segmented" role="tablist">
-          <button role="tab" aria-selected={mode === "in"} onClick={() => selectMode("in")}>Entrar</button>
-          <button role="tab" aria-selected={mode === "up"} onClick={() => selectMode("up")}>Crear cuenta</button>
-        </div>
 
         <form onSubmit={submit} className="form">
           {mode === "up" && (
             <label className="field">
-              <span>Nombre</span>
+              <span>{copy.name}</span>
               <input className="input" value={name} onChange={(e) => setName(e.target.value)} autoComplete="nickname" maxLength={40} />
             </label>
           )}
           <label className="field">
-            <span>Email</span>
+            <span>{copy.email}</span>
             <input className="input" type="email" required value={email} onChange={(e) => setEmail(e.target.value)} autoComplete="email" />
           </label>
           <div className="field">
-            <label htmlFor="auth-password">Contraseña</label>
+            <label htmlFor="auth-password">{copy.password}</label>
             <div className="password-input">
               <input
                 id="auth-password"
@@ -97,6 +91,7 @@ export function Login() {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 autoComplete={mode === "up" ? "new-password" : "current-password"}
+                aria-describedby={mode === "up" ? "password-minimum" : undefined}
                 autoCapitalize="none"
                 spellCheck={false}
               />
@@ -110,32 +105,27 @@ export function Login() {
                 {showPassword ? <EyeOffIcon /> : <EyeIcon />}
               </button>
             </div>
-            {mode === "up" && <small className="muted">Usá al menos {MIN_PASSWORD_LENGTH} caracteres.</small>}
-            {mode === "in" && canReset && <Link to="/recuperar" className="linkbtn small forgot">¿Te olvidaste la contraseña?</Link>}
+            {mode === "up" && <small id="password-minimum" className="muted">{copy.minimum(MIN_PASSWORD_LENGTH)}</small>}
           </div>
+          {mode === "in" && canReset && <Link to="/recuperar" className="linkbtn small forgot">{copy.forgot}</Link>}
           {error && <p className="error" role="alert">{error}</p>}
-          <button className="btn btn--primary" disabled={busy}>
-            {busy ? "Un toque…" : mode === "up" ? "Crear cuenta" : "Entrar"}
+          <button type="submit" className="btn btn--primary" disabled={busy}>
+            {busy ? copy.busy : mode === "up" ? copy.signUp : copy.signIn}
           </button>
         </form>
-        <p className="fineprint">
-          Solo para mayores de 18. {APP_NAME} está en beta: la usás bajo tu propia responsabilidad. Al registrarte vas a
-          leer y aceptar los <Link to="/terminos">Términos</Link> y la <Link to="/privacidad">Política de privacidad</Link>.
-        </p>
-        <p className="fineprint country-safety__link"><Link to="/seguridad-por-pais">Avisos de seguridad por país</Link></p>
-      </div>
-    </div>
+      </section>
+    </AccessLayout>
   );
 }
 
-function translate(code: string | undefined, fallback: string | undefined) {
+function translate(code: string | undefined) {
   switch (code) {
-    case "INVALID_EMAIL_OR_PASSWORD": return "Email o contraseña incorrectos.";
+    case "INVALID_EMAIL_OR_PASSWORD": return copy.invalidCredentials;
     case "USER_ALREADY_EXISTS":
-    case "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL": return "Ya hay una cuenta con ese email.";
-    case "PASSWORD_TOO_SHORT": return `Usá al menos ${MIN_PASSWORD_LENGTH} caracteres.`;
-    case "INVALID_EMAIL": return "Ese email no parece válido.";
-    default: return fallback ?? "No se pudo. Probá de nuevo.";
+    case "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL": return copy.duplicateEmail;
+    case "PASSWORD_TOO_SHORT": return copy.minimum(MIN_PASSWORD_LENGTH);
+    case "INVALID_EMAIL": return copy.invalidEmail;
+    default: return copy.failed;
   }
 }
 

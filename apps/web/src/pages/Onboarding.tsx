@@ -1,10 +1,9 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { api, authClient } from "../api";
+import { accessCopy as copy } from "../access";
 import { useMe } from "../App";
-import { APP_NAME } from "../brand";
-import { Wordmark } from "../components/Wordmark";
-import { Logo } from "../components/Logo";
+import { AccessLayout } from "../components/AccessLayout";
 import { Markdown } from "../components/Markdown";
 import terminos from "../legal/terminos.md?raw";
 
@@ -36,43 +35,32 @@ export function Onboarding() {
       await reload();
       nav("/yo?nuevo=1", { replace: true });
     } catch (err) {
-      setError((err as Error).message);
+      setError(err instanceof Error ? err.message : "UNKNOWN");
     } finally {
       setBusy(false);
     }
   }
 
   return (
-    <div className="auth">
-      <div className="auth__hero">
-        <Logo className="auth__logo" />
-        <Wordmark big />
-        <p className="auth__tag">Dos datos y entrás.</p>
-      </div>
-      <form className="auth__card form" onSubmit={submit}>
+    <AccessLayout compact>
+      <form className="form" onSubmit={submit}>
+        <h1 className="access__title">{copy.profileTitle}</h1>
         <label className="field">
-          <span>¿Cómo querés que te vean?</span>
+          <span>{copy.displayName}</span>
           <input className="input" required maxLength={40} value={displayName} onChange={(e) => setDisplayName(e.target.value)} />
         </label>
         <label className="field">
-          <span>Fecha de nacimiento</span>
+          <span>{copy.birthdate}</span>
           <input className="input" type="date" required max={maxBirthdate()} value={birthdate} onChange={(e) => setBirthdate(e.target.value)} />
-          <small className="muted">Solo mostramos tu edad. La fecha no se puede cambiar después.</small>
+          <small className="muted">{copy.birthdayHint}</small>
         </label>
         <label className="check">
           <input type="checkbox" checked={adult} onChange={(e) => setAdult(e.target.checked)} />
-          <span>Confirmo que tengo 18 años o más.</span>
+          <span>{copy.adult}</span>
         </label>
         <div className="beta-notice" role="note">
-          <p className="beta-notice__title">Antes de entrar, leé esto</p>
-          <ul className="beta-notice__list">
-            <li>{APP_NAME} está en <b>beta</b>: puede fallar, cambiar o perder datos.</li>
-            <li>Te registrás y la usás <b>bajo tu propia responsabilidad</b>.</li>
-            <li>
-              Quienes la desarrollamos respondemos <b>solo por el funcionamiento de la app</b>, no por lo que hagan otras
-              personas ni por lo que pase fuera de ella.
-            </li>
-          </ul>
+          <p className="beta-notice__title">{copy.betaTitle}</p>
+          <p>{copy.betaNotice}</p>
           <button
             type="button"
             className="btn btn--ghost btn--small"
@@ -82,10 +70,10 @@ export function Onboarding() {
               setOpenedTerms(true);
             }}
           >
-            {showTerms ? "Ocultar los términos" : "Leer los Términos y condiciones"}
+            {showTerms ? copy.hideTerms : copy.showTerms}
           </button>
           {showTerms && (
-            <div className="beta-notice__terms legal__body" tabIndex={0} aria-label="Términos y condiciones">
+            <div className="beta-notice__terms legal__body" lang="es" tabIndex={0} aria-label="Términos y condiciones">
               <Markdown source={terminos} />
             </div>
           )}
@@ -93,13 +81,12 @@ export function Onboarding() {
         <label className={`check ${openedTerms ? "" : "check--disabled"}`}>
           <input type="checkbox" disabled={!openedTerms} checked={acceptTerms} onChange={(e) => setAcceptTerms(e.target.checked)} />
           <span>
-            Leí los Términos y condiciones y la <Link to="/privacidad" target="_blank">Política de privacidad</Link>, y los
-            acepto. Entiendo que {APP_NAME} está en beta y que la uso bajo mi propia responsabilidad.
-            {!openedTerms && <small className="muted check__hint">Para aceptarlos, primero abrí los términos.</small>}
+            {copy.acceptedTerms} <Link to="/privacidad" target="_blank">{copy.privacyPolicy}</Link>. {copy.acceptedBeta}
+            {!openedTerms && <small className="muted check__hint">{copy.readFirst}</small>}
           </span>
         </label>
-        {error && <p className="error" role="alert">{error}</p>}
-        <button className="btn btn--primary" disabled={!adult || !acceptTerms || busy}>{busy ? "Un toque…" : `Entrar a ${APP_NAME}`}</button>
+        {error && <p className="error" role="alert">{error !== "UNKNOWN" ? error : copy.failed}</p>}
+        <button className="btn btn--primary" type="submit" disabled={!adult || !acceptTerms || busy}>{busy ? copy.busy : copy.enterApp}</button>
         <button
           type="button"
           className="btn btn--ghost"
@@ -108,9 +95,9 @@ export function Onboarding() {
             await reload();
           }}
         >
-          Salir
+          {copy.signOut}
         </button>
       </form>
-    </div>
+    </AccessLayout>
   );
 }

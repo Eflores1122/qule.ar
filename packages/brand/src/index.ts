@@ -152,6 +152,8 @@ export const fontSizes = {
   "display-xl": "120px",
   /** El nombre de la app en la pantalla de bienvenida. */
   "wordmark-hero": "clamp(48px, 14vw, 72px)",
+  /** Titular del acceso público. */
+  "title-access": "clamp(42px, 6.5vw, 98px)",
 } as const;
 
 // ---------- Formas ----------

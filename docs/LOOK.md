@@ -118,6 +118,12 @@ El mate culo: un mate con su bombilla en el que el cuenco es una cola. Hay conte
 
 **Poné la pava.** Es una invitación: poner la pava es lo primero que hacés cuando viene alguien, el arranque de la charla. Tiene el mismo guiño que el mate. Se eligió en el hilo de Look and feel y vive en `APP_SLOGAN` (`packages/brand`): no se escribe a mano en las pantallas.
 
+## Acceso y movimiento
+
+- El acceso usa `--title-access` para el titular y muestra el logo al lado del nombre en la cabecera.
+- La foto es de [Josh Hild](https://unsplash.com/photos/rainy-city-street-at-night-with-bright-lights-coam-W6_tK0) y se sirve con la app según la [licencia de Unsplash](https://unsplash.com/license).
+- El indicador se desliza al cambiar de sección o de modo en el acceso. Con movimiento reducido cambia de lugar al instante.
+
 ## Tono de los textos
 
 - Español rioplatense con voseo: "Tenés", "Pedí entrar", "Escribí algo".
