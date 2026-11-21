@@ -68,7 +68,7 @@ p { margin: 0; }
 
 .input {
   width: 100%; min-height: 46px; padding: 11px 14px; border-radius: var(--radius-lg);
-  background: var(--surface-2); border: 1px solid var(--line); color: var(--text); font: inherit;
+  background: var(--surface-2); border: 1px solid var(--line); color: var(--text); font: inherit; font-size: var(--text-input);
 }
 .input:focus { outline: none; border-color: var(--accent); }
 .password-input { position: relative; }
@@ -190,7 +190,7 @@ input[type="date"].input { color-scheme: dark; }
 .composer { border-top: 1px solid var(--line); padding: 8px 10px calc(8px + var(--safe-b)); background: var(--surface); flex: none; }
 .shell:not(.shell--thread) .composer { padding-bottom: 8px; }
 .composer__row { display: flex; gap: 8px; align-items: flex-end; }
-.composer__input { flex: 1; resize: none; max-height: 140px; min-height: 44px; padding: 11px 14px; border-radius: var(--radius-4xl); background: var(--surface-2); border: 1px solid var(--line); color: var(--text); font: inherit; field-sizing: content; }
+.composer__input { flex: 1; resize: none; max-height: 140px; min-height: 44px; padding: 11px 14px; border-radius: var(--radius-4xl); background: var(--surface-2); border: 1px solid var(--line); color: var(--text); font: inherit; font-size: var(--text-input); field-sizing: content; }
 .composer__input:focus { outline: none; border-color: var(--accent); }
 .composer__editing { font-size: var(--text-xs); color: var(--queue); display: flex; justify-content: space-between; align-items: center; padding: 0 6px 6px; }
 .sendbtn { width: 44px; height: 44px; border-radius: var(--radius-pill); border: 0; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; flex: none; }
