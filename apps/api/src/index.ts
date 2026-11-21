@@ -21,12 +21,17 @@ import { adminRoutes } from "./routes/admin.js";
 import { toqueRoutes } from "./routes/toques.js";
 import { securityHeaders } from "./security.js";
 import { sweepExpiredPhotos } from "./expiring.js";
+import { purgeRemovedGroups } from "./moderation.js";
 
 await runMigrations();
 
 // Fotos temporales ya vistas: se borran al arrancar (por si el API se reinició justo después de abrir una) y cada minuto
 await sweepExpiredPhotos().catch((e) => console.error("sweepExpiredPhotos", e));
 setInterval(() => sweepExpiredPhotos().catch((e) => console.error("sweepExpiredPhotos", e)), 60_000).unref();
+
+// Grupos dados de baja hace más de 90 días: se borran del todo (sus reportes conservan la copia)
+await purgeRemovedGroups().catch((e) => console.error("purgeRemovedGroups", e));
+setInterval(() => purgeRemovedGroups().catch((e) => console.error("purgeRemovedGroups", e)), 6 * 3_600_000).unref();
 
 // El chat general existe siempre
 const [general] = await db.select().from(schema.group).where(eq(schema.group.isGeneral, true));

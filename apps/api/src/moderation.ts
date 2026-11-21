@@ -102,3 +102,103 @@ export async function releaseEvidence(reportIds: string[]) {
     if (!(await isEvidence(key)) && !(await stillInUse(key))) await deleteImage(key);
   }
 }
+
+// ---------- Grupos ----------
+
+/** Grupos ocultos del listado por precaución: reportes urgentes abiertos de AUTO_HIDE_REPORTERS personas distintas. */
+export async function autoHiddenGroups(): Promise<Set<string>> {
+  const rows = await db
+    .select({ id: report.groupId })
+    .from(report)
+    .where(and(eq(report.status, "open"), inArray(report.reason, [...URGENT_REASONS]), sql`${report.groupId} is not null`))
+    .groupBy(report.groupId)
+    .having(sql`count(distinct ${report.reporterId}) >= ${AUTO_HIDE_REPORTERS}`);
+  return new Set(rows.flatMap((r) => (r.id ? [r.id] : [])));
+}
+
+/** ¿El grupo es prueba de algún reporte (el grupo en sí o un mensaje suyo)? Entonces no se borra: se da de baja. */
+export async function groupIsEvidence(groupId: string): Promise<boolean> {
+  const [r] = await db.select({ id: report.id }).from(report)
+    .where(and(
+      inArray(report.status, KEPT),
+      or(
+        eq(report.groupId, groupId),
+        and(eq(report.messageKind, "group"),
+          sql`${report.messageId} in (select id from ${schema.groupMessage} where ${schema.groupMessage.groupId} = ${groupId})`),
+      ),
+    ))
+    .limit(1);
+  return Boolean(r);
+}
+
+/** Días que un grupo dado de baja queda guardado como prueba antes de borrarse del todo. */
+export const REMOVED_GROUP_DAYS = 90;
+
+/** Borra del todo los grupos dados de baja hace más de REMOVED_GROUP_DAYS (sus reportes conservan la copia). */
+export async function purgeRemovedGroups() {
+  await db.delete(schema.group)
+    .where(sql`${schema.group.removedAt} < now() - make_interval(days => ${REMOVED_GROUP_DAYS})`);
+}
+
+// ---------- Alertas automáticas: señales de menores en nombres y descripciones ----------
+// No borran ni ocultan nada: crean un reporte urgente para que una persona lo revise. Ver docs/MODERACION.md.
+
+const MINOR_SIGNALS: RegExp[] = [
+  /(?:^|[^\d+])[-−]\s?18\b/, // "-18"
+  /\+\s?1[0-7]\b/, // "+14", "+16" (el "+18" de adultos no cuenta)
+  /\b1[0-7]\s?(?:anos|anitos|a)\b/, // "15 años", "16a"
+  /\bsub\s?-?\s?1[0-8]\b/, // "sub 18", "sub-16"
+  /\bmenores\b|\bmenor de edad\b|\bmenorcit[oa]s?\b/,
+  /\bteens?\b|\bsecundari[oa]s?\b|\bliceo\b/,
+];
+
+/** Devuelve el fragmento que dispara la alerta, o null. Ignora mayúsculas y tildes. */
+export function minorSignal(text: string | null | undefined): string | null {
+  if (!text) return null;
+  const t = text.toLowerCase().normalize("NFD").replace(/[\u0300-\u036f]/g, "");
+  for (const re of MINOR_SIGNALS) {
+    const m = re.exec(t);
+    if (m) return m[0].trim();
+  }
+  return null;
+}
+
+export const AUTO_DETAILS_PREFIX = "Alerta automática";
+
+/**
+ * Revisa un texto y, si hay señales de menores, crea un reporte urgente sin persona que lo mande (reporterId null).
+ * No duplica: si ya hay una alerta abierta para ese perfil o grupo, no crea otra.
+ */
+export async function checkMinorSignals(
+  target: { userId: string; name: string } | { groupId: string; name: string },
+  fields: Record<string, string | null | undefined>,
+) {
+  let hit: string | null = null;
+  let where = "";
+  for (const [label, value] of Object.entries(fields)) {
+    hit = minorSignal(value);
+    if (hit) { where = label; break; }
+  }
+  if (!hit) return;
+  const isGroup = "groupId" in target;
+  const [dup] = await db.select({ id: report.id }).from(report)
+    .where(and(
+      eq(report.status, "open"),
+      sql`${report.reporterId} is null`,
+      sql`${report.details} like ${AUTO_DETAILS_PREFIX + "%"}`,
+      isGroup ? eq(report.groupId, target.groupId) : eq(report.targetUserId, target.userId),
+    ))
+    .limit(1);
+  if (dup) return;
+  await db.insert(report).values({
+    id: crypto.randomUUID(),
+    reporterId: null,
+    targetUserId: isGroup ? null : target.userId,
+    groupId: isGroup ? target.groupId : null,
+    reason: "menor de edad",
+    details: `${AUTO_DETAILS_PREFIX}: «${hit}» en ${where}.`,
+    targetName: target.name,
+    messageBody: Object.values(fields).filter(Boolean).join("\n"),
+  });
+  await notifyModeratorsUrgent();
+}
