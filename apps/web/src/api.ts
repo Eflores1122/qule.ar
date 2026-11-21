@@ -177,6 +177,7 @@ export type GroupListing = {
 
 export type GroupInfo = GroupListing & {
   isGeneral: boolean;
+  pendingMessage: string | null;
   muted: boolean;
   rules: SpamRules;
   pendingCount: number;

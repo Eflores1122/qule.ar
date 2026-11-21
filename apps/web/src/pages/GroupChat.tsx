@@ -7,6 +7,7 @@ import { Avatar } from "../components/Avatar";
 import { BackIcon, ClockIcon, DotsIcon, InfoIcon, SendIcon } from "../components/Icons";
 import { JoinButton } from "../components/JoinButton";
 import { ReportDialog } from "../components/ReportDialog";
+import { slowModeText } from "../features/groups/groupRules";
 
 const fmtTime = (iso: string) =>
   new Date(iso).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
@@ -242,12 +243,8 @@ export function GroupChat() {
     setMessages((list) => list.filter((x) => x.id !== m.id));
   }
 
-  const windowSecs = info ? info.rules.burst * info.rules.intervalSeconds : 0;
-  const rulesText = info
-    ? `Modo lento · ${info.rules.burst} ${info.rules.burst === 1 ? "mensaje" : "mensajes"} cada ${windowSecs < 60 ? `${windowSecs} s` : `${Math.round((windowSecs / 60) * 10) / 10} min`}`
-    : "";
-
   if (!info) return <div className="chat" />;
+  const rulesText = slowModeText(info.rules);
 
   // Vista previa para quien no es miembro: no ve los mensajes, solo puede pedir ingreso
   if (!isMember) {
@@ -260,10 +257,18 @@ export function GroupChat() {
         <div className="preview">
           <span className="gcard__icon gcard__icon--big" aria-hidden>{info.name.charAt(0).toUpperCase()}</span>
           <h2>{info.name}</h2>
-          {info.description && <p className="muted">{info.description}</p>}
+          {info.description && <p className="muted group-description">{info.description}</p>}
           <p className="muted small">{info.memberCount} {info.memberCount === 1 ? "miembro" : "miembros"} · {rulesText}</p>
+          <div className="preview__request">
+            {info.pending && info.pendingMessage && (
+              <div className="preview__request-message">
+                <h3 className="small muted">Tu mensaje</h3>
+                <p className="group-description">{info.pendingMessage}</p>
+              </div>
+            )}
+            <JoinButton g={info} onChange={() => setInfoTick((t) => t + 1)} />
+          </div>
           <p className="small">Los mensajes de este grupo solo los ven sus miembros.</p>
-          <JoinButton g={info} onChange={() => setInfoTick((t) => t + 1)} />
         </div>
       </div>
     );
@@ -273,11 +278,11 @@ export function GroupChat() {
     <div className="chat">
       <header className="topbar">
         <div className="topbar__grow">
-          <h1 className="topbar__title">{info.isGeneral ? "# " : ""}{info.name}</h1>
+          <h1 className="topbar__title topbar__title--sm"><Link to={`/grupos/${id}/info`}>{info.isGeneral ? "# " : ""}{info.name}</Link></h1>
           <p className="topbar__sub"><ClockIcon /> {rulesText}</p>
         </div>
-        <Link to={`/grupos/${id}/info`} className="iconbtn iconbtn--badge" aria-label={`Info del grupo${info.pendingCount ? `, ${info.pendingCount} solicitudes pendientes` : ""}`}>
-          <InfoIcon />
+        <Link to={`/grupos/${id}/info`} className="btn btn--small group-details-link" aria-label={`Ver detalles${info.pendingCount ? `, ${info.pendingCount} solicitudes pendientes` : ""}`}>
+          <InfoIcon /> Ver detalles
           {info.pendingCount > 0 && <b className="badge">{info.pendingCount}</b>}
         </Link>
       </header>

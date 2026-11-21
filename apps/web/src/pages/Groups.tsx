@@ -100,8 +100,10 @@ export function Groups() {
                 <li key={g.id} className="gcard gcard--static">
                   <span className="gcard__icon" aria-hidden>{g.name.charAt(0).toUpperCase()}</span>
                   <div className="gcard__text">
-                    <b>{g.name}</b>
-                    {g.description && <p className="gcard__desc">{g.description}</p>}
+                    <Link className="gcard__details" to={`/grupos/${g.id}${g.role ? "/info" : ""}`}>
+                      <b>{g.name}</b>
+                      {g.description && <p className="gcard__desc">{g.description}</p>}
+                    </Link>
                     <p className="gcard__meta">
                       {g.memberCount} {g.memberCount === 1 ? "miembro" : "miembros"} ·{" "}
                       <button type="button" className="gcard__report" onClick={() => setReporting(g)}>Reportar</button>
