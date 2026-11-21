@@ -453,6 +453,13 @@ a.gcard:hover { background: var(--surface); }
 .photo-menu button { display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; border-radius: var(--radius-md); background: var(--surface-2); border: 0; }
 .photo-menu button:hover { background: var(--surface-3); }
 .photo-menu .muted { margin-left: auto; }
+.phrase-menu { display: flex; flex-direction: column; gap: 6px; padding: 0 0 8px; max-height: 40vh; overflow-y: auto; }
+.phrase-menu__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.phrase-menu__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.phrase-menu__list li { display: flex; align-items: center; gap: 4px; }
+.phrase-menu__pick { flex: 1; min-width: 0; text-align: left; padding: 10px 12px; border-radius: var(--radius-md); background: var(--surface-2); border: 0; overflow-wrap: anywhere; }
+.phrase-menu__pick:hover { background: var(--surface-3); }
+.phrase-menu .linkbtn { align-self: flex-start; }
 .viewer { position: fixed; inset: 0; z-index: var(--z-viewer); background: var(--media-bg); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 16px; }
 .viewer img { max-width: 100%; max-height: 80vh; object-fit: contain; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .viewer__bar { position: absolute; top: calc(12px + env(safe-area-inset-top, 0px)); left: 16px; right: 16px; height: 3px; background: var(--on-media-track); border-radius: var(--radius-hair); overflow: hidden; }

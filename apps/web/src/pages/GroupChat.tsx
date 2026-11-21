@@ -9,6 +9,7 @@ import { BackIcon, ClockIcon, DotsIcon, InfoIcon, SendIcon } from "../components
 import { JoinButton } from "../components/JoinButton";
 import { ReportDialog } from "../components/ReportDialog";
 import { slowModeText } from "../features/groups/groupRules";
+import { SavedPhrasesButton, SavedPhrasesMenu } from "../features/phrases/SavedPhrases";
 
 const fmtTime = (iso: string) =>
   new Date(iso).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
@@ -28,6 +29,7 @@ export function GroupChat() {
   const [queued, setQueued] = useState<GroupMessage[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [text, setText] = useState("");
+  const [phrasesOpen, setPhrasesOpen] = useState(false);
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -393,7 +395,11 @@ export function GroupChat() {
             <button type="button" className="iconbtn" aria-label="Cancelar respuesta" onClick={() => setReplyTo(null)}>✕</button>
           </div>
         )}
+        {phrasesOpen && (
+          <SavedPhrasesMenu text={text} onClose={() => setPhrasesOpen(false)} onPick={(p) => { setText(p); setPhrasesOpen(false); inputRef.current?.focus(); }} />
+        )}
         <div className="composer__row">
+          <SavedPhrasesButton open={phrasesOpen} onToggle={() => setPhrasesOpen((v) => !v)} />
           <textarea
             ref={inputRef}
             className="composer__input"
