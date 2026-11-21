@@ -60,7 +60,7 @@ Solo para que la app funcione: mostrar tu perfil, la gente cerca y los grupos, m
 **Quién los ve:**
 
 - **Otras personas de la app:** ven tu perfil, tus fotos públicas y tu distancia aproximada, si no la ocultaste. Tus álbumes privados los ve solo quien vos elijas.
-- **Moderación:** para revisar un reporte, quien modera puede ver el mensaje o el perfil reportado.
+- **Moderación:** para revisar un reporte, quien modera puede ver el mensaje o el perfil reportado, y la copia que se guarda al reportarlo (mirá el punto 6).
 - **Quienes mantienen el servidor:** técnicamente pueden acceder a la base de datos y a los archivos. Hoy los mensajes **no están cifrados de punta a punta**, y lo guardado en el servidor tampoco está cifrado. Solo acceden cuando hace falta para arreglar un problema o por una orden judicial.
 - **Proveedores que usamos para que la app funcione:**
   - **Cloudflare** (Estados Unidos): por ahí pasa el tráfico entre tu celu y el servidor, para que la conexión sea segura y para proteger la app de ataques. Técnicamente, el contenido pasa por sus equipos.
@@ -74,10 +74,13 @@ Solo para que la app funcione: mostrar tu perfil, la gente cerca y los grupos, m
 ## 6. Cuánto tiempo los guardamos
 
 - Mientras tengas la cuenta.
-- **Si borrás tu cuenta**, se borran en el momento tu perfil, fotos, videos, mensajes, favoritos y todo lo asociado. Puede quedar una copia en los backups hasta **14 días**, y después se borra sola.
+- **Si borrás tu cuenta**, se borran en el momento tu perfil, fotos, videos, mensajes, favoritos y todo lo asociado, salvo lo que forme parte de un reporte de moderación (mirá abajo). Puede quedar una copia en los backups hasta **14 días**, y después se borra sola.
 - **Si desenviás un mensaje privado**, se borra para las dos personas.
-- **Si borrás un mensaje en un grupo**, deja de verse para todes, pero hoy el texto queda guardado en la base de datos. Lo estamos revisando para que se borre de verdad.
+- **Si borrás un mensaje en un grupo**, se borra: deja de verse para todes y el texto se elimina.
 - **Las fotos temporales** se borran del servidor después de verse.
+- **Si alguien reporta un mensaje o un perfil**, guardamos una copia de lo reportado (el texto y las fotos) para que moderación lo pueda revisar aunque después se borre.
+  - Si moderación **descarta** el reporte, la copia se borra.
+  - Si el reporte **terminó en una medida** (borrar el mensaje o suspender la cuenta), la copia se conserva como registro y como prueba, aunque después se borre la cuenta. Solo la ve moderación, y se entrega a una autoridad únicamente si una orden judicial lo pide. La ley permite no borrar datos cuando hacerlo perjudicaría derechos de otras personas o cuando hay obligación de conservarlos (Ley 25.326, art. 16, inc. 5).
 
 ## 7. Cómo los cuidamos
 

@@ -14,7 +14,7 @@ import { myRecentToque } from "./toques.js";
 import { pushTo } from "../push.js";
 import { APP_NAME } from "../brand.js";
 import { EXPIRING_GRACE_MS, EXPIRING_SECONDS } from "../expiring.js";
-import { isUrgent, notifyModeratorsUrgent, REPORT_REASONS } from "../moderation.js";
+import { deleteImageUnlessEvidence, isUrgent, notifyModeratorsUrgent, REPORT_REASONS } from "../moderation.js";
 
 const { profile, photo, block, report, conversation, directMessage } = schema;
 
@@ -258,7 +258,7 @@ socialRoutes.post("/conversations/:id/messages/:mid/open", async (c) => {
   if (!row?.photoKey) throw new HTTPException(410, { message: "Esta foto ya se vio" });
   const key = row.photoKey;
   setTimeout(async () => {
-    await deleteImage(key);
+    await deleteImageUnlessEvidence(key);
     await db.update(directMessage).set({ photoKey: null }).where(eq(directMessage.id, row.id)).catch(() => {});
   }, EXPIRING_GRACE_MS);
   emitToUser(row.senderId, "dm:opened", { conversationId: conv.id, id: row.id });
@@ -274,7 +274,7 @@ socialRoutes.delete("/conversations/:id/messages/:mid", async (c) => {
     .where(and(eq(directMessage.id, c.req.param("mid")), eq(directMessage.conversationId, conv.id), eq(directMessage.senderId, me.id)))
     .returning();
   if (!row) return c.notFound();
-  if (row.photoKey) await deleteImage(row.photoKey);
+  if (row.photoKey) await deleteImageUnlessEvidence(row.photoKey);
   await db.delete(schema.reaction).where(eq(schema.reaction.messageId, row.id));
   const payload = { conversationId: conv.id, id: row.id };
   emitToUser(me.id, "dm:deleted", payload);
@@ -340,6 +340,9 @@ socialRoutes.post("/reports", async (c) => {
     .safeParse(await c.req.json());
   if (!r.success) throw new HTTPException(400, { message: "Elegí un motivo" });
   const { userId, ...rest } = r.data;
+  // Copia para moderación (ver report en schema.ts y docs/MODERACION.md)
+  let messageBody: string | null = null;
+  let evidenceKeys: string[] = [];
   if (rest.messageId) {
     // El mensaje adjunto tiene que ser de la persona reportada y de una charla o grupo donde está quien reporta
     let ok = false;
@@ -347,6 +350,10 @@ socialRoutes.post("/reports", async (c) => {
       const [m] = await db.select().from(directMessage).where(eq(directMessage.id, rest.messageId));
       const [conv] = m ? await db.select().from(conversation).where(eq(conversation.id, m.conversationId)) : [];
       ok = Boolean(m && conv && m.senderId === userId && (conv.userA === me.id || conv.userB === me.id));
+      if (ok) {
+        messageBody = m.body;
+        evidenceKeys = m.photoKey ? [m.photoKey] : [];
+      }
     } else if (rest.messageKind === "group") {
       const [m] = await db.select().from(schema.groupMessage).where(eq(schema.groupMessage.id, rest.messageId));
       const [mem] = m
@@ -354,10 +361,19 @@ socialRoutes.post("/reports", async (c) => {
             .where(and(eq(schema.groupMember.groupId, m.groupId), eq(schema.groupMember.userId, me.id)))
         : [];
       ok = Boolean(m && mem && m.userId === userId);
+      if (ok) messageBody = m.body;
     }
     if (!ok) throw new HTTPException(400, { message: "Ese mensaje no corresponde a este reporte" });
+  } else if (isUrgent(rest.reason)) {
+    // Perfil reportado por algo urgente (por ejemplo, una foto de una persona menor): sus fotos públicas quedan como prueba
+    const pics = await db.select({ key: photo.key }).from(photo).where(and(eq(photo.userId, userId), eq(photo.isPrivate, false)));
+    evidenceKeys = pics.map((p) => p.key);
   }
-  await db.insert(report).values({ id: newId(), reporterId: me.id, targetUserId: userId, ...rest });
+  const [target] = await db.select({ name: profile.displayName }).from(profile).where(eq(profile.userId, userId));
+  await db.insert(report).values({
+    id: newId(), reporterId: me.id, targetUserId: userId, ...rest,
+    targetName: target?.name ?? null, messageBody, evidenceKeys,
+  });
   // Lo urgente (menores, contenido íntimo sin consentimiento, amenazas) le avisa a moderación al instante
   if (isUrgent(rest.reason)) notifyModeratorsUrgent().catch((e) => console.error("notifyModeratorsUrgent", e));
   return c.json({ ok: true });

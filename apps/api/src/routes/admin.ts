@@ -11,7 +11,7 @@ import { pushEnabled, pushTo, vapidPublicKey } from "../push.js";
 import { APP_NAME } from "../brand.js";
 import { disconnectUser, emitToGroup } from "../realtime.js";
 import { deleteImage } from "../storage.js";
-import { autoHiddenUsers, isUrgent } from "../moderation.js";
+import { autoHiddenUsers, deleteImageUnlessEvidence, isUrgent, releaseEvidence } from "../moderation.js";
 
 const { report, profile, session, groupMessage, directMessage, pushSubscription, user, group } = schema;
 
@@ -93,27 +93,34 @@ adminRoutes.get("/admin/reports", async (c) => {
     .where(status === "open" ? eq(report.status, "open") : inArray(report.status, ["dismissed", "actioned"]))
     .orderBy(desc(report.createdAt))
     .limit(100);
-  const people = await authorsFor(rows.flatMap((r) => [r.reporterId, r.targetUserId]));
-  const targets = [...new Set(rows.map((r) => r.targetUserId))];
+  // Quien reportó o fue reportado puede haber borrado su cuenta: el reporte queda, sin la cuenta
+  const ids = (xs: (string | null)[]) => xs.filter((x): x is string => x != null);
+  const people = await authorsFor(ids(rows.flatMap((r) => [r.reporterId, r.targetUserId])));
+  const targets = [...new Set(ids(rows.map((r) => r.targetUserId)))];
   const profiles = targets.length ? await db.select().from(profile).where(inArray(profile.userId, targets)) : [];
   const suspended = new Map(profiles.map((p) => [p.userId, p.suspendedAt?.toISOString() ?? null]));
   const totals = targets.length
     ? await db.select({ id: report.targetUserId, n: sql<number>`count(*)::int` }).from(report)
         .where(inArray(report.targetUserId, targets)).groupBy(report.targetUserId)
     : [];
-  const totalBy = new Map(totals.map((t) => [t.id, t.n]));
+  const totalBy = new Map(totals.map((t) => [t.id ?? "", t.n]));
 
   const hidden = await autoHiddenUsers();
   const out = [];
   for (const r of rows) {
+    // El mensaje reportado: si ya se borró, se muestra la copia que guardó el reporte
     let message: { body: string | null; photo: boolean; deleted: boolean } | null = null;
     if (r.messageId && r.messageKind === "group") {
       const [m] = await db.select().from(groupMessage).where(eq(groupMessage.id, r.messageId));
-      message = m ? { body: m.body, photo: false, deleted: m.status === "deleted" } : { body: null, photo: false, deleted: true };
+      const deleted = !m || m.status === "deleted";
+      message = { body: deleted ? r.messageBody : m.body, photo: false, deleted };
     } else if (r.messageId && r.messageKind === "dm") {
       const [m] = await db.select().from(directMessage).where(eq(directMessage.id, r.messageId));
-      message = m ? { body: m.body, photo: Boolean(m.photoKey), deleted: false } : { body: null, photo: false, deleted: true };
+      message = m
+        ? { body: m.body, photo: Boolean(m.photoKey) || r.evidenceKeys.length > 0, deleted: false }
+        : { body: r.messageBody, photo: r.evidenceKeys.length > 0, deleted: true };
     }
+    const tid = r.targetUserId ?? "";
     out.push({
       id: r.id,
       reason: r.reason,
@@ -124,12 +131,14 @@ adminRoutes.get("/admin/reports", async (c) => {
       messageId: r.messageId,
       messageKind: r.messageKind,
       message,
-      reporter: people.get(r.reporterId) ?? null,
-      target: people.get(r.targetUserId) ?? { id: r.targetUserId, name: "Cuenta borrada", age: 0, photo: null },
-      targetSuspendedAt: suspended.get(r.targetUserId) ?? null,
-      targetReportCount: totalBy.get(r.targetUserId) ?? 0,
+      reporter: (r.reporterId && people.get(r.reporterId)) || null,
+      // Cuenta borrada: id null (no se puede suspender) y el nombre que tenía al reportarla
+      target: people.get(tid) ?? { id: null, name: r.targetName ? `${r.targetName} (cuenta borrada)` : "Cuenta borrada", age: 0, photo: null },
+      targetSuspendedAt: suspended.get(tid) ?? null,
+      targetReportCount: totalBy.get(tid) ?? 0,
+      evidenceFiles: r.evidenceKeys.length,
       urgent: isUrgent(r.reason),
-      targetAutoHidden: hidden.has(r.targetUserId),
+      targetAutoHidden: hidden.has(tid),
     });
   }
   // Lo urgente primero (menores, contenido íntimo sin consentimiento, amenazas); dentro de cada grupo, lo más nuevo
@@ -143,6 +152,8 @@ async function closeReports(ids: string[], adminId: string, status: "dismissed" 
     .update(report)
     .set({ status, resolvedBy: adminId, resolvedAt: new Date(), resolution })
     .where(and(inArray(report.id, ids), eq(report.status, "open")));
+  // Descartado: la copia del mensaje y los archivos guardados como prueba se liberan
+  if (status === "dismissed") await releaseEvidence(ids);
 }
 
 adminRoutes.post("/admin/reports/:id/dismiss", async (c) => {
@@ -155,11 +166,12 @@ adminRoutes.post("/admin/reports/:id/delete-message", async (c) => {
   const [r] = await db.select().from(report).where(eq(report.id, c.req.param("id")));
   if (!r?.messageId) throw new HTTPException(400, { message: "Este reporte no tiene mensaje" });
   if (r.messageKind === "group") {
-    const [m] = await db.update(groupMessage).set({ status: "deleted" }).where(eq(groupMessage.id, r.messageId)).returning();
+    const [m] = await db.update(groupMessage).set({ status: "deleted", body: "" }).where(eq(groupMessage.id, r.messageId)).returning();
     if (m) await emitToGroup(m.groupId, m.userId, "group:deleted", { id: m.id, groupId: m.groupId });
   } else {
     const [m] = await db.delete(directMessage).where(eq(directMessage.id, r.messageId)).returning();
-    if (m?.photoKey) await deleteImage(m.photoKey);
+    // La foto queda como prueba del reporte (que termina en una medida); si no, se borra
+    if (m?.photoKey) await deleteImageUnlessEvidence(m.photoKey);
   }
   await closeReports([r.id], c.get("user").id, "actioned", "Mensaje borrado");
   return c.json({ ok: true });

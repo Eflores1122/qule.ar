@@ -131,10 +131,18 @@ export const block = pgTable("block", {
 
 export const report = pgTable("report", {
   id: text("id").primaryKey(),
-  reporterId: text("reporter_id").notNull().references(() => user.id, { onDelete: "cascade" }),
-  targetUserId: text("target_user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  // Si se borra la cuenta de quien reportó o de quien fue reportado, el reporte queda (con la copia de abajo):
+  // es la prueba que moderación tiene que poder preservar (ver docs/MODERACION.md).
+  reporterId: text("reporter_id").references(() => user.id, { onDelete: "set null" }),
+  targetUserId: text("target_user_id").references(() => user.id, { onDelete: "set null" }),
   messageId: text("message_id"),
   messageKind: text("message_kind"), // "group" | "dm"
+  // Copia al momento del reporte: el nombre visible, el texto del mensaje y los archivos (la foto del mensaje
+  // o, si se reporta un perfil por algo urgente, sus fotos públicas). Esos archivos no se borran mientras
+  // el reporte esté abierto o haya terminado en una medida; si se descarta, se liberan.
+  targetName: text("target_name"),
+  messageBody: text("message_body"),
+  evidenceKeys: jsonb("evidence_keys").$type<string[]>().notNull().default([]),
   reason: text("reason").notNull(),
   details: text("details"),
   status: text("status").notNull().default("open"), // open | dismissed | actioned

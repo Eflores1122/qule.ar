@@ -17,7 +17,9 @@ type Report = {
   messageKind: "group" | "dm" | null;
   message: { body: string | null; photo: boolean; deleted: boolean } | null;
   reporter: Author | null;
-  target: Author;
+  // id null: la cuenta reportada se borró (el reporte queda como prueba)
+  target: Omit<Author, "id"> & { id: string | null };
+  evidenceFiles: number;
   targetSuspendedAt: string | null;
   targetReportCount: number;
 };
@@ -99,7 +101,7 @@ export function Admin() {
                   </span>
                   <time className="muted small">{fmt(r.createdAt)}</time>
                 </div>
-                <Link to={`/perfil/${r.target.id}`} className="rcard__who">
+                <Link to={r.target.id ? `/perfil/${r.target.id}` : "#"} className="rcard__who">
                   <Avatar src={r.target.photo} name={r.target.name} size={40} />
                   <span>
                     <b>{r.target.name}</b> <span className="muted">{r.target.age || ""}</span>
@@ -115,9 +117,16 @@ export function Admin() {
                     <span className="muted small">{r.messageKind === "group" ? "Mensaje en un grupo" : "Mensaje privado"}{r.message.deleted && " (ya borrado)"}</span>
                     {r.message.body && <p>{r.message.body}</p>}
                     {r.message.photo && <p className="muted">[foto]</p>}
+                    {r.message.deleted && r.message.body && <span className="muted small">Copia guardada al reportarlo</span>}
                   </blockquote>
                 )}
                 {r.details && <p className="rcard__details">“{r.details}”</p>}
+                {r.evidenceFiles > 0 && (
+                  <p className="muted small">
+                    {r.evidenceFiles === 1 ? "1 archivo guardado" : `${r.evidenceFiles} archivos guardados`} como prueba. No lo descargues: si hay que
+                    denunciar, lo pide la fiscalía (ver el protocolo).
+                  </p>
+                )}
                 <p className="muted small">Reportado por {r.reporter?.name ?? "una cuenta borrada"}</p>
                 {r.status === "open" ? (
                   <div className="rcard__actions">
@@ -125,7 +134,7 @@ export function Admin() {
                     {r.message && !r.message.deleted && (
                       <button className="btn btn--small" onClick={() => act(() => api(`/admin/reports/${r.id}/delete-message`, { method: "POST" }))}>Borrar mensaje</button>
                     )}
-                    {!r.targetSuspendedAt && (
+                    {!r.targetSuspendedAt && r.target.id && (
                       <button className="btn btn--small btn--danger" onClick={() => setSuspending(r)}>Suspender</button>
                     )}
                   </div>
