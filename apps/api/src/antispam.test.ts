@@ -4,7 +4,6 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { DEFAULT_SPAM_RULES, group, groupMessage, user } from "./db/schema.js";
 
 test("nextSlot con las reglas por defecto", async (t) => {
   // Cada archivo de pruebas corre en su propio proceso. Usamos una base descartable.
@@ -22,6 +21,7 @@ test("nextSlot con las reglas por defecto", async (t) => {
   });
 
   const { db, closeDb, runMigrations } = await import("./db/index.js");
+  const { DEFAULT_SPAM_RULES, group, groupMessage, user } = await import("./db/schema.js");
   close = closeDb;
   const { nextSlot } = await import("./antispam.js");
   await runMigrations();

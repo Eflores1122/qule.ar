@@ -8,6 +8,8 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { auth } from "./auth.js";
 import { closeDb, db, runMigrations, schema } from "./db/index.js";
+import { encryptLegacyHealth } from "./db/health.js";
+import { checkDataKey } from "./crypt.js";
 import { env } from "./env.js";
 import { APP_NAME } from "./brand.js";
 import type { AppEnv } from "./lib.js";
@@ -23,7 +25,10 @@ import { securityHeaders } from "./security.js";
 import { sweepExpiredPhotos } from "./expiring.js";
 import { purgeRemovedGroups, scanExistingGroups } from "./moderation.js";
 
+checkDataKey();
 await runMigrations();
+const encryptedProfiles = await encryptLegacyHealth(db);
+if (encryptedProfiles) console.log(`Datos de salud cifrados: ${encryptedProfiles} perfiles`);
 
 // Fotos temporales ya vistas: se borran al arrancar (por si el API se reinició justo después de abrir una) y cada minuto
 await sweepExpiredPhotos().catch((e) => console.error("sweepExpiredPhotos", e));
