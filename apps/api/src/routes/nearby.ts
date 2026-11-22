@@ -8,6 +8,7 @@ import { ageFrom, firstPublicPhotoKeys, thumbUrl, requireProfile, requireUser, t
 import { autoHiddenUsers } from "../moderation.js";
 import { isOnline } from "../realtime.js";
 import { hit } from "../shared.js";
+import { limit } from "../ratelimit.js";
 
 const { profile } = schema;
 
@@ -101,6 +102,7 @@ type Candidate = { user_id: string; cell_lat: number | null; cell_lng: number | 
  * 2. Se ordena acá (en línea vive en memoria) y se buscan nombre, edad y foto solo de la página que se muestra.
  */
 nearbyRoutes.get("/nearby", async (c) => {
+  await limit(c.get("user").id, "nearby");
   return c.json(await nearbyPage(c.get("profile")!, filtersSchema.parse(c.req.query())));
 });
 

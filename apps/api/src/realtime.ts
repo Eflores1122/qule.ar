@@ -6,7 +6,9 @@ import { auth } from "./auth.js";
 import { db, schema } from "./db/index.js";
 import { authorsFor, blockedWith, reactionsFor } from "./lib.js";
 import { notifyGroupMessage } from "./groupNotify.js";
-import { clustered, socketClosed, socketOpened } from "./shared.js";
+import { clustered, reserveSocket } from "./shared.js";
+import { env } from "./env.js";
+import { limit } from "./ratelimit.js";
 
 const { groupMember, groupMessage } = schema;
 
@@ -32,8 +34,11 @@ export const groupRoom = (id: string) => `group:${id}`;
  * `publishQueued`: este proceso publica los mensajes en cola (uno solo, el líder).
  */
 export function attachRealtime(server: HttpServer, opts: { publishQueued: boolean }) {
+  const origin = new URL(env.APP_URL).origin;
   io = new Server(server, {
     path: "/socket.io",
+    maxHttpBufferSize: 8 * 1024,
+    allowRequest: (req, done) => done(null, !req.headers.origin || req.headers.origin === origin),
     ...(clustered ? { adapter: createAdapter(), transports: ["websocket"] } : {}),
   });
 
@@ -44,9 +49,27 @@ export function attachRealtime(server: HttpServer, opts: { publishQueued: boolea
     }
     const s = await auth.api.getSession({ headers });
     if (!s) return next(new Error("sin sesión"));
+    try {
+      await limit(s.user.id, "socket");
+    } catch {
+      return next(new Error("Demasiados intentos de conexión"));
+    }
     const [p] = await db.select({ suspendedAt: schema.profile.suspendedAt }).from(schema.profile)
       .where(eq(schema.profile.userId, s.user.id));
-    if (p?.suspendedAt) return next(new Error("cuenta suspendida"));
+    if (!p || p.suspendedAt) return next(new Error("perfil no disponible"));
+    const release = await reserveSocket(s.user.id);
+    if (!release) return next(new Error("No pudimos abrir más conexiones para esta cuenta"));
+    if (socket.conn.readyState !== "open") {
+      release();
+      return next(new Error("conexión cerrada"));
+    }
+    const onClose = () => {
+      socket.conn.off("close", onClose);
+      socket.off("disconnect", onClose);
+      release();
+    };
+    socket.conn.once("close", onClose);
+    socket.once("disconnect", onClose);
     socket.data.userId = s.user.id;
     next();
   });
@@ -54,25 +77,27 @@ export function attachRealtime(server: HttpServer, opts: { publishQueued: boolea
   io.on("connection", async (socket) => {
     const userId: string = socket.data.userId;
     socket.join(userRoom(userId));
-    socketOpened(userId);
     touchLastSeen(userId);
     // "Escribiendo…": lo único que el socket acepta del cliente. Se verifica que sea parte de la charla.
     const convOther = new Map<string, string | null>();
     let lastTyping = 0;
     socket.on("dm:typing", async (p: unknown) => {
-      const conversationId = typeof p === "object" && p && "conversationId" in p ? String((p as { conversationId: unknown }).conversationId) : "";
-      if (!conversationId || Date.now() - lastTyping < 1000) return;
+      const conversationId = typeof p === "object" && p && "conversationId" in p ? p.conversationId : "";
+      if (typeof conversationId !== "string" || !conversationId || conversationId.length > 128 || Date.now() - lastTyping < 1000) return;
       lastTyping = Date.now();
       if (!convOther.has(conversationId)) {
         const [conv] = await db.select().from(schema.conversation).where(eq(schema.conversation.id, conversationId));
         const other = conv && (conv.userA === userId ? conv.userB : conv.userB === userId ? conv.userA : null);
+        if (convOther.size >= 100) {
+          const oldest = convOther.keys().next().value;
+          if (oldest !== undefined) convOther.delete(oldest);
+        }
         convOther.set(conversationId, other ?? null);
       }
       const other = convOther.get(conversationId);
       if (other) io?.to(userRoom(other)).emit("dm:typing", { conversationId });
     });
     socket.on("disconnect", () => {
-      socketClosed(userId);
       touchLastSeen(userId);
     });
     const groups = await db.select().from(groupMember).where(eq(groupMember.userId, userId));
