@@ -66,21 +66,27 @@ nearbyRoutes.put("/me/privacy", async (c) => {
 });
 
 const list = z
-  .string()
+  .string().max(1220)
   .optional()
-  .transform((s) => (s ? s.split(",").map((x) => x.trim()).filter(Boolean).slice(0, 20) : []));
-const int = z.coerce.number().int().optional();
+  .transform((s) => (s ? s.split(",").map((x) => x.trim()).filter(Boolean) : []))
+  .pipe(z.array(z.string().max(60)).max(20));
+const range = (min: number, max: number) => z.coerce.number().int().min(min).max(max).optional();
+const age = range(18, 120);
+const height = range(120, 230);
+const weight = range(35, 250);
+const ordered = (min?: number, max?: number) => min == null || max == null || min <= max;
 
 const filtersSchema = z.object({
-  ageMin: int, ageMax: int,
-  heightMin: int, heightMax: int,
-  weightMin: int, weightMax: int,
+  ageMin: age, ageMax: age,
+  heightMin: height, heightMax: height,
+  weightMin: weight, weightMax: weight,
   bodyType: list, position: list, tribes: list, lookingFor: list, relationship: list,
   online: z.enum(["1"]).optional(),
   withPhoto: z.enum(["1"]).optional(),
   favorites: z.enum(["1"]).optional(),
   offset: z.coerce.number().int().min(0).max(2000).default(0),
-});
+}).refine((f) => ordered(f.ageMin, f.ageMax) && ordered(f.heightMin, f.heightMax) && ordered(f.weightMin, f.weightMax),
+  "El mínimo tiene que ser menor o igual al máximo");
 
 export type NearbyFilters = z.infer<typeof filtersSchema>;
 

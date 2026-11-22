@@ -161,6 +161,29 @@ const MES = {
   "distancia escondida": { userId: ME, cellLat: -34.6, cellLng: -58.4, showDistance: false },
 };
 
+test("valida los rangos y conserva los filtros de texto como valores literales", async () => {
+  const invalid: Record<string, string>[] = [
+    { ageMin: "999999999" }, { heightMin: "210", heightMax: "150" },
+    { weightMin: "80.5" }, { tribes: "a".repeat(61) }, { position: Array(21).fill("versatil").join(",") },
+  ];
+  for (const input of invalid) assert.throws(() => parseNearbyFilters(input));
+
+  const id = "filtros-literales";
+  await db.insert(schema.user).values({ id, name: "Ana", email: "literal@example.test" });
+  await db.insert(schema.profile).values({
+    userId: id, displayName: "Ana", birthdate: "1990-01-01",
+    bodyType: "D'Angelo", lookingFor: ["Música 100%"],
+  });
+  try {
+    const found = await nearbyPage(MES["sin ubicación"], parseNearbyFilters({ bodyType: "D'Angelo", lookingFor: "Música 100%" }));
+    assert.deepEqual(found.people.map((p) => p.id), [id]);
+    const partial = await nearbyPage(MES["sin ubicación"], parseNearbyFilters({ bodyType: "D'An", lookingFor: "Música %" }));
+    assert.equal(partial.total, 0);
+  } finally {
+    await db.delete(schema.user).where(inArray(schema.user.id, [id]));
+  }
+});
+
 for (const [label, me] of Object.entries(MES)) {
   test(`grilla de Cerca igual a la cuenta en memoria (${label})`, async () => {
     for (const q of CASES) {
