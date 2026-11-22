@@ -96,6 +96,28 @@ Al reportar, la app guarda una copia de lo reportado: el texto del mensaje y sus
 - **Cuidado con los reportes falsos.** Si muchas cuentas nuevas reportan a la misma persona sin motivo, puede ser un ataque. Descartá esos reportes y, si hace falta, suspendé a quienes los mandan.
 - **Si te equivocaste**, la suspensión se puede levantar desde la pestaña Suspendidas.
 
+## Permisos del equipo
+
+Quien administra en general (las cuentas de `ADMIN_USER_IDS` o `ADMIN_EMAILS` en el servidor) puede todo. Al resto del equipo se le dan permisos chicos desde el panel, en la pestaña **Equipo**, de a uno:
+
+| Permiso | Qué permite |
+|---|---|
+| Reportes | Ver los reportes, descartarlos y borrar el mensaje reportado |
+| Suspensiones | Suspender y reactivar cuentas |
+| Revisiones | Responder los pedidos de revisión de suspensiones (mantener o levantar) |
+
+Solo la administración general puede dar de baja o reactivar grupos, ver quién mandó cada reporte, dar y sacar permisos y ver el **Registro**. Nadie del equipo ve mails, IPs ni datos de salud. Los permisos se chequean en el servidor, no solo escondiendo botones.
+
+Cada acción (descartar, borrar un mensaje, suspender, reactivar, responder una revisión, dar de baja un grupo, cambiar permisos) queda en el **Registro**: quién, cuándo, sobre qué y por qué.
+
+## Pedidos de revisión
+
+Quien está suspendido ve el motivo al entrar y puede **pedir una revisión** desde la app, en privado. Un pedido por suspensión, y puede sumar algo más una sola vez mientras no haya respuesta. Le llega un mail avisando la suspensión (sin el motivo) y otro cuando hay respuesta.
+
+- Lo revisa alguien con el permiso **Revisiones**, mejor si no es quien suspendió (el panel lo avisa; si no hay nadie más, se puede igual y queda registrado).
+- El panel muestra el motivo, lo que escribió la persona y los reportes que terminaron en la medida, **sin decir quién reportó**.
+- La respuesta es obligatoria y la persona la lee en la app. Si se levanta, la cuenta vuelve a funcionar enseguida.
+
 ## Pendiente
 
 - **Un canal privado de contacto**, por mail, para quien quiere apelar una suspensión o pedir ayuda. Depende del servicio de mails (discusión #25).

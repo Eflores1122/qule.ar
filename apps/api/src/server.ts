@@ -22,6 +22,7 @@ import { nearbyRoutes } from "./routes/nearby.js";
 import { premiumRoutes } from "./routes/premium.js";
 import { adminRoutes } from "./routes/admin.js";
 import { toqueRoutes } from "./routes/toques.js";
+import { appealRoutes } from "./routes/appeals.js";
 import { securityHeaders } from "./security.js";
 import { sweepExpiredPhotos } from "./expiring.js";
 import { purgeRemovedGroups, scanExistingGroups } from "./moderation.js";
@@ -90,6 +91,7 @@ app.route("/api", nearbyRoutes);
 app.route("/api", premiumRoutes);
 app.route("/api", adminRoutes);
 app.route("/api", toqueRoutes);
+app.route("/api", appealRoutes);
 app.all("/api/*", (c) => c.json({ error: "No existe" }, 404));
 
 // En producción el API también sirve la web compilada (un solo proceso, un solo puerto)

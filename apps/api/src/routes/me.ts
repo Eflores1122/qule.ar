@@ -9,7 +9,7 @@ import { syncGroupRoom } from "../realtime.js";
 import { deleteImage, MAX_UPLOAD_BYTES, MAX_VIDEO_BYTES, readImage, saveImage, saveVideo, videoEnabled, videoFile, type VideoSource } from "../storage.js";
 import { googleEnabled } from "../auth.js";
 import { hasAlbumAccess } from "./premium.js";
-import { isAdmin } from "./admin.js";
+import { accessFor } from "../staff.js";
 import { APP_NAME } from "../brand.js";
 import { expiringIsOver } from "../expiring.js";
 import { checkMinorSignals, deleteImageUnlessEvidence, isEvidence } from "../moderation.js";
@@ -62,10 +62,12 @@ meRoutes.get("/files/:key", requireUser, async (c) => {
   // Foto de un grupo: la ve cualquiera con sesión, igual que el nombre del grupo al explorar
   // (la de un grupo dado de baja solo la ve moderación)
   const [grp] = ph || dm ? [] : await db.select({ removedAt: group.removedAt }).from(group).where(eq(group.photoKey, key)).limit(1);
-  const gr = grp && (!grp.removedAt || isAdmin(c.get("user")));
+  // Moderación: quien revisa reportes o suspende puede ver la foto de un grupo dado de baja y las pruebas guardadas
+  const mod = async () => (await accessFor(c.get("user"))).some((a) => a === "reports" || a === "sanctions");
+  const gr = grp && (!grp.removedAt || (await mod()));
   // Archivo que ya no usa ningún mensaje, perfil ni grupo (desenviado, borrado): solo existe como prueba de un reporte,
   // y solo moderación lo puede pedir
-  if (!ph && !dm && !gr && !(isAdmin(c.get("user")) && (await isEvidence(key)))) return c.notFound();
+  if (!ph && !dm && !gr && !((await isEvidence(key)) && (await mod()))) return c.notFound();
   if (dm) {
     const [conv] = await db.select().from(conversation).where(eq(conversation.id, dm.conversationId));
     const inConv = conv && (conv.userA === viewer || conv.userB === viewer);
@@ -111,8 +113,10 @@ meRoutes.get("/me", requireUser, async (c) => {
   const u = c.get("user");
   const p = c.get("profile");
   const photos = await db.select().from(photo).where(eq(photo.userId, u.id)).orderBy(asc(photo.position));
+  const access = await accessFor(u);
   return c.json({
-    user: { id: u.id, email: u.email, name: u.name, isAdmin: isAdmin(u) },
+    // isAdmin: entra al panel de moderación. access: qué puede hacer ahí (ver staff.ts)
+    user: { id: u.id, email: u.email, name: u.name, isAdmin: access.length > 0, access },
     profile: p
       ? (() => {
           const { cellLat, cellLng, ...rest } = p;
