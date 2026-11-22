@@ -209,6 +209,12 @@ El límite de intentos (login, registro, recuperar contraseña) y las sesiones u
 
 La app también manda encabezados de seguridad (CSP, anti-iframe, HSTS en https): están en `apps/api/src/security.ts` y no hace falta configurarlos en el proxy.
 
+### Límites del proxy
+
+El nginx de ejemplo limita por IP las llamadas a la API, los intentos de acceso y las aperturas de WebSocket. El proxy responde con 429 cuando se supera el límite. Validá la configuración con `nginx -t` y probá acceso, fotos y reconexión del chat en staging antes de recargarla. Si muchas personas salen por la misma IP, revisá los 429 del proxy antes de ajustar los umbrales.
+
+Con Cloudflare Tunnel directo al API, aplicá los límites de tráfico HTTP del lado de Cloudflare y mantené el origen accesible solo desde el túnel. Si Cloudflare está delante de nginx, configurá la recuperación de la IP real únicamente para proxies de confianza antes de aplicar los límites por IP. Para tráfico volumétrico usá la protección del proveedor antes de que llegue al servidor.
+
 ## 7. Actualizar
 
 Antes de desplegar cambios en la carga o edición de fotos, completá la [checklist de staging](STAGING.md) sobre la versión integrada y dejá los resultados y los pendientes en el PR.
