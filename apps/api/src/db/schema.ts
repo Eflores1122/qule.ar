@@ -1,6 +1,7 @@
 import {
   pgTable, text, timestamp, boolean, integer, date, jsonb, uniqueIndex, index, primaryKey, doublePrecision,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { encryptedText } from "../crypt.js";
 
 // ---------- Better Auth (no cambiar nombres de campos) ----------
@@ -24,7 +25,7 @@ export const session = pgTable("session", {
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
-});
+}, (t) => [index("session_user_idx").on(t.userId)]);
 
 export const account = pgTable("account", {
   id: text("id").primaryKey(),
@@ -40,7 +41,7 @@ export const account = pgTable("account", {
   password: text("password"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [index("account_user_idx").on(t.userId)]);
 
 export const verification = pgTable("verification", {
   id: text("id").primaryKey(),
@@ -87,7 +88,11 @@ export const profile = pgTable("profile", {
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [index("profile_cell_idx").on(t.cellLat, t.cellLng)]);
+}, (t) => [
+  index("profile_cell_idx").on(t.cellLat, t.cellLng),
+  // La grilla de Cerca: solo quienes se muestran, de la última vez vista hacia atrás (ver routes/nearby.ts)
+  index("profile_grid_idx").on(t.lastSeenAt.desc()).where(sql`${t.incognito} = false and ${t.suspendedAt} is null`),
+]);
 
 export const photo = pgTable("photo", {
   id: text("id").primaryKey(),
@@ -115,7 +120,7 @@ export const albumGrant = pgTable("album_grant", {
   // Hasta cuándo lo puede ver. null = sin límite.
   expiresAt: timestamp("expires_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [primaryKey({ columns: [t.ownerId, t.granteeId] })]);
+}, (t) => [primaryKey({ columns: [t.ownerId, t.granteeId] }), index("album_grant_grantee_idx").on(t.granteeId)]);
 
 /** Quién vio tu perfil (una fila por persona, con la última visita). */
 export const profileView = pgTable("profile_view", {
@@ -128,7 +133,7 @@ export const favorite = pgTable("favorite", {
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   favoriteId: text("favorite_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [primaryKey({ columns: [t.userId, t.favoriteId] })]);
+}, (t) => [primaryKey({ columns: [t.userId, t.favoriteId] }), index("favorite_favorite_idx").on(t.favoriteId)]);
 
 // ---------- Seguridad ----------
 
@@ -236,6 +241,7 @@ export const groupJoinRequest = pgTable("group_join_request", {
 }, (t) => [
   index("gjr_group_status_idx").on(t.groupId, t.status),
   index("gjr_user_idx").on(t.userId, t.groupId),
+  index("gjr_resolved_by_idx").on(t.resolvedBy),
 ]);
 
 /**
@@ -269,6 +275,8 @@ export const groupMessage = pgTable("group_message", {
 }, (t) => [
   index("gm_group_sched_idx").on(t.groupId, t.status, t.scheduledAt),
   index("gm_user_idx").on(t.groupId, t.userId, t.scheduledAt),
+  // Al borrar una cuenta se borran sus mensajes: sin esto había que recorrer la tabla entera
+  index("gm_author_idx").on(t.userId),
 ]);
 
 // ---------- Mensajes privados ----------
@@ -297,6 +305,8 @@ export const directMessage = pgTable("direct_message", {
   index("dm_conv_idx").on(t.conversationId, t.createdAt),
   // /files/:key busca si el archivo es foto de un mensaje privado
   index("dm_photo_key_idx").on(t.photoKey),
+  // Al borrar una cuenta se borran sus mensajes: sin esto había que recorrer la tabla entera
+  index("dm_sender_idx").on(t.senderId),
 ]);
 
 // ---------- Toques y reacciones ----------
@@ -321,4 +331,4 @@ export const reaction = pgTable("reaction", {
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   kind: text("kind").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [primaryKey({ columns: [t.messageId, t.userId] }), index("reaction_msg_idx").on(t.messageId)]);
+}, (t) => [primaryKey({ columns: [t.messageId, t.userId] }), index("reaction_msg_idx").on(t.messageId), index("reaction_user_idx").on(t.userId)]);
