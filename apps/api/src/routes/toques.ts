@@ -41,7 +41,7 @@ toqueRoutes.post("/users/:id/toques", async (c) => {
   const [p] = await db.select({ suspendedAt: profile.suspendedAt }).from(profile).where(eq(profile.userId, to));
   if (!p || p.suspendedAt) throw new HTTPException(404, { message: "Perfil no disponible" });
   if (await myRecentToque(me.id, to)) throw new HTTPException(429, { message: "Ya le mandaste un toque hace poco" });
-  limit(me.id, "toque");
+  await limit(me.id, "toque");
 
   const now = new Date();
   const id = newId();

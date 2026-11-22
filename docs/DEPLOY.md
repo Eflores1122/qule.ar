@@ -85,6 +85,18 @@ docker logs -f mortero-app   # tiene que decir "qule.ar API escuchando"
 
 Las migraciones de la base se aplican solas al arrancar. La app escucha solo en `127.0.0.1:3010`: el único acceso desde afuera es por nginx.
 
+### Varios núcleos
+
+Node usa un solo núcleo por proceso. Con Postgres (`DATABASE_URL`), la app arranca varios procesos del API y reparte las conexiones entre ellos (ver `apps/api/src/cluster.ts`):
+
+- Por defecto, uno por núcleo menos uno, que queda para Postgres, hasta 4. En un servidor de 4 núcleos son 3.
+- `WORKERS=2` en `app.env` lo fija a mano. `WORKERS=1` vuelve a un solo proceso, como antes.
+- Primero arranca el proceso líder: corre las migraciones y las tareas que no se pueden repetir (publicar los mensajes en cola, borrar las fotos vencidas). Después arrancan los demás. En el log aparece `escuchando` una vez por proceso.
+- Lo que tienen que compartir (quién está en línea, los límites contra el spam y contra quien prueba contraseñas, el chat en vivo) pasa por el proceso principal, sin servicios extra.
+- El chat en vivo va solo por WebSocket. Quien tenga la app abierta desde antes del deploy se reconecta cuando la app se actualiza.
+- Si un proceso se cae, se levanta otro solo. Si el líder no llega a arrancar (por ejemplo, falla una migración), se corta todo y Docker lo reinicia con el error en el log.
+- Cada proceso usa su propia memoria. Mirá `docker stats` después de subir: si el servidor queda justo, bajá `WORKERS`.
+
 ## 5. nginx y HTTPS
 
 ```bash
@@ -99,7 +111,12 @@ Si el servidor ya tiene otros sitios, este bloque se suma sin tocar los demás.
 
 ## 6. Backups
 
-Todas las noches `deploy/backup.sh` guarda la base y las fotos **cifradas y fuera del servidor**, con [restic](https://restic.net). Se cifran en el servidor antes de salir (AES-256): el proveedor del almacenamiento no puede ver nada. Se guardan 14 días, lo que dice la política de privacidad.
+Todas las noches `deploy/backup.sh` hace dos copias:
+
+- **Local, siempre:** un volcado de la base en `~/mortero/backups`, para volver atrás en un minuto si un deploy sale mal (el deploy también lo corre antes de actualizar). Mientras no esté configurada la copia de afuera, guarda también las fotos (sin miniaturas) y dura 14 días. Con copia afuera, solo la base y 3 días.
+- **Afuera y cifrada,** con [restic](https://restic.net), cuando existe `~/mortero/backup.env`: la base y las fotos. Se cifran en el servidor antes de salir (AES-256): el proveedor del almacenamiento no puede ver nada. Se guardan 14 días, lo que dice la política de privacidad.
+
+Si falta `backup.env`, el script avisa en el log y hace solo la parte local: nunca se queda sin backup.
 
 Si se pierde el servidor, los backups siguen estando. Si se pierde **la contraseña de restic**, no se pueden recuperar: por eso se guarda también fuera del servidor.
 
@@ -159,6 +176,26 @@ Conviene probar la restauración cada tanto en otra máquina o en una base de pr
 
 Sus datos salen de la base al instante, pero pueden quedar en los backups hasta 14 días. Después `restic forget --prune` los borra solos. Por eso no hay que subir `KEEP_DAYS` sin cambiar antes la política de privacidad.
 
+## Fotos en Cloudflare R2 (opcional)
+
+Por defecto, las fotos y los videos se guardan en el disco del servidor (volumen `mortero-data`, carpeta `uploads`). Cuando el disco quede chico, se pueden pasar a **Cloudflare R2** o a cualquier almacenamiento compatible con S3. La app sigue sirviendo las fotos igual: pasan por `/api/files`, que controla quién puede ver cada una. El bucket nunca queda público.
+
+1. **En Cloudflare:** creá un bucket privado en R2 (por ejemplo `qule-fotos`) y un token de API con permiso **Object Read & Write solo para ese bucket**. Guardá el *Access Key ID* y el *Secret Access Key*.
+2. **En `~/mortero/app.env`** (los secretos los pegás vos en el servidor):
+   ```
+   STORAGE=s3
+   S3_ENDPOINT=https://<id-de-cuenta>.r2.cloudflarestorage.com
+   S3_BUCKET=qule-fotos
+   S3_REGION=auto
+   S3_ACCESS_KEY_ID=…
+   S3_SECRET_ACCESS_KEY=…
+   ```
+3. **Recreá el contenedor** (paso 4). Desde ese momento, lo nuevo va al bucket. Lo viejo se sigue leyendo del disco mientras no esté en el bucket, así que no se corta nada.
+4. **Pasá lo que ya estaba:** `docker exec mortero-app node --import tsx src/storage-migrate.ts`. Se puede correr varias veces: lo que ya está en el bucket se saltea. Las miniaturas no se suben, porque se regeneran solas.
+5. **Cuando confirmes que todo se ve bien,** podés borrar las fotos del disco (`uploads/*.webp` y `uploads/*.mp4` dentro del volumen). El backup de las fotos (sección 6) deja de hacer falta para lo que está en R2. Si querés una copia aparte, activá el versionado o una regla de retención en el bucket.
+
+Para volver al disco: sacá `STORAGE=s3` y recreá el contenedor. Lo que se subió mientras estaba en R2 queda solo en el bucket, así que antes bajalo con `rclone` o similar.
+
 ## Seguridad: la IP de cada persona
 
 El límite de intentos (login, registro, recuperar contraseña) y las sesiones usan la IP real de cada persona. El API la lee de **un solo encabezado**, que el proxy de adelante tiene que pisar siempre, así nadie la puede inventar. Se elige con `CLIENT_IP_HEADER` en `app.env`:
@@ -173,6 +210,8 @@ El límite de intentos (login, registro, recuperar contraseña) y las sesiones u
 La app también manda encabezados de seguridad (CSP, anti-iframe, HSTS en https): están en `apps/api/src/security.ts` y no hace falta configurarlos en el proxy.
 
 ## 7. Actualizar
+
+Antes de desplegar cambios en la carga o edición de fotos, completá la [checklist de staging](STAGING.md) sobre la versión integrada y dejá los resultados y los pendientes en el PR.
 
 ```bash
 cd /opt/mortero/src && git pull

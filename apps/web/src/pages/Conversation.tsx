@@ -6,6 +6,7 @@ import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { BackIcon, ImageIcon, LockIcon, SendIcon, TimerIcon } from "../components/Icons";
 import { useSectionBack } from "../useSectionBack";
+import { SavedPhrasesButton, SavedPhrasesMenu } from "../features/phrases/SavedPhrases";
 
 export function Conversation() {
   const { id = "" } = useParams();
@@ -15,6 +16,7 @@ export function Conversation() {
   const [other, setOther] = useState<Author | null>(null);
   const [messages, setMessages] = useState<Dm[]>([]);
   const [text, setText] = useState("");
+  const [phrasesOpen, setPhrasesOpen] = useState(false);
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
   const [typing, setTyping] = useState(false);
@@ -191,7 +193,7 @@ export function Conversation() {
         )}
       </header>
 
-      <div className="chat__list chat__list--dm" ref={listRef} onScroll={onListScroll} onClick={() => setMsgMenu(null)}>
+      <div className="chat__list chat__list--dm" role="log" aria-label="Mensajes" ref={listRef} onScroll={onListScroll} onClick={() => setMsgMenu(null)}>
         {messages.map((m) => {
           const mine = m.senderId === myId;
           return (
@@ -257,10 +259,14 @@ export function Conversation() {
             </button>
           </div>
         )}
+        {phrasesOpen && (
+          <SavedPhrasesMenu text={text} onClose={() => setPhrasesOpen(false)} onPick={(p) => { onType(p); setPhrasesOpen(false); }} />
+        )}
         <div className="composer__row">
-          <button type="button" className="iconbtn" aria-label="Mandar foto" aria-expanded={photoMenu} disabled={sending} onClick={() => setPhotoMenu((v) => !v)}>
+          <button type="button" className="iconbtn" aria-label="Mandar foto" aria-expanded={photoMenu} disabled={sending} onClick={() => { setPhotoMenu((v) => !v); setPhrasesOpen(false); }}>
             <ImageIcon />
           </button>
+          <SavedPhrasesButton open={phrasesOpen} onToggle={() => { setPhrasesOpen((v) => !v); setPhotoMenu(false); }} />
           <input
             ref={fileRef}
             type="file"
@@ -274,6 +280,7 @@ export function Conversation() {
           />
           <textarea
             className="composer__input"
+            aria-label="Mensaje"
             rows={1}
             maxLength={2000}
             placeholder="Escribí un mensaje…"

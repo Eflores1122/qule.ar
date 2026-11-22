@@ -31,7 +31,8 @@ export const upload = <T,>(path: string, file: File, extra: Record<string, strin
 
 let socket: Socket | null = null;
 export function getSocket(): Socket {
-  if (!socket) socket = io({ path: "/socket.io", withCredentials: true });
+  // Solo WebSocket: el API corre en varios procesos y así cada conexión queda entera en uno (ver apps/api/src/cluster.ts)
+  if (!socket) socket = io({ path: "/socket.io", withCredentials: true, transports: ["websocket"] });
   return socket;
 }
 export function closeSocket() {

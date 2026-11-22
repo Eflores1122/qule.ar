@@ -6,6 +6,7 @@ import { useMe } from "../App";
 import { CheckIcon, FilterIcon, PinIcon, RefreshIcon, StarIcon } from "../components/Icons";
 import { LOCATION_EVENT, shareLocation } from "../location";
 import { BODY_TYPES, LOOKING_FOR, POSITIONS, RELATIONSHIP, TRIBES } from "../options";
+import { DialogFocus } from "../components/DialogFocus";
 
 export type Filters = {
   ageMin?: number; ageMax?: number;
@@ -409,6 +410,7 @@ function FilterSheet({ initial, onApply, onClose }: { initial: Filters; onApply:
   return (
     <div className="sheet-backdrop" onClick={onClose}>
       <div className="sheet sheet--tall" role="dialog" aria-modal aria-labelledby="filters-title" onClick={(e) => e.stopPropagation()}>
+        <DialogFocus onClose={onClose} />
         <div className="sheet__head">
           <h2 id="filters-title">Filtros</h2>
           <button className="linkbtn" onClick={() => setF(EMPTY)}>Limpiar</button>

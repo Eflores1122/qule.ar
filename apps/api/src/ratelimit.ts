@@ -1,11 +1,12 @@
 import { HTTPException } from "hono/http-exception";
+import { hit } from "./shared.js";
 
 /**
  * Límites por persona para las acciones de la app. Frenan el abuso (mandar mensajes a cientos de personas,
  * llenar el disco con fotos, inundar a moderación con reportes) sin molestar a quien usa la app normalmente.
  * El login y el registro tienen su propio límite por IP (ver auth.ts).
  *
- * Se guardan en memoria: alcanza con un solo proceso del API. Si un día hay varios, habría que pasarlo a la base.
+ * Se guardan en memoria. Con varios procesos del API, los cuenta el proceso principal para todos (ver shared.ts).
  */
 type Rule = { max: number; windowMs: number; message: string };
 
@@ -27,29 +28,10 @@ export const LIMITS = {
   toque: { max: 40, windowMs: HOUR, message: "Mandaste muchos toques. Probá de nuevo en un rato." },
 } satisfies Record<string, Rule>;
 
-const hits = new Map<string, number[]>();
-
-/** Cuenta una acción y corta con 429 si la persona pasó el límite. */
-export function limit(userId: string, action: keyof typeof LIMITS) {
+/** Cuenta una acción y corta con 429 si la persona pasó el límite. Con varios procesos, cuenta en todos juntos. */
+export async function limit(userId: string, action: keyof typeof LIMITS) {
   const rule = LIMITS[action];
-  const key = `${action}:${userId}`;
-  const now = Date.now();
-  const recent = (hits.get(key) ?? []).filter((t) => t > now - rule.windowMs);
-  if (recent.length >= rule.max) {
-    hits.set(key, recent);
+  if (!(await hit(`${action}:${userId}`, rule.max, rule.windowMs))) {
     throw new HTTPException(429, { message: rule.message });
   }
-  recent.push(now);
-  hits.set(key, recent);
 }
-
-// Limpieza: saca lo que ya venció para que el mapa no crezca sin fin
-setInterval(() => {
-  const now = Date.now();
-  for (const [key, times] of hits) {
-    const rule = LIMITS[key.split(":")[0] as keyof typeof LIMITS];
-    const recent = times.filter((t) => t > now - (rule?.windowMs ?? HOUR));
-    if (recent.length) hits.set(key, recent);
-    else hits.delete(key);
-  }
-}, 10 * MIN).unref();

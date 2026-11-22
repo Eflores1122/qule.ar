@@ -276,7 +276,12 @@ html:has(.nearby-page), .nearby-page { overscroll-behavior-y: none; }
 .photos__action { background: var(--scrim); color: var(--text); }
 .photos__remove { position: absolute; top: 6px; right: 6px; width: 28px; height: 28px; border-radius: var(--radius-pill); border: 0; background: var(--scrim); font-size: var(--text-xs); }
 .photos__add { width: 100%; align-self: start; border: 1.5px dashed var(--line); background: var(--surface); color: var(--muted); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 6px; font-size: var(--text-sm); font-weight: 600; }
-.photos__add:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+button.photos__add:hover:not(:disabled) { border-color: var(--accent); color: var(--accent); }
+.photos__spinner {
+  width: 24px; height: 24px; border: 2px solid var(--line); border-top-color: var(--accent);
+  border-radius: var(--radius-pill); animation: nearby-refresh-spin 0.8s linear infinite;
+}
+@media (prefers-reduced-motion: reduce) { .photos__spinner { animation: none; } }
 .photos__order { display: flex; justify-content: center; }
 .photos__order .iconbtn { width: 38px; height: 38px; }
 .photo-crop {
@@ -453,6 +458,13 @@ a.gcard:hover { background: var(--surface); }
 .photo-menu button { display: flex; align-items: center; gap: 10px; text-align: left; padding: 10px 12px; border-radius: var(--radius-md); background: var(--surface-2); border: 0; }
 .photo-menu button:hover { background: var(--surface-3); }
 .photo-menu .muted { margin-left: auto; }
+.phrase-menu { display: flex; flex-direction: column; gap: 6px; padding: 0 0 8px; max-height: 40vh; overflow-y: auto; }
+.phrase-menu__head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.phrase-menu__list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 2px; }
+.phrase-menu__list li { display: flex; align-items: center; gap: 4px; }
+.phrase-menu__pick { flex: 1; min-width: 0; text-align: left; padding: 10px 12px; border-radius: var(--radius-md); background: var(--surface-2); border: 0; overflow-wrap: anywhere; }
+.phrase-menu__pick:hover { background: var(--surface-3); }
+.phrase-menu .linkbtn { align-self: flex-start; }
 .viewer { position: fixed; inset: 0; z-index: var(--z-viewer); background: var(--media-bg); display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; padding: 16px; }
 .viewer img { max-width: 100%; max-height: 80vh; object-fit: contain; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
 .viewer__bar { position: absolute; top: calc(12px + env(safe-area-inset-top, 0px)); left: 16px; right: 16px; height: 3px; background: var(--on-media-track); border-radius: var(--radius-hair); overflow: hidden; }
@@ -491,6 +503,8 @@ a.gcard:hover { background: var(--surface); }
 .sheet-backdrop { position: fixed; inset: 0; background: var(--backdrop); display: flex; align-items: flex-end; justify-content: center; z-index: var(--z-sheet); }
 .sheet { width: 100%; max-width: 480px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-4xl) var(--radius-4xl) 0 0; padding: 20px 16px calc(20px + var(--safe-b)); display: flex; flex-direction: column; gap: 14px; }
 .sheet h2 { font-size: var(--text-xl); }
+/* El foco que DialogFocus le da a la hoja al abrirse es solo para el lector de pantalla y el teclado: no se dibuja */
+.sheet:focus { outline: none; }
 @media (min-width: 600px) {
   .sheet-backdrop { align-items: center; }
   .sheet { border-radius: var(--radius-4xl); }
@@ -625,7 +639,6 @@ button.quote:hover { background: var(--surface-3); }
 .pill--urgent { background: var(--danger-soft); color: var(--danger); }
 .report-urgent { padding: 10px 12px; border-radius: var(--radius-lg); background: var(--danger-soft); border: 1px solid var(--danger-line); color: var(--text); }
 
-/* Moderación de grupos: reportar desde la lista y la tarjeta del grupo en el panel */
-.gcard__report { background: none; border: 0; padding: 0; color: var(--muted); font-size: var(--text-xs); text-decoration: underline; }
+/* Tarjeta del grupo en el panel de moderación */
 .rcard__group > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .rcard__groupdesc { color: var(--text); overflow-wrap: anywhere; }
