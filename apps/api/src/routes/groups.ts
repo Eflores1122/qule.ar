@@ -370,7 +370,7 @@ groupRoutes.post("/groups/:id/requests", async (c) => {
   if (member) throw new HTTPException(400, { message: "Ya sos parte de este grupo" });
   // Si ya te habían invitado, pedir entrar es aceptar la invitación
   if ((await inviteStateFor(u.id, [g.id])).get(g.id) === "invited") {
-    await acceptPendingAdmission(g.id, u.id, null, "invite");
+    await acceptPendingAdmission(g.id, u.id, { kind: "invite" });
     return c.json({ joined: true });
   }
   const state = (await requestStateFor(u.id, [g.id])).get(g.id);
@@ -428,6 +428,7 @@ groupRoutes.post("/groups/:id/requests/:rid/:decision{accept|reject}", async (c)
   const accept = c.req.param("decision") === "accept";
   const req = await db.transaction(async (tx) => {
     await lockActiveGroup(tx, g.id);
+    await lockModerator(tx, g.id, u.id);
     const now = new Date();
     const [resolved] = await tx
       .update(groupJoinRequest)
@@ -468,6 +469,13 @@ async function lockActiveGroup(tx: Transaction, groupId: string) {
   if (!active) throw new HTTPException(404, { message: "Ese grupo ya no existe" });
 }
 
+/** Evita que cambie el rol mientras el moderador resuelve el ingreso. */
+async function lockModerator(tx: Transaction, groupId: string, userId: string) {
+  const [member] = await tx.select({ role: groupMember.role }).from(groupMember)
+    .where(and(eq(groupMember.groupId, groupId), eq(groupMember.userId, userId))).for("share");
+  if (!canModerate(member?.role)) throw new HTTPException(403, { message: "Solo dueño o moderadores" });
+}
+
 /** Suma a alguien al grupo y cierra lo que tenía pendiente dentro de la misma transacción. */
 async function addMember(tx: Transaction, groupId: string, userId: string, by: string | null, now: Date) {
   await tx.insert(groupMember).values({ groupId, userId }).onConflictDoNothing();
@@ -492,16 +500,20 @@ async function notifyAdmissionMods(groupId: string) {
     .catch((error) => console.error("Aviso de ingreso a moderación", { groupId, error }));
 }
 
+type PendingAdmission = { kind: "invite" } | { kind: "request"; moderatorId: string };
+
 /** Al coincidir una solicitud y una invitación, confirma que la anterior siga pendiente. */
-async function acceptPendingAdmission(groupId: string, userId: string, by: string | null, pending: "invite" | "request") {
+async function acceptPendingAdmission(groupId: string, userId: string, pending: PendingAdmission) {
   await db.transaction(async (tx) => {
     await lockActiveGroup(tx, groupId);
-    const source = pending === "invite" ? groupInvite : groupJoinRequest;
+    const moderatorId = pending.kind === "request" ? pending.moderatorId : null;
+    if (moderatorId !== null) await lockModerator(tx, groupId, moderatorId);
+    const source = pending.kind === "invite" ? groupInvite : groupJoinRequest;
     const [row] = await tx.select({ id: source.id }).from(source)
       .where(and(eq(source.groupId, groupId), eq(source.userId, userId), eq(source.status, "pending")))
       .limit(1).for("update");
     if (!row) throw new HTTPException(409, { message: "El ingreso ya se resolvió. Actualizá el grupo." });
-    await addMember(tx, groupId, userId, by, new Date());
+    await addMember(tx, groupId, userId, moderatorId, new Date());
   });
   await notifyGroupJoin(groupId, userId);
 }
@@ -583,7 +595,7 @@ groupRoutes.post("/groups/:id/invites", async (c) => {
   if (state === "declined") throw new HTTPException(429, { message: "Rechazó una invitación hace poco. Esperá unos días para volver a invitarle" });
   if (state === "requested") {
     // Ya había pedido entrar: invitarle es lo mismo que aceptarle
-    await acceptPendingAdmission(g.id, target, u.id, "request");
+    await acceptPendingAdmission(g.id, target, { kind: "request", moderatorId: u.id });
     emitToUser(target, "group:accepted", { groupId: g.id, name: g.name });
     pushTo(target, { title: "Te aceptaron en un grupo", body: "Ya podés entrar al chat.", url: `/grupos/${g.id}`, tag: `acc-${g.id}`, kind: "solicitudes" }).catch(() => {});
     return c.json({ joined: true });
