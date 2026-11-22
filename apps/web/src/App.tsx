@@ -80,7 +80,9 @@ export function App() {
           <Route path="/visitas" element={<Views />} />
           <Route path="/favoritos" element={<Favorites />} />
           <Route path="/toques" element={<Toques />} />
-          <Route path="/admin" element={<Admin />} />
+          <Route element={<RequirePermission allows={(me) => me.user.isAdmin} />}>
+            <Route path="/admin" element={<Admin />} />
+          </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
@@ -97,6 +99,12 @@ function RequireAuth({ children, needProfile }: { children: React.ReactNode; nee
   if (needProfile && !me.profile) return <Navigate to="/bienvenida" replace />;
   if (!needProfile && me.profile && loc.pathname === "/bienvenida") return <Navigate to="/yo/editar?nuevo=1" replace />;
   return <>{children}</>;
+}
+
+function RequirePermission({ allows }: { allows: (me: Me) => boolean }) {
+  const { me } = useMe();
+  if (!me || !allows(me)) return <Navigate to="/" replace />;
+  return <Outlet />;
 }
 
 function Suspended() {

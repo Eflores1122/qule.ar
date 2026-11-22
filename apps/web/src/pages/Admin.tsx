@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router";
-import { api, type Author } from "../api";
+import { Link, Navigate, useNavigate } from "react-router";
+import { api, ApiError, type Author } from "../api";
 import { Avatar } from "../components/Avatar";
 import { BackIcon } from "../components/Icons";
 import { DialogFocus } from "../components/DialogFocus";
@@ -55,17 +55,28 @@ export function Admin() {
   const [suspending, setSuspending] = useState<Report | null>(null);
   const [removing, setRemoving] = useState<Report | null>(null);
   const [error, setError] = useState("");
+  const [permissionDenied, setPermissionDenied] = useState(false);
+
+  const adminApi: typeof api = useCallback(async <T,>(path: string, init?: Parameters<typeof api>[1]) => {
+    try {
+      return await api<T>(path, init);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 403) setPermissionDenied(true);
+      throw error;
+    }
+  }, []);
 
   const load = useCallback(async () => {
     try {
-      setStats(await api<Stats>("/admin/stats"));
-      if (tab === "suspended") setSuspended(await api<Suspended[]>("/admin/suspended"));
-      else if (tab === "groups") setRemoved(await api<RemovedGroup[]>("/admin/groups/removed"));
-      else setReports(await api<Report[]>(`/admin/reports?status=${tab}`));
+      const nextStats = await adminApi<Stats>("/admin/stats");
+      if (tab === "suspended") setSuspended(await adminApi<Suspended[]>("/admin/suspended"));
+      else if (tab === "groups") setRemoved(await adminApi<RemovedGroup[]>("/admin/groups/removed"));
+      else setReports(await adminApi<Report[]>(`/admin/reports?status=${tab}`));
+      setStats(nextStats);
     } catch (e) {
       setError((e as Error).message);
     }
-  }, [tab]);
+  }, [adminApi, tab]);
 
   useEffect(() => {
     load();
@@ -81,6 +92,11 @@ export function Admin() {
     }
   }
 
+  if (permissionDenied) return <Navigate to="/" replace />;
+  if (!stats) {
+    return error ? <p className="notice notice--error" role="alert">No pudimos cargar el panel.</p> : null;
+  }
+
   return (
     <div className="page">
       <header className="topbar topbar--thread">
@@ -88,14 +104,12 @@ export function Admin() {
         <h1 className="topbar__title topbar__title--sm">Moderación</h1>
       </header>
 
-      {stats && (
-        <dl className="kpis">
-          <div><dt>Perfiles</dt><dd>{stats.users}</dd></div>
-          <div><dt>Grupos</dt><dd>{stats.groups}</dd></div>
-          <div className={stats.openReports ? "kpi--alert" : ""}><dt>Reportes abiertos</dt><dd>{stats.openReports}</dd></div>
-          <div><dt>Suspendidas</dt><dd>{stats.suspended}</dd></div>
-        </dl>
-      )}
+      <dl className="kpis">
+        <div><dt>Perfiles</dt><dd>{stats.users}</dd></div>
+        <div><dt>Grupos</dt><dd>{stats.groups}</dd></div>
+        <div className={stats.openReports ? "kpi--alert" : ""}><dt>Reportes abiertos</dt><dd>{stats.openReports}</dd></div>
+        <div><dt>Suspendidas</dt><dd>{stats.suspended}</dd></div>
+      </dl>
 
       <div className="tabs" role="tablist">
         <button role="tab" aria-selected={tab === "open"} onClick={() => setTab("open")}>Abiertos</button>
@@ -168,9 +182,9 @@ export function Admin() {
                 </p>
                 {r.status === "open" ? (
                   <div className="rcard__actions">
-                    <button className="btn btn--small" onClick={() => act(() => api(`/admin/reports/${r.id}/dismiss`, { method: "POST" }))}>Descartar</button>
+                    <button className="btn btn--small" onClick={() => act(() => adminApi(`/admin/reports/${r.id}/dismiss`, { method: "POST" }))}>Descartar</button>
                     {r.message && !r.message.deleted && (
-                      <button className="btn btn--small" onClick={() => act(() => api(`/admin/reports/${r.id}/delete-message`, { method: "POST" }))}>Borrar mensaje</button>
+                      <button className="btn btn--small" onClick={() => act(() => adminApi(`/admin/reports/${r.id}/delete-message`, { method: "POST" }))}>Borrar mensaje</button>
                     )}
                     {r.group?.id && !r.group.removedAt && (
                       <button className="btn btn--small btn--danger" onClick={() => setRemoving(r)}>Dar de baja el grupo</button>
@@ -201,7 +215,7 @@ export function Admin() {
                 </div>
                 {s.reason && <p className="rcard__details">{s.reason}</p>}
                 <div className="rcard__actions">
-                  <button className="btn btn--small" onClick={() => act(() => api(`/admin/users/${s.id}/unsuspend`, { method: "POST" }))}>Reactivar cuenta</button>
+                  <button className="btn btn--small" onClick={() => act(() => adminApi(`/admin/users/${s.id}/unsuspend`, { method: "POST" }))}>Reactivar cuenta</button>
                 </div>
               </li>
             ))}
@@ -225,7 +239,7 @@ export function Admin() {
                 </div>
                 {g.reason && <p className="rcard__details">{g.reason}</p>}
                 <div className="rcard__actions">
-                  <button className="btn btn--small" onClick={() => act(() => api(`/admin/groups/${g.id}/restore`, { method: "POST" }))}>Volver a activarlo</button>
+                  <button className="btn btn--small" onClick={() => act(() => adminApi(`/admin/groups/${g.id}/restore`, { method: "POST" }))}>Volver a activarlo</button>
                 </div>
               </li>
             ))}
@@ -235,6 +249,7 @@ export function Admin() {
 
       {suspending && (
         <SuspendDialog
+          adminApi={adminApi}
           report={suspending}
           onClose={() => setSuspending(null)}
           onDone={() => { setSuspending(null); load(); }}
@@ -242,6 +257,7 @@ export function Admin() {
       )}
       {removing && (
         <RemoveGroupDialog
+          adminApi={adminApi}
           report={removing}
           onClose={() => setRemoving(null)}
           onDone={() => { setRemoving(null); load(); }}
@@ -251,7 +267,7 @@ export function Admin() {
   );
 }
 
-function SuspendDialog({ report, onClose, onDone }: { report: Report; onClose: () => void; onDone: () => void }) {
+function SuspendDialog({ adminApi, report, onClose, onDone }: { adminApi: typeof api; report: Report; onClose: () => void; onDone: () => void }) {
   const [reason, setReason] = useState(`Reportes por ${report.reason}`);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -259,7 +275,7 @@ function SuspendDialog({ report, onClose, onDone }: { report: Report; onClose: (
     setBusy(true);
     setError("");
     try {
-      await api(`/admin/users/${report.target?.id}/suspend`, { method: "POST", json: { reason } });
+      await adminApi(`/admin/users/${report.target?.id}/suspend`, { method: "POST", json: { reason } });
       onDone();
     } catch (e) {
       setError((e as Error).message);
@@ -286,7 +302,7 @@ function SuspendDialog({ report, onClose, onDone }: { report: Report; onClose: (
   );
 }
 
-function RemoveGroupDialog({ report, onClose, onDone }: { report: Report; onClose: () => void; onDone: () => void }) {
+function RemoveGroupDialog({ adminApi, report, onClose, onDone }: { adminApi: typeof api; report: Report; onClose: () => void; onDone: () => void }) {
   const [reason, setReason] = useState(`Reportes por ${report.reason}`);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -294,7 +310,7 @@ function RemoveGroupDialog({ report, onClose, onDone }: { report: Report; onClos
     setBusy(true);
     setError("");
     try {
-      await api(`/admin/groups/${report.group?.id}/remove`, { method: "POST", json: { reason } });
+      await adminApi(`/admin/groups/${report.group?.id}/remove`, { method: "POST", json: { reason } });
       onDone();
     } catch (e) {
       setError((e as Error).message);
