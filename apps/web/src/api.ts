@@ -189,6 +189,7 @@ export type GroupInfo = GroupListing & {
 
 export type JoinRequest = { id: string; message: string | null; createdAt: string; user: Author };
 export type Member = Author & { role: Role; joinedAt: string };
+export type MemberPage = { members: Member[]; nextOffset: number | null };
 
 /** Dónde está una persona respecto de un grupo, para invitarla. */
 export type InviteState = "member" | "invited" | "requested" | "declined" | null;

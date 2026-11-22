@@ -736,23 +736,36 @@ groupRoutes.post("/invites/:iid/:decision{accept|decline}", requireUser, require
 
 // ---------- Miembros ----------
 
+/** De a 25, como la grilla de Gente: la información del grupo no trae cientos de integrantes de una. */
+const MEMBER_PAGE = 25;
+
 groupRoutes.get("/groups/:id/members", async (c) => {
   const u = c.get("user");
   const { group: g, member } = await membership(c.req.param("id"), u.id);
   if (!member) throw new HTTPException(403, { message: "No sos parte de este grupo" });
+  const offset = parse(z.coerce.number().int().min(0), c.req.query("offset") ?? 0);
   const rows = await db
     .select()
     .from(groupMember)
     .where(eq(groupMember.groupId, g.id))
-    .orderBy(sql`case ${groupMember.role} when 'owner' then 0 when 'moderator' then 1 else 2 end`, asc(groupMember.joinedAt))
-    .limit(500);
+    .orderBy(
+      sql`case ${groupMember.role} when 'owner' then 0 when 'moderator' then 1 else 2 end`,
+      asc(groupMember.joinedAt),
+      asc(groupMember.userId),
+    )
+    .limit(MEMBER_PAGE + 1)
+    .offset(offset);
+  const hasMore = rows.length > MEMBER_PAGE;
   const blocked = await blockedWith(u.id);
-  const visible = rows.filter((r) => !blocked.has(r.userId));
+  const visible = rows.slice(0, MEMBER_PAGE).filter((r) => !blocked.has(r.userId));
   const authors = await authorsFor(visible.map((r) => r.userId));
-  return c.json(visible.flatMap((r) => {
-    const a = authors.get(r.userId);
-    return a ? [{ ...a, role: r.role as Role, joinedAt: r.joinedAt.toISOString() }] : [];
-  }));
+  return c.json({
+    members: visible.flatMap((r) => {
+      const a = authors.get(r.userId);
+      return a ? [{ ...a, role: r.role as Role, joinedAt: r.joinedAt.toISOString() }] : [];
+    }),
+    nextOffset: hasMore ? offset + MEMBER_PAGE : null,
+  });
 });
 
 /** Nombrar o sacar moderadores (solo el dueño). */
