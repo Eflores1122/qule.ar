@@ -21,8 +21,9 @@ function useTabResource<T>(path: string, onUnauthorized: () => void, fallback?: 
       setData(null);
     }
     if (mode === "recent") {
+      // Si la lista tiene más de 15 segundos, se sigue mostrando mientras llega la nueva: así cambiar de pestaña
+      // nunca deja la pantalla vacía esperando al servidor. Los eventos en vivo ya la mantienen al día.
       if (updatedAt.current !== null && Date.now() - updatedAt.current < FRESH_MS) return;
-      setData(null);
     }
     if (inFlight.current) {
       if (mode === "refresh") inFlight.current.again = true;
