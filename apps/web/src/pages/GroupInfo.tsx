@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
 import { api, getSocket, ROLE_LABEL, type GroupInfo as Info, type JoinRequest, type Member, type SentInvite, type SpamRules } from "../api";
 import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
@@ -16,6 +16,7 @@ export function GroupInfo() {
   const { me } = useMe();
   const { refreshGroups } = useTabData();
   const nav = useNavigate();
+  const location = useLocation();
   const [info, setInfo] = useState<Info | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
   const [requests, setRequests] = useState<JoinRequest[]>([]);
@@ -84,8 +85,9 @@ export function GroupInfo() {
   return (
     <div className="page">
       <header className="topbar topbar--thread">
-        {/* Volver al lugar desde donde se abrió: si no, el gesto de atrás vuelve a entrar a la info. */}
-        <button className="iconbtn" onClick={() => nav(-1)} aria-label="Volver"><BackIcon /></button>
+        {/* Volver al lugar desde donde se abrió: si no, el gesto de atrás vuelve a entrar a la info.
+            Si se entró directo (una notificación, o recargando), no hay a dónde volver: va al chat del grupo. */}
+        <button className="iconbtn" onClick={() => (location.key === "default" ? nav(`/grupos/${id}`, { replace: true }) : nav(-1))} aria-label="Volver"><BackIcon /></button>
         <h1 className="topbar__title topbar__title--sm">{info.isGeneral ? "# " : ""}{info.name}</h1>
       </header>
 
