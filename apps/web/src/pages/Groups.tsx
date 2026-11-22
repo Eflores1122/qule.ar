@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
-import { api, getSocket, ROLE_LABEL, upload, type GroupListing, type MyGroup, type MyInvite } from "../api";
+import { api, getSocket, ROLE_LABEL, upload, type GroupListing } from "../api";
 import { GroupAvatar } from "../components/GroupAvatar";
 import { PhotoPicker } from "../components/GroupPhoto";
 import { preparePhotoForUpload } from "../features/photos/preparePhoto";
+import { GROUP_EVENTS, useTabData } from "../features/navigation/tabData";
 import { PlusIcon } from "../components/Icons";
 import { MyInvites } from "../components/Invite";
 import { JoinButton } from "../components/JoinButton";
@@ -12,33 +13,25 @@ import { DialogFocus } from "../components/DialogFocus";
 export function Groups() {
   const [params, setParams] = useSearchParams();
   const tab = params.get("ver") === "todos" ? "all" : "mine";
-  const [mine, setMine] = useState<MyGroup[] | null>(null);
+  const { groups: mine, invites, refreshGroups } = useTabData();
   const [all, setAll] = useState<GroupListing[] | null>(null);
   const [q, setQ] = useState("");
   const [creating, setCreating] = useState(false);
 
-  const [invites, setInvites] = useState<MyInvite[]>([]);
-  const loadMine = useCallback(() => {
-    api<MyGroup[]>("/groups").then(setMine).catch(() => {});
-    api<MyInvite[]>("/invites").then(setInvites).catch(() => {});
-  }, []);
   const loadAll = useCallback(
     (query = q) => api<GroupListing[]>(`/groups/all?q=${encodeURIComponent(query)}`).then(setAll).catch(() => {}),
     [q],
   );
 
   useEffect(() => {
-    loadMine();
+    if (tab !== "all") return;
     const s = getSocket();
-    const refresh = () => {
-      loadMine();
-      if (tab === "all") loadAll();
-    };
-    for (const ev of ["group:request", "group:accepted", "group:rejected", "group:removed", "group:gone", "group:role", "group:invite"]) s.on(ev, refresh);
+    const refresh = () => loadAll();
+    for (const ev of GROUP_EVENTS) s.on(ev, refresh);
     return () => {
-      for (const ev of ["group:request", "group:accepted", "group:rejected", "group:removed", "group:gone", "group:role", "group:invite"]) s.off(ev, refresh);
+      for (const ev of GROUP_EVENTS) s.off(ev, refresh);
     };
-  }, [loadMine, loadAll, tab]);
+  }, [loadAll, tab]);
 
   useEffect(() => {
     if (tab !== "all") return;
@@ -60,7 +53,7 @@ export function Groups() {
 
       {tab === "mine" ? (
         <>
-        <MyInvites invites={invites} onChange={loadMine} />
+        <MyInvites invites={invites ?? []} onChange={() => refreshGroups("refresh")} />
         <ul className="glist">
           {mine?.map((g) => (
             <li key={g.id}>
@@ -110,7 +103,7 @@ export function Groups() {
                     </p>
                   </div>
                   <div className="gcard__action">
-                    <JoinButton g={g} onChange={() => { loadAll(); loadMine(); }} />
+                    <JoinButton g={g} onChange={() => { loadAll(); refreshGroups("refresh"); }} />
                   </div>
                 </li>
               ))}
@@ -126,6 +119,7 @@ export function Groups() {
 
 function CreateGroup({ onClose }: { onClose: () => void }) {
   const nav = useNavigate();
+  const { refreshGroups } = useTabData();
   const [name, setName] = useState("");
   const [description, setDescription] = useState("");
   const [photo, setPhoto] = useState<File | null>(null);
@@ -140,6 +134,7 @@ function CreateGroup({ onClose }: { onClose: () => void }) {
       const { id } = await api<{ id: string }>("/groups", { method: "POST", json: { name, description: description || null } });
       // El grupo ya está creado: si la foto falla, se puede volver a poner desde la info del grupo
       if (photo) await upload(`/groups/${id}/photo`, await preparePhotoForUpload(photo)).catch(() => {});
+      refreshGroups("refresh");
       nav(`/grupos/${id}`);
     } catch (err) {
       setError((err as Error).message);

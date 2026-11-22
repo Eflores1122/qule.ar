@@ -1,8 +1,7 @@
-import { useEffect, useState } from "react";
 import { Link } from "react-router";
-import { api, getSocket, type ConversationSummary } from "../api";
 import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
+import { useTabData } from "../features/navigation/tabData";
 
 function ago(iso: string) {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -14,17 +13,7 @@ function ago(iso: string) {
 
 export function Inbox() {
   const { me } = useMe();
-  const [list, setList] = useState<ConversationSummary[] | null>(null);
-
-  useEffect(() => {
-    const load = () => api<ConversationSummary[]>("/conversations").then(setList).catch(() => setList([]));
-    load();
-    const s = getSocket();
-    s.on("dm:message", load);
-    return () => {
-      s.off("dm:message", load);
-    };
-  }, []);
+  const { conversations: list } = useTabData();
 
   return (
     <div className="page">

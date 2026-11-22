@@ -7,12 +7,14 @@ import { BackIcon, PlusIcon } from "../components/Icons";
 import { InvitePeopleSheet } from "../components/Invite";
 import { ReportDialog } from "../components/ReportDialog";
 import { slowModeText } from "../features/groups/groupRules";
+import { useTabData } from "../features/navigation/tabData";
 import { GroupPhotoSetting } from "../components/GroupPhoto";
 import { GroupAvatar } from "../components/GroupAvatar";
 
 export function GroupInfo() {
   const { id = "" } = useParams();
   const { me } = useMe();
+  const { refreshGroups } = useTabData();
   const nav = useNavigate();
   const [info, setInfo] = useState<Info | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
@@ -88,7 +90,10 @@ export function GroupInfo() {
 
       <section className="section group-head">
         <GroupAvatar name={info.name} photo={info.photo} general={info.isGeneral} size="big" />
-        {isOwner && !info.isGeneral && <GroupPhotoSetting groupId={id} photo={info.photo} onChange={(photo) => setInfo({ ...info, photo })} />}
+        {isOwner && !info.isGeneral && <GroupPhotoSetting groupId={id} photo={info.photo} onChange={(photo) => {
+          setInfo({ ...info, photo });
+          refreshGroups("refresh");
+        }} />}
       </section>
 
       <section className="section">
@@ -217,7 +222,10 @@ export function GroupInfo() {
         </section>
       )}
 
-      {isOwner && !info.isGeneral && <GroupSettings info={info} onSaved={load} />}
+      {isOwner && !info.isGeneral && <GroupSettings info={info} onSaved={async () => {
+        refreshGroups("refresh");
+        await load();
+      }} />}
 
       {!info.isGeneral && (
         <section className="section">
@@ -227,7 +235,11 @@ export function GroupInfo() {
                 <p>¿Salir de {info.name}? Para volver vas a tener que pedir ingreso de nuevo.{isOwner && " Como sos el dueño, el grupo pasa a un moderador o al miembro más antiguo. Si no queda nadie, se cierra."}</p>
                 <div className="row">
                   <button className="btn" onClick={() => setConfirm(null)}>Cancelar</button>
-                  <button className="btn btn--danger" onClick={() => act(async () => { await api(`/groups/${id}/leave`, { method: "POST" }); nav("/grupos"); })}>Salir</button>
+                  <button className="btn btn--danger" onClick={() => act(async () => {
+                    await api(`/groups/${id}/leave`, { method: "POST" });
+                    refreshGroups("clear");
+                    nav("/grupos");
+                  })}>Salir</button>
                 </div>
               </div>
             ) : confirm === "delete" ? (
