@@ -7,6 +7,7 @@ import { distanceLabel, snapToCell, visibleKm } from "../geo.js";
 import { ageFrom, firstPublicPhotoKeys, thumbUrl, requireProfile, requireUser, type AppEnv } from "../lib.js";
 import { autoHiddenUsers } from "../moderation.js";
 import { isOnline } from "../realtime.js";
+import { hit } from "../shared.js";
 
 const { profile } = schema;
 
@@ -25,7 +26,6 @@ nearbyRoutes.use("/me/privacy", requireUser, requireProfile);
  * intenta triangular a otra persona necesita moverse muchas. Pasado el límite se ignora en silencio.
  */
 const MAX_CELL_CHANGES_PER_HOUR = 20;
-const cellChanges = new Map<string, number[]>();
 
 /**
  * Guarda la ubicación redondeada a la celda. La posición exacta no se guarda ni se loguea.
@@ -42,11 +42,7 @@ nearbyRoutes.put("/me/location", async (c) => {
   if (r.data.auto && (me.cellLat == null || me.cellLng == null)) return c.json({ ok: true });
   const cell = snapToCell(r.data.lat, r.data.lng);
   if (me.cellLat !== cell.lat || me.cellLng !== cell.lng) {
-    const hourAgo = Date.now() - 3_600_000;
-    const recent = (cellChanges.get(u.id) ?? []).filter((t) => t > hourAgo);
-    if (recent.length >= MAX_CELL_CHANGES_PER_HOUR) return c.json({ ok: true });
-    recent.push(Date.now());
-    cellChanges.set(u.id, recent);
+    if (!(await hit(`cell:${u.id}`, MAX_CELL_CHANGES_PER_HOUR, 3_600_000))) return c.json({ ok: true });
   }
   await db
     .update(profile)

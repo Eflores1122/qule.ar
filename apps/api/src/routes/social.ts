@@ -168,7 +168,7 @@ socialRoutes.post("/conversations", async (c) => {
   const [existing] = await db.select({ id: conversation.id }).from(conversation)
     .where(and(eq(conversation.userA, key.userA), eq(conversation.userB, key.userB)));
   if (existing) return c.json({ id: existing.id });
-  limit(me.id, "newChat");
+  await limit(me.id, "newChat");
   await db.insert(conversation).values({ id: newId(), ...key }).onConflictDoNothing();
   const [conv] = await db
     .select()
@@ -211,7 +211,7 @@ socialRoutes.post("/conversations/:id/messages", async (c) => {
   let photoKey: string | null = null;
   let expiring = false;
   if ((c.req.header("content-type") ?? "").includes("multipart/form-data")) {
-    limit(me.id, "dmPhoto");
+    await limit(me.id, "dmPhoto");
     const form = await c.req.parseBody();
     expiring = form.expiring === "1";
     const file = form.file;
@@ -223,7 +223,7 @@ socialRoutes.post("/conversations/:id/messages", async (c) => {
       throw new HTTPException(400, { message: "No pudimos leer esa imagen" });
     }
   } else {
-    limit(me.id, "dm");
+    await limit(me.id, "dm");
     const r = z.object({ body: z.string().trim().min(1).max(2000) }).safeParse(await c.req.json());
     if (!r.success) throw new HTTPException(400, { message: "Mensaje vacío o demasiado largo" });
     body = r.data.body;
@@ -338,7 +338,7 @@ export { REPORT_REASONS } from "../moderation.js";
 
 socialRoutes.post("/reports", async (c) => {
   const me = c.get("user");
-  limit(me.id, "report");
+  await limit(me.id, "report");
   const r = z
     .object({
       userId: z.string().optional(),

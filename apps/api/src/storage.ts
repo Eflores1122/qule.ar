@@ -8,6 +8,7 @@ import path from "node:path";
 import sharp from "sharp";
 import { env } from "./env.js";
 import { createS3 } from "./s3.js";
+import { clustered } from "./shared.js";
 
 /**
  * Dónde se guardan las fotos y los videos: en el disco del servidor (por defecto) o en un almacenamiento compatible
@@ -127,9 +128,9 @@ export const videoEnabled = await run(FFMPEG, ["-version"]).then(() => true, () 
  */
 /**
  * Videos procesándose a la vez. ffmpeg usa mucho procesador: si varias personas suben videos juntas, los que
- * sobran esperan su turno en vez de trabar el servidor para todes.
+ * sobran esperan su turno en vez de trabar el servidor para todes. Con varios procesos del API, uno por proceso.
  */
-const MAX_VIDEO_JOBS = 2;
+const MAX_VIDEO_JOBS = clustered ? 1 : 2;
 let videoJobs = 0;
 const videoQueue: (() => void)[] = [];
 async function videoSlot<T>(job: () => Promise<T>): Promise<T> {
