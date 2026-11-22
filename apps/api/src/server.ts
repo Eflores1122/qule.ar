@@ -34,7 +34,7 @@ checkDataKey();
 const leader = !cluster.isWorker || process.env.LEADER === "1";
 
 if (leader) {
-  await runMigrations();
+  if (!env.DATABASE_URL || env.MIGRATE_ON_STARTUP) await runMigrations();
   const encryptedProfiles = await encryptLegacyHealth(db);
   if (encryptedProfiles) console.log(`Datos de salud cifrados: ${encryptedProfiles} perfiles`);
 
