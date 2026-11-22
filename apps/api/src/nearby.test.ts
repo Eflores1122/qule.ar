@@ -161,6 +161,26 @@ const MES = {
   "distancia escondida": { userId: ME, cellLat: -34.6, cellLng: -58.4, showDistance: false },
 };
 
+test("explorar una ciudad incluye solo perfiles visibles que eligieron compartirla", async () => {
+  const ids = ["ciudad-visible", "ciudad-oculta", "ciudad-otro-pais", "ciudad-sin-publicar"];
+  await db.insert(schema.user).values(ids.map((id) => ({ id, name: id, email: `${id}@example.test` })));
+  const common = { birthdate: "1990-01-01", displayName: "Perfil de prueba" };
+  await db.insert(schema.profile).values([
+    { ...common, userId: ids[0], discoveryCountry: "MX", discoveryCity: "Ciudad de México", discoveryCityKey: "ciudad de mexico" },
+    { ...common, userId: ids[1], discoveryCountry: "MX", discoveryCity: "Ciudad de México", discoveryCityKey: "ciudad de mexico", incognito: true },
+    { ...common, userId: ids[2], discoveryCountry: "AR", discoveryCity: "Ciudad de México", discoveryCityKey: "ciudad de mexico" },
+    { ...common, userId: ids[3] },
+  ]);
+  try {
+    const filter = parseNearbyFilters({ country: "MX", city: "ciudad DE   mexico" });
+    const results = await nearbyPage(MES["sin ubicación"], filter);
+    assert.deepEqual(results.people.map(({ id, distance }) => ({ id, distance })), [{ id: ids[0], distance: null }]);
+    assert.throws(() => parseNearbyFilters({ city: "Ciudad de México" }));
+  } finally {
+    await db.delete(schema.user).where(inArray(schema.user.id, ids));
+  }
+});
+
 for (const [label, me] of Object.entries(MES)) {
   test(`grilla de Cerca igual a la cuenta en memoria (${label})`, async () => {
     for (const q of CASES) {

@@ -2,6 +2,7 @@ import { eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import { cityKey, DISCOVERY_COUNTRIES } from "../../../../packages/geo/discovery.js";
 import { db, schema } from "../db/index.js";
 import { distanceLabel, snapToCell, visibleKm } from "../geo.js";
 import { ageFrom, firstPublicPhotoKeys, thumbUrl, requireProfile, requireUser, type AppEnv } from "../lib.js";
@@ -79,8 +80,10 @@ const filtersSchema = z.object({
   online: z.enum(["1"]).optional(),
   withPhoto: z.enum(["1"]).optional(),
   favorites: z.enum(["1"]).optional(),
+  country: z.enum(DISCOVERY_COUNTRIES).optional(),
+  city: z.string().trim().min(2).max(60).refine((value) => /\p{L}/u.test(value)).optional(),
   offset: z.coerce.number().int().min(0).max(2000).default(0),
-});
+}).refine((f) => Boolean(f.country) === Boolean(f.city), "Elegí un país y una ciudad");
 
 export type NearbyFilters = z.infer<typeof filtersSchema>;
 
@@ -119,6 +122,7 @@ export async function nearbyPage(me: Me, f: NearbyFilters) {
     sql`p.suspended_at is null`,
     sql`not exists (select 1 from block b where (b.blocker_id = ${u.id} and b.blocked_id = p.user_id) or (b.blocker_id = p.user_id and b.blocked_id = ${u.id}))`,
   ];
+  if (f.country && f.city) conds.push(sql`p.discovery_country = ${f.country} and p.discovery_city_key = ${cityKey(f.city)}`);
   // Las fechas van como texto AAAA-MM-DD, igual que se guardan
   if (f.ageMin != null) conds.push(sql`p.birthdate <= ${bornOnOrBefore(f.ageMin)}::date`);
   if (f.ageMax != null) conds.push(sql`p.birthdate > ${bornOnOrBefore(f.ageMax + 1)}::date`);
@@ -154,7 +158,7 @@ export async function nearbyPage(me: Me, f: NearbyFilters) {
   const candidates = rows
     .filter((p) => !hidden.has(p.user_id))
     .map((p) => {
-      const km = visibleKm(me, { cellLat: p.cell_lat, cellLng: p.cell_lng, showDistance: p.show_distance });
+      const km = f.city ? null : visibleKm(me, { cellLat: p.cell_lat, cellLng: p.cell_lng, showDistance: p.show_distance });
       const on = isOnline(p.user_id);
       return { id: p.user_id, seen: p.seen, km, online: on, recent: on || now - p.seen < RECENT_MS };
     })

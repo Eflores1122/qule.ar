@@ -3,6 +3,7 @@ import { mailEnabled } from "../mail.js";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
+import { cityKey, DISCOVERY_COUNTRIES } from "../../../../packages/geo/discovery.js";
 import { db, schema } from "../db/index.js";
 import { ageFrom, mediaOut, newId, requireProfile, requireUser, type AppEnv } from "../lib.js";
 import { syncGroupRoom } from "../realtime.js";
@@ -115,13 +116,28 @@ meRoutes.get("/me", requireUser, async (c) => {
     user: { id: u.id, email: u.email, name: u.name, isAdmin: isAdmin(u) },
     profile: p
       ? (() => {
-          const { cellLat, cellLng, ...rest } = p;
+          const { cellLat, cellLng, discoveryCityKey: _internal, ...rest } = p;
           // A la propia persona solo le decimos si tiene ubicación, no la celda
           return { ...rest, age: ageFrom(p.birthdate), hasLocation: cellLat != null && cellLng != null };
         })()
       : null,
     photos: photos.map((x) => ({ id: x.id, position: x.position, isPrivate: x.isPrivate, ...mediaOut(x) })),
   });
+});
+
+meRoutes.put("/me/discovery-city", requireUser, requireProfile, async (c) => {
+  const input = z.object({
+    country: z.enum(DISCOVERY_COUNTRIES),
+    city: z.string().trim().min(2).max(60).refine((value) => /\p{L}/u.test(value)),
+  }).nullable().safeParse(await c.req.json().catch(() => undefined));
+  if (!input.success) throw new HTTPException(400, { message: "Elegí un país y escribí una ciudad válida." });
+  const city = input.data?.city.normalize("NFC");
+  await db.update(profile).set({
+    discoveryCountry: input.data?.country ?? null,
+    discoveryCity: city ?? null,
+    discoveryCityKey: city ? cityKey(city) : null,
+  }).where(eq(profile.userId, c.get("user").id));
+  return c.json({ ok: true });
 });
 
 meRoutes.put("/me/profile", requireUser, async (c) => {
