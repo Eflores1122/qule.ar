@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { api, getSocket, ROLE_LABEL, type GroupInfo as Info, type JoinRequest, type Member, type MemberPage, type SentInvite, type SpamRules } from "../api";
 import { useMe } from "../App";
@@ -18,6 +18,8 @@ export function GroupInfo() {
   const nav = useNavigate();
   const [info, setInfo] = useState<Info | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
+  // Las recargas por socket o invitaciones llaman a load() sin cantidad: el ref conserva lo que se ve.
+  const visibleMembers = useRef(0);
   const [memberNext, setMemberNext] = useState<number | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [requests, setRequests] = useState<JoinRequest[]>([]);
@@ -31,7 +33,7 @@ export function GroupInfo() {
   const isMod = info?.role === "owner" || info?.role === "moderator";
   const isOwner = info?.role === "owner";
 
-  const load = useCallback(async (keepMembers = 0) => {
+  const load = useCallback(async (keepMembers = visibleMembers.current) => {
     try {
       const g = await api<Info>(`/groups/${id}`);
       setInfo(g);
@@ -45,6 +47,7 @@ export function GroupInfo() {
         list = [...list, ...more.members];
         next = more.nextOffset;
       }
+      visibleMembers.current = list.length;
       setMembers(list);
       setMemberNext(next);
       if ((g.role === "owner" || g.role === "moderator") && !g.isGeneral) {
@@ -85,7 +88,7 @@ export function GroupInfo() {
     setMemberMenu(null);
     try {
       await fn();
-      await load(members.length);
+      await load();
     } catch (e) {
       setError((e as Error).message);
     }
@@ -97,7 +100,11 @@ export function GroupInfo() {
     setLoadingMore(true);
     try {
       const page = await api<MemberPage>(`/groups/${id}/members?offset=${memberNext}`);
-      setMembers((prev) => [...prev, ...page.members]);
+      setMembers((prev) => {
+        const nextList = [...prev, ...page.members];
+        visibleMembers.current = nextList.length;
+        return nextList;
+      });
       setMemberNext(page.nextOffset);
     } catch (e) {
       setError((e as Error).message);
