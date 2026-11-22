@@ -84,7 +84,11 @@ meRoutes.get("/files/:key", requireUser, async (c) => {
   }
   const buf = await readImage(key, c.req.query("s") === "thumb");
   if (!buf) return c.notFound();
-  return c.body(new Uint8Array(buf), 200, { "Content-Type": "image/webp" });
+  const publicPhoto = (ph && !ph.isPrivate) || (grp && !grp.removedAt);
+  return c.body(new Uint8Array(buf), 200, {
+    "Content-Type": "image/webp",
+    "Cache-Control": publicPhoto ? "private, max-age=31536000, immutable" : "no-store",
+  });
 });
 
 /** Sirve un video por partes (Range): Safari no reproduce videos sin esto, y así se puede adelantar. */

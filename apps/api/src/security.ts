@@ -1,5 +1,13 @@
 import { createHash } from "node:crypto";
+import { createMiddleware } from "hono/factory";
 import { secureHeaders } from "hono/secure-headers";
+
+export const noStoreJson = createMiddleware(async (c, next) => {
+  await next();
+  if (c.res.headers.get("content-type")?.split(";", 1)[0] === "application/json") {
+    c.header("Cache-Control", "no-store");
+  }
+});
 
 /**
  * Encabezados de seguridad para todas las respuestas (API y web).

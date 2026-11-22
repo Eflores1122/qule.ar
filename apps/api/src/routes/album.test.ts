@@ -38,9 +38,11 @@ test("accesos al álbum privado", async (t) => {
   const { meRoutes } = await import("./me.js");
   const { premiumRoutes } = await import("./premium.js");
   const { socialRoutes } = await import("./social.js");
+  const { noStoreJson } = await import("../security.js");
   const { saveImage } = await import("../storage.js");
 
   const app = new Hono<AppEnv>();
+  app.use("/api/*", noStoreJson);
   app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
   app.route("/api", meRoutes);
   app.route("/api", socialRoutes);
@@ -95,6 +97,7 @@ test("accesos al álbum privado", async (t) => {
   async function albumFor(viewer: Account) {
     const res = await request(`/api/users/${owner.id}`, viewer);
     assert.equal(res.status, 200);
+    assert.equal(res.headers.get("cache-control"), "no-store");
     return ((await res.json()) as Album).privateAlbum;
   }
 
@@ -132,10 +135,12 @@ test("accesos al álbum privado", async (t) => {
     for (const url of fileUrls.slice(0, 3)) {
       const response = await request(url, viewer);
       assert.equal(response.status, 200);
+      assert.equal(response.headers.get("cache-control"), "no-store");
       await response.arrayBuffer();
     }
     const video = await request(videoItem.url, viewer, { headers: { range: "bytes=0-3" } });
     assert.equal(video.status, 206);
+    assert.equal(video.headers.get("cache-control"), "no-store");
     assert.equal(video.headers.get("content-range"), `bytes 0-3/${videoBytes.length}`);
     assert.deepEqual(Buffer.from(await video.arrayBuffer()), videoBytes.subarray(0, 4));
   }
@@ -145,6 +150,21 @@ test("accesos al álbum privado", async (t) => {
     assert.equal((await request("/api/album/grants", undefined, { method: "DELETE" })).status, 401);
     await assertVisible(owner);
     await assertHidden(person);
+  });
+
+  await t.test("las fotos públicas conservan la caché local y los permisos requieren sesión", async () => {
+    const form = new FormData();
+    form.set("file", new File([Uint8Array.from(sample)], "publica.png", { type: "image/png" }));
+    const upload = await request("/api/me/photos", owner, { method: "POST", body: form });
+    assert.equal(upload.status, 200);
+    assert.equal(upload.headers.get("cache-control"), "no-store");
+    const { url, thumb } = await upload.json() as { url: string; thumb: string };
+    for (const path of [url, thumb]) {
+      assert.equal((await request(path)).status, 401);
+      const response = await request(path, person);
+      assert.equal(response.status, 200);
+      assert.equal(response.headers.get("cache-control"), "private, max-age=31536000, immutable");
+    }
   });
 
   await t.test("solo la persona invitada puede aceptar y ver los archivos", async () => {
