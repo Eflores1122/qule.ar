@@ -26,6 +26,7 @@ export function Conversation() {
   const listRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const fileRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const expiringNext = useRef(false);
   const typingTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const myId = me?.user.id;
@@ -129,6 +130,8 @@ export function Conversation() {
     e?.preventDefault();
     const body = text.trim();
     if (!body) return;
+    // Mandar con el botón le saca el foco al campo y cierra el teclado. Se lo devolvemos.
+    inputRef.current?.focus();
     setError("");
     setText("");
     try {
@@ -279,6 +282,7 @@ export function Conversation() {
             }}
           />
           <textarea
+            ref={inputRef}
             className="composer__input"
             aria-label="Mensaje"
             rows={1}
@@ -293,7 +297,7 @@ export function Conversation() {
               }
             }}
           />
-          <button className="sendbtn" aria-label="Mandar" disabled={!text.trim()}><SendIcon /></button>
+          <button className="sendbtn" aria-label="Mandar" disabled={!text.trim()} onMouseDown={(e) => e.preventDefault()}><SendIcon /></button>
         </div>
       </form>
 
