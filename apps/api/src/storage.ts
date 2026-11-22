@@ -1,16 +1,58 @@
 import { execFile } from "node:child_process";
+import { createReadStream } from "node:fs";
+import { Readable } from "node:stream";
 import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import path from "node:path";
 import sharp from "sharp";
 import { env } from "./env.js";
+import { createS3 } from "./s3.js";
 
-// Por ahora las fotos se guardan en disco. Más adelante: un driver para Cloudflare R2.
+/**
+ * Dónde se guardan las fotos y los videos: en el disco del servidor (por defecto) o en un almacenamiento compatible
+ * con S3, como Cloudflare R2 (STORAGE=s3, ver docs/DEPLOY.md). Las miniaturas van al mismo lugar, en "thumbs/".
+ * Con S3, si un archivo todavía no está en el bucket se busca en el disco: así se puede migrar sin cortar nada.
+ */
 const dir = path.join(env.DATA_DIR, "uploads");
-const thumbs = path.join(dir, "thumbs");
-await mkdir(thumbs, { recursive: true });
+await mkdir(path.join(dir, "thumbs"), { recursive: true });
 const THUMB_PX = 480;
+
+const s3 = env.STORAGE === "s3"
+  ? createS3({
+      endpoint: required("S3_ENDPOINT", env.S3_ENDPOINT),
+      bucket: required("S3_BUCKET", env.S3_BUCKET),
+      region: env.S3_REGION,
+      accessKeyId: required("S3_ACCESS_KEY_ID", env.S3_ACCESS_KEY_ID),
+      secretAccessKey: required("S3_SECRET_ACCESS_KEY", env.S3_SECRET_ACCESS_KEY),
+    })
+  : null;
+
+function required(name: string, value: string | undefined): string {
+  if (!value) throw new Error(`STORAGE=s3 necesita ${name}`);
+  return value;
+}
+
+/** Dónde se guarda este archivo. */
+export const storageKind = s3 ? "s3" : "disk";
+
+async function putBlob(key: string, data: Buffer, contentType: string) {
+  if (s3) await s3.put(key, data, contentType);
+  else await writeFile(path.join(dir, key), data);
+}
+
+async function getBlob(key: string): Promise<Buffer | null> {
+  if (s3) {
+    const found = await s3.get(key);
+    if (found) return found;
+  }
+  return readFile(path.join(dir, key)).catch(() => null);
+}
+
+async function deleteBlob(key: string) {
+  if (s3) await s3.del(key).catch(() => {});
+  await unlink(path.join(dir, key)).catch(() => {});
+}
 
 export const MAX_UPLOAD_BYTES = 12 * 1024 * 1024;
 
@@ -31,7 +73,7 @@ export async function saveImage(input: ArrayBuffer | Buffer): Promise<string> {
     .webp({ quality: 82 })
     .toBuffer();
   const key = `${crypto.randomUUID()}.webp`;
-  await writeFile(path.join(dir, key), out);
+  await putBlob(key, out, "image/webp");
   return key;
 }
 
@@ -41,18 +83,18 @@ const VIDEO_RE = /^[0-9a-f-]{36}\.mp4$/;
 export async function readImage(key: string, thumb = false): Promise<Buffer | null> {
   if (!KEY_RE.test(key)) return null;
   try {
-    if (!thumb) return await readFile(path.join(dir, key));
+    if (!thumb) return await getBlob(key);
     // La miniatura se genera la primera vez que se pide y queda guardada
-    try {
-      return await readFile(path.join(thumbs, key));
-    } catch {
-      const out = await sharp(await readFile(path.join(dir, key)), { limitInputPixels: MAX_INPUT_PIXELS })
-        .resize({ width: THUMB_PX, height: THUMB_PX, fit: "cover", position: "attention" })
-        .webp({ quality: 74 })
-        .toBuffer();
-      await writeFile(path.join(thumbs, key), out);
-      return out;
-    }
+    const saved = await getBlob(`thumbs/${key}`);
+    if (saved) return saved;
+    const original = await getBlob(key);
+    if (!original) return null;
+    const out = await sharp(original, { limitInputPixels: MAX_INPUT_PIXELS })
+      .resize({ width: THUMB_PX, height: THUMB_PX, fit: "cover", position: "attention" })
+      .webp({ quality: 74 })
+      .toBuffer();
+    await putBlob(`thumbs/${key}`, out, "image/webp").catch(() => {});
+    return out;
   } catch {
     return null;
   }
@@ -60,12 +102,12 @@ export async function readImage(key: string, thumb = false): Promise<Buffer | nu
 
 export async function deleteImage(key: string) {
   if (VIDEO_RE.test(key)) {
-    await unlink(path.join(dir, key)).catch(() => {});
+    await deleteBlob(key);
     return;
   }
   if (!KEY_RE.test(key)) return;
-  await unlink(path.join(dir, key)).catch(() => {});
-  await unlink(path.join(thumbs, key)).catch(() => {});
+  await deleteBlob(key);
+  await deleteBlob(`thumbs/${key}`);
 }
 
 // ---------- Videos (solo para el álbum privado) ----------
@@ -111,7 +153,8 @@ async function processVideo(input: ArrayBuffer): Promise<{ key: string; posterKe
   const id = crypto.randomUUID();
   const tmpIn = path.join(tmpdir(), `${id}.in`);
   const key = `${id}.mp4`;
-  const out = path.join(dir, key);
+  // ffmpeg escribe en una carpeta temporal; después el video se guarda en el disco o en el bucket
+  const out = path.join(tmpdir(), key);
   const frame = path.join(tmpdir(), `${id}.png`);
   await writeFile(tmpIn, Buffer.from(input));
   try {
@@ -129,22 +172,28 @@ async function processVideo(input: ArrayBuffer): Promise<{ key: string; posterKe
     await run(FFMPEG, ["-hide_banner", "-y", "-ss", "0.5", "-i", out, "-frames:v", "1", frame], { timeout: 30_000 })
       .catch(() => run(FFMPEG, ["-hide_banner", "-y", "-i", out, "-frames:v", "1", frame], { timeout: 30_000 }));
     const posterKey = await saveImage(await readFile(frame));
+    await putBlob(key, await readFile(out), "video/mp4");
     return { key, posterKey, seconds };
-  } catch (err) {
-    await unlink(out).catch(() => {});
-    throw err;
   } finally {
     await unlink(tmpIn).catch(() => {});
     await unlink(frame).catch(() => {});
+    await unlink(out).catch(() => {});
   }
 }
 
-/** Ruta y tamaño de un video guardado, para servirlo por partes (Safari lo exige para reproducir). */
-export async function videoFile(key: string): Promise<{ file: string; size: number } | null> {
+export type VideoSource = { size: number; open: (start: number, end: number) => Promise<ReadableStream> };
+
+/** Tamaño de un video guardado y cómo leer un pedazo, para servirlo por partes (Safari lo exige para reproducir). */
+export async function videoFile(key: string): Promise<VideoSource | null> {
   if (!VIDEO_RE.test(key)) return null;
+  if (s3) {
+    const size = await s3.size(key).catch(() => null);
+    if (size != null) return { size, open: (start, end) => s3.stream(key, start, end) };
+  }
   const file = path.join(dir, key);
   try {
-    return { file, size: (await stat(file)).size };
+    const size = (await stat(file)).size;
+    return { size, open: async (start, end) => Readable.toWeb(createReadStream(file, { start, end })) as ReadableStream };
   } catch {
     return null;
   }

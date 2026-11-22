@@ -1,5 +1,3 @@
-import { createReadStream } from "node:fs";
-import { Readable } from "node:stream";
 import { and, asc, eq, or } from "drizzle-orm";
 import { mailEnabled } from "../mail.js";
 import { Hono } from "hono";
@@ -8,7 +6,7 @@ import { z } from "zod";
 import { db, schema } from "../db/index.js";
 import { ageFrom, mediaOut, newId, requireProfile, requireUser, type AppEnv } from "../lib.js";
 import { syncGroupRoom } from "../realtime.js";
-import { deleteImage, MAX_UPLOAD_BYTES, MAX_VIDEO_BYTES, readImage, saveImage, saveVideo, videoEnabled, videoFile } from "../storage.js";
+import { deleteImage, MAX_UPLOAD_BYTES, MAX_VIDEO_BYTES, readImage, saveImage, saveVideo, videoEnabled, videoFile, type VideoSource } from "../storage.js";
 import { googleEnabled } from "../auth.js";
 import { hasAlbumAccess } from "./premium.js";
 import { isAdmin } from "./admin.js";
@@ -85,7 +83,7 @@ meRoutes.get("/files/:key", requireUser, async (c) => {
 });
 
 /** Sirve un video por partes (Range): Safari no reproduce videos sin esto, y así se puede adelantar. */
-function serveVideo(range: string | undefined, v: { file: string; size: number }) {
+async function serveVideo(range: string | undefined, v: VideoSource) {
   const headers: Record<string, string> = { "Content-Type": "video/mp4", "Accept-Ranges": "bytes", "Cache-Control": "no-store" };
   let start = 0;
   let end = v.size - 1;
@@ -105,7 +103,7 @@ function serveVideo(range: string | undefined, v: { file: string; size: number }
     headers["Content-Range"] = `bytes ${start}-${end}/${v.size}`;
   }
   headers["Content-Length"] = String(end - start + 1);
-  const body = Readable.toWeb(createReadStream(v.file, { start, end })) as ReadableStream;
+  const body = await v.open(start, end);
   return new Response(body, { status, headers });
 }
 

@@ -164,6 +164,26 @@ Conviene probar la restauración cada tanto en otra máquina o en una base de pr
 
 Sus datos salen de la base al instante, pero pueden quedar en los backups hasta 14 días. Después `restic forget --prune` los borra solos. Por eso no hay que subir `KEEP_DAYS` sin cambiar antes la política de privacidad.
 
+## Fotos en Cloudflare R2 (opcional)
+
+Por defecto, las fotos y los videos se guardan en el disco del servidor (volumen `mortero-data`, carpeta `uploads`). Cuando el disco quede chico, se pueden pasar a **Cloudflare R2** o a cualquier almacenamiento compatible con S3. La app sigue sirviendo las fotos igual: pasan por `/api/files`, que controla quién puede ver cada una. El bucket nunca queda público.
+
+1. **En Cloudflare:** creá un bucket privado en R2 (por ejemplo `qule-fotos`) y un token de API con permiso **Object Read & Write solo para ese bucket**. Guardá el *Access Key ID* y el *Secret Access Key*.
+2. **En `~/mortero/app.env`** (los secretos los pegás vos en el servidor):
+   ```
+   STORAGE=s3
+   S3_ENDPOINT=https://<id-de-cuenta>.r2.cloudflarestorage.com
+   S3_BUCKET=qule-fotos
+   S3_REGION=auto
+   S3_ACCESS_KEY_ID=…
+   S3_SECRET_ACCESS_KEY=…
+   ```
+3. **Recreá el contenedor** (paso 4). Desde ese momento, lo nuevo va al bucket. Lo viejo se sigue leyendo del disco mientras no esté en el bucket, así que no se corta nada.
+4. **Pasá lo que ya estaba:** `docker exec mortero-app node --import tsx src/storage-migrate.ts`. Se puede correr varias veces: lo que ya está en el bucket se saltea. Las miniaturas no se suben, porque se regeneran solas.
+5. **Cuando confirmes que todo se ve bien,** podés borrar las fotos del disco (`uploads/*.webp` y `uploads/*.mp4` dentro del volumen). El backup de las fotos (sección 6) deja de hacer falta para lo que está en R2. Si querés una copia aparte, activá el versionado o una regla de retención en el bucket.
+
+Para volver al disco: sacá `STORAGE=s3` y recreá el contenedor. Lo que se subió mientras estaba en R2 queda solo en el bucket, así que antes bajalo con `rclone` o similar.
+
 ## Seguridad: la IP de cada persona
 
 El límite de intentos (login, registro, recuperar contraseña) y las sesiones usan la IP real de cada persona. El API la lee de **un solo encabezado**, que el proxy de adelante tiene que pisar siempre, así nadie la puede inventar. Se elige con `CLIENT_IP_HEADER` en `app.env`:
