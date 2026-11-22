@@ -78,12 +78,12 @@ const filtersSchema = z.object({
   weightMin: int, weightMax: int,
   bodyType: list, position: list, tribes: list, lookingFor: list, relationship: list,
   online: z.enum(["1"]).optional(),
-  withPhoto: z.enum(["1"]).optional(),
-  favorites: z.enum(["1"]).optional(),
   country: z.enum(DISCOVERY_COUNTRIES).optional(),
   city: z.string().trim().min(2).max(60).refine((value) => /\p{L}/u.test(value)).optional(),
+  withPhoto: z.enum(["1"]).optional(),
+  favorites: z.enum(["1"]).optional(),
   offset: z.coerce.number().int().min(0).max(2000).default(0),
-}).refine((f) => Boolean(f.country) === Boolean(f.city), "Elegí un país y una ciudad");
+});
 
 export type NearbyFilters = z.infer<typeof filtersSchema>;
 
@@ -111,6 +111,9 @@ type Me = { userId: string; cellLat: number | null; cellLng: number | null; show
 
 /** Una página de la grilla para `me`. Separada de la ruta para poder probarla sin sesión (ver nearby.test.ts). */
 export async function nearbyPage(me: Me, f: NearbyFilters) {
+  if (Boolean(f.country) !== Boolean(f.city)) {
+    throw new HTTPException(400, { message: "Elegí un país y una ciudad." });
+  }
   const u = { id: me.userId };
   // Mostramos a todes, sin límite de distancia: al principio somos pocas personas y la idea es que se encuentren.
   // Con ubicación, se ordena de más cerca a más lejos; sin ubicación, por quién está en línea.
