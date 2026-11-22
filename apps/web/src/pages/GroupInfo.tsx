@@ -84,7 +84,8 @@ export function GroupInfo() {
   return (
     <div className="page">
       <header className="topbar topbar--thread">
-        <button className="iconbtn" onClick={() => nav(`/grupos/${id}`)} aria-label="Volver al chat"><BackIcon /></button>
+        {/* Volver al lugar desde donde se abrió: si no, el gesto de atrás vuelve a entrar a la info. */}
+        <button className="iconbtn" onClick={() => nav(-1)} aria-label="Volver"><BackIcon /></button>
         <h1 className="topbar__title topbar__title--sm">{info.isGeneral ? "# " : ""}{info.name}</h1>
       </header>
 
