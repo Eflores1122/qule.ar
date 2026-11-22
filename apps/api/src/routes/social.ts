@@ -39,7 +39,6 @@ socialRoutes.get("/users/:id", async (c) => {
   const pendingAlbum = Boolean(albumGrant && !albumGrant.acceptedAt);
   // Lista explícita de campos públicos: nunca la fecha de nacimiento ni la celda de ubicación
   const mine = c.get("profile")!;
-  await recordView(me.id, mine.incognito, id);
   const km = id === me.id ? null : visibleKm(mine, p);
   // En incógnito no se muestra si estás en línea
   const on = !p.incognito && isOnline(id);
@@ -84,6 +83,19 @@ socialRoutes.get("/users/:id", async (c) => {
     sharedUntil: myGrant?.expiresAt?.toISOString() ?? null,
     distance: km != null ? distanceLabel(km) : null,
   });
+});
+
+// El cliente registra la apertura del perfil. Leer sus datos para refrescar la pantalla no cuenta como visita.
+socialRoutes.post("/users/:id/view", async (c) => {
+  const viewer = c.get("user").id;
+  const target = c.req.param("id");
+  if (viewer === target || c.get("profile")!.incognito) return c.body(null, 204);
+  if (await isBlocked(viewer, target)) return c.notFound();
+  const [available] = await db.select({ userId: profile.userId }).from(profile)
+    .where(and(eq(profile.userId, target), isNull(profile.suspendedAt)));
+  if (!available) return c.notFound();
+  await recordView(viewer, false, target);
+  return c.body(null, 204);
 });
 
 // ---------- Mensajes privados ----------

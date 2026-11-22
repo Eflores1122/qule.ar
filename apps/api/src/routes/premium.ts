@@ -1,5 +1,5 @@
 // Lo que en otras apps es "premium", acá es gratis para todo el mundo.
-import { and, desc, eq, gt, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, isNull, lte, notInArray, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -24,27 +24,32 @@ for (const p of ["/me/views", "/favorites", "/favorites/*", "/album/*"]) {
 /** Registra una visita, salvo que quien mira esté en incógnito o se esté mirando a sí mismo. */
 export async function recordView(viewerId: string, viewerIncognito: boolean, viewedId: string) {
   if (viewerId === viewedId || viewerIncognito) return;
+  const now = new Date();
   await db
     .insert(profileView)
-    .values({ viewerId, viewedId, viewedAt: new Date() })
-    .onConflictDoUpdate({ target: [profileView.viewerId, profileView.viewedId], set: { viewedAt: new Date() } });
+    .values({ viewerId, viewedId, viewedAt: now })
+    .onConflictDoUpdate({ target: [profileView.viewerId, profileView.viewedId], set: { viewedAt: sql`greatest(${profileView.viewedAt}, ${now.toISOString()}::timestamptz)` } });
 }
 
 premiumRoutes.get("/me/views", async (c) => {
   const u = c.get("user");
-  const since = new Date(Date.now() - VIEWS_DAYS * 86_400_000);
+  const days = z.enum(["1", "7", "30"]).optional().safeParse(c.req.query("days"));
+  if (!days.success) throw new HTTPException(400, { message: "Período inválido" });
+  const since = new Date(Date.now() - (Number(days.data) || VIEWS_DAYS) * 86_400_000);
+  const blocked = [...await blockedWith(u.id)];
   const rows = await db
-    .select({ viewerId: profileView.viewerId, viewedAt: profileView.viewedAt, incognito: profile.incognito })
+    .select({ viewerId: profileView.viewerId, viewedAt: profileView.viewedAt })
     .from(profileView)
     .innerJoin(profile, eq(profile.userId, profileView.viewerId))
-    .where(and(eq(profileView.viewedId, u.id), gt(profileView.viewedAt, since)))
-    .orderBy(desc(profileView.viewedAt))
+    .where(and(
+      eq(profileView.viewedId, u.id), gt(profileView.viewedAt, since),
+      eq(profile.incognito, false), isNull(profile.suspendedAt),
+      blocked.length ? notInArray(profileView.viewerId, blocked) : undefined,
+    ))
+    .orderBy(desc(profileView.viewedAt), asc(profileView.viewerId))
     .limit(200);
-  const blocked = await blockedWith(u.id);
-  // Si después se pusieron en incógnito, también dejan de aparecer
-  const visible = rows.filter((r) => !blocked.has(r.viewerId) && !r.incognito);
-  const authors = await authorsFor(visible.map((r) => r.viewerId));
-  return c.json(visible.flatMap((r) => {
+  const authors = await authorsFor(rows.map((r) => r.viewerId));
+  return c.json(rows.flatMap((r) => {
     const a = authors.get(r.viewerId);
     return a ? [{ ...a, viewedAt: r.viewedAt.toISOString() }] : [];
   }));

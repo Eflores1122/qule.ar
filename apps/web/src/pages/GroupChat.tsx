@@ -1,7 +1,7 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { api, getSocket, type GroupInfo, type GroupMessage, type ReactionEvent } from "../api";
-import { myReaction, ReactionBar, ReactionPicker } from "../components/Reactions";
+import { MessageReactions } from "../components/Reactions";
 import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { BackIcon, ClockIcon, DotsIcon, InfoIcon, SendIcon } from "../components/Icons";
@@ -226,17 +226,6 @@ export function GroupChat() {
     }
   }
 
-  /** Poner, cambiar o sacar mi reacción (si toco la que ya tenía, se saca). */
-  async function react(m: GroupMessage, kind: string) {
-    setMenuFor(null);
-    try {
-      const { reactions } = await api<{ reactions: GroupMessage["reactions"] }>(`/reactions/group/${m.id}`, { method: "PUT", json: { kind } });
-      setMessages((list) => list.map((x) => (x.id === m.id ? { ...x, reactions } : x)));
-    } catch (e) {
-      setNotice({ kind: "error", text: (e as Error).message });
-    }
-  }
-
   async function remove(m: GroupMessage) {
     setMenuFor(null);
     await api(`/groups/${id}/messages/${m.id}`, { method: "DELETE" }).catch(() => {});
@@ -323,14 +312,16 @@ export function GroupChat() {
                   </button>
                 )}
                 <p className="gmsg__body">{m.body}</p>
-                <ReactionBar reactions={m.reactions ?? []} myId={me?.user.id} onToggle={(k) => react(m, k)} />
+                {m.status === "published" && (
+                  <MessageReactions scope="group" messageId={m.id} reactions={m.reactions ?? []} myId={me?.user.id}
+                    onUpdate={(reactions) => setMessages((list) => list.map((x) => x.id === m.id ? { ...x, reactions } : x))} />
+                )}
               </div>
               <button className="iconbtn gmsg__more" aria-label="Opciones del mensaje" onClick={() => setMenuFor(menuFor === m.id ? null : m.id)}>
                 <DotsIcon />
               </button>
               {menuFor === m.id && (
                 <div className="menu" role="menu">
-                  {m.status === "published" && <ReactionPicker current={myReaction(m.reactions ?? [], me?.user.id)} onPick={(k) => react(m, k)} />}
                   {m.status === "published" && <button role="menuitem" onClick={() => startReply(m)}>Responder</button>}
                   {mine ? (
                     <button role="menuitem" onClick={() => remove(m)}>Borrar mensaje</button>

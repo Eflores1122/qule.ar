@@ -89,14 +89,14 @@ toqueRoutes.post("/toques/seen", async (c) => {
 // ---------- Reacciones a mensajes ----------
 
 /**
- * Poner, cambiar o sacar mi reacción a un mensaje. kind = null la saca; si mandás la misma que ya tenías, también.
+ * Poner, cambiar o sacar mi reacción. Con mode "set", repetir el pedido conserva el estado.
  * A quienes están en la charla les llega el resumen actualizado en vivo.
  */
 toqueRoutes.put("/reactions/:scope{dm|group}/:messageId", async (c) => {
   const me = c.get("user");
   const scope = c.req.param("scope") as "dm" | "group";
   const messageId = c.req.param("messageId");
-  const r = z.object({ kind: kindInput.nullable() }).safeParse(await c.req.json().catch(() => ({})));
+  const r = z.object({ kind: kindInput.nullable(), mode: z.literal("set").optional() }).safeParse(await c.req.json().catch(() => ({})));
   if (!r.success) throw new HTTPException(400, { message: "Reacción inválida" });
 
   // Que el mensaje exista y que yo esté en esa charla
@@ -119,10 +119,11 @@ toqueRoutes.put("/reactions/:scope{dm|group}/:messageId", async (c) => {
     deliver = (p) => emitToGroup(m.groupId, me.id, "reaction", p);
   }
 
-  const [current] = await db.select().from(reaction).where(and(eq(reaction.messageId, messageId), eq(reaction.userId, me.id)));
-  const kind = r.data.kind;
+  const own = and(eq(reaction.messageId, messageId), eq(reaction.userId, me.id));
+  const { kind, mode } = r.data;
+  const [current] = kind && !mode ? await db.select().from(reaction).where(own) : [];
   if (!kind || current?.kind === kind) {
-    await db.delete(reaction).where(and(eq(reaction.messageId, messageId), eq(reaction.userId, me.id)));
+    await db.delete(reaction).where(own);
   } else {
     await db.insert(reaction).values({ messageId, scope, userId: me.id, kind })
       .onConflictDoUpdate({ target: [reaction.messageId, reaction.userId], set: { kind, createdAt: new Date() } });

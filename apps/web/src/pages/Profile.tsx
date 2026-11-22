@@ -76,17 +76,34 @@ export function ProfilePage() {
   const [toqueMsg, setToqueMsg] = useState("");
 
   useEffect(() => {
+    const request = new AbortController();
     setP(null);
     setMissing(false);
     setPhotoIdx(0);
+    setViewing(null);
     setInviteBusy(false);
     setInviteMessage("");
-    api<PublicProfile>(`/users/${id}`).then((x) => {
+    api<PublicProfile>(`/users/${id}`, { signal: request.signal }).then((x) => {
+      if (request.signal.aborted) return;
       setP(x);
       if (params.get("album") === "1" && x.privateAlbum?.items?.length) setViewing(0);
-    }).catch(() => setMissing(true));
+    }).catch(() => { if (!request.signal.aborted) setMissing(true); });
+    return () => request.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
+
+  const otherProfileId = p?.id === id && !p.isMe ? id : null;
+  useEffect(() => {
+    if (!otherProfileId) return;
+    function register() {
+      if (document.visibilityState !== "visible") return;
+      document.removeEventListener("visibilitychange", register);
+      api(`/users/${otherProfileId}/view`, { method: "POST" }).catch(() => {});
+    }
+    document.addEventListener("visibilitychange", register);
+    register();
+    return () => document.removeEventListener("visibilitychange", register);
+  }, [otherProfileId]);
 
   function closeViewer() {
     setViewing(null);

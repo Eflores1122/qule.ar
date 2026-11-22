@@ -77,8 +77,8 @@ test("selección regional de Gente", async (t) => {
     FROM "user" WHERE id LIKE 'remoto-%'
   `);
 
-  async function load(offset = 0) {
-    const res = await app.request(`${origin}/api/nearby?offset=${offset}`, { headers: { cookie } });
+  async function load(query = "") {
+    const res = await app.request(`${origin}/api/nearby?${query}`, { headers: { cookie } });
     assert.equal(res.status, 200);
     return res.json() as Promise<{ hasMore: boolean; people: Array<{ id: string; distance: string | null }> }>;
   }
@@ -90,12 +90,22 @@ test("selección regional de Gente", async (t) => {
     assert.ok(people.some(({ id }) => id.startsWith("remoto-")));
   });
 
+  await t.test("limita por el tramo visible y permite ordenar por actividad", async () => {
+    const { people } = await load("proximity=5");
+    assert.deepEqual(people.map(({ id }) => id), ["local-mx"]);
+    assert.equal((await load("order=active")).people[0]?.id, "local-private");
+    const invalid = await app.request(`${origin}/api/nearby?proximity=6`, { headers: { cookie } });
+    assert.equal(invalid.status, 400);
+  });
+
   await t.test("con la distancia oculta, la actividad reciente guía la selección", async () => {
     await db.update(schema.profile).set({ showDistance: false }).where(eq(schema.profile.userId, user.id));
     const { people } = await load();
     assert.equal(people[0]?.id, "local-private");
     assert.ok(people.every(({ distance }) => distance === null));
     assert.ok(!people.some(({ id }) => id === "local-mx"));
+    const privateFilter = await app.request(`${origin}/api/nearby?proximity=5`, { headers: { cookie } });
+    assert.equal(privateFilter.status, 400);
   });
 
   await t.test("la ventana regional admite perfiles al otro lado del antimeridiano", async () => {
@@ -105,10 +115,11 @@ test("selección regional de Gente", async (t) => {
     const { people } = await load();
     assert.equal(people[0]?.id, "local-pacific");
     assert.ok(people[0]?.distance);
+    assert.deepEqual((await load("proximity=50")).people.map(({ id }) => id), ["local-pacific"]);
   });
 
   await t.test("la paginación llega al final del cupo de selección", async () => {
-    const { people, hasMore } = await load(2940);
+    const { people, hasMore } = await load("offset=2940");
     assert.equal(people.length, 60);
     assert.equal(hasMore, false);
   });

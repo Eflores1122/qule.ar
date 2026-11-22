@@ -223,6 +223,7 @@ function Shell() {
 
   // En una conversación abierta, la barra de abajo se esconde para dejar lugar al teclado
   const inThread = /^\/mensajes\/.+/.test(loc.pathname);
+  const inGroupChat = /^\/grupos\/[^/]+\/?$/.test(loc.pathname);
 
   return (
     <DiscreetScreenContext.Provider value={openDiscreet}>
@@ -231,7 +232,7 @@ function Shell() {
           <Outlet />
         </main>
         {!inThread && <TermsBanner />}
-        {!inThread && <NotifyBanner />}
+        {!inThread && !inGroupChat && <NotifyBanner />}
         {toast && (
           <div className="toast" role="status" key={toast.id}>
             {toast.to ? <NavLink to={toast.to} onClick={() => setToast(null)}>{toast.text} →</NavLink> : <span>{toast.text}</span>}

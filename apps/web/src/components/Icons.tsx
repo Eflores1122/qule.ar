@@ -27,6 +27,9 @@ export const ClockIcon = () => (
 export const DotsIcon = () => (
   <svg {...base}><circle cx="5" cy="12" r="1" /><circle cx="12" cy="12" r="1" /><circle cx="19" cy="12" r="1" /></svg>
 );
+export const ReactionAddIcon = () => (
+  <svg {...base} width={17} height={17}><path d="M20 13a8.5 8.5 0 1 1-8.5-9.5M18 3v6m-3-3h6M8.5 13.5a3.5 3.5 0 0 0 5.5 0" /><path d="M8.5 9.5h.01m5 .01h.01" /></svg>
+);
 export const GridIcon = () => (
   <svg {...base}><rect x="3" y="3" width="7.5" height="7.5" rx="2" /><rect x="13.5" y="3" width="7.5" height="7.5" rx="2" /><rect x="3" y="13.5" width="7.5" height="7.5" rx="2" /><rect x="13.5" y="13.5" width="7.5" height="7.5" rx="2" /></svg>
 );

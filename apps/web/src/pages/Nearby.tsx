@@ -6,6 +6,7 @@ import { useMe } from "../App";
 import { FilterIcon, PinIcon, StarIcon } from "../components/Icons";
 import { LOCATION_EVENT, shareLocation, type ShareResult } from "../location";
 import { BODY_TYPES, LOOKING_FOR, POSITIONS, RELATIONSHIP, TRIBES } from "../options";
+import { isProximityLimit, PROXIMITY_OPTIONS, type ProximityLimit } from "../../../../packages/geo/proximity";
 
 export type Filters = {
   ageMin?: number; ageMax?: number;
@@ -13,15 +14,21 @@ export type Filters = {
   weightMin?: number; weightMax?: number;
   bodyType: string[]; position: string[]; tribes: string[]; lookingFor: string[]; relationship: string[];
   online: boolean; withPhoto: boolean; favorites: boolean;
+  proximity?: ProximityLimit;
+  order: "nearby" | "active";
 };
 
-const EMPTY: Filters = { bodyType: [], position: [], tribes: [], lookingFor: [], relationship: [], online: false, withPhoto: false, favorites: false };
+const EMPTY: Filters = { bodyType: [], position: [], tribes: [], lookingFor: [], relationship: [], online: false, withPhoto: false, favorites: false, order: "nearby" };
 const STORE_KEY = "mortero:filtros";
 
-function loadFilters(): Filters {
+function loadFilters(canUseDistance: boolean): Filters {
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    return raw ? { ...EMPTY, ...JSON.parse(raw) } : EMPTY;
+    if (!raw) return EMPTY;
+    const filters: Filters = { ...EMPTY, ...JSON.parse(raw) };
+    if (!canUseDistance || !isProximityLimit(filters.proximity ?? 0)) delete filters.proximity;
+    if (filters.order !== "active") filters.order = "nearby";
+    return filters;
   } catch {
     return EMPTY;
   }
@@ -46,6 +53,8 @@ function toQuery(f: Filters, offset: number) {
   if (f.online) q.set("online", "1");
   if (f.withPhoto) q.set("withPhoto", "1");
   if (f.favorites) q.set("favorites", "1");
+  if (f.proximity) q.set("proximity", String(f.proximity));
+  if (f.order === "active") q.set("order", f.order);
   if (offset) q.set("offset", String(offset));
   return q.toString();
 }
@@ -59,6 +68,8 @@ export function countFilters(f: Filters) {
   if (f.online) n++;
   if (f.withPhoto) n++;
   if (f.favorites) n++;
+  if (f.proximity) n++;
+  if (f.order === "active") n++;
   return n;
 }
 
@@ -68,7 +79,8 @@ type LocationFeedback = { error: boolean; text: string };
 
 export function Nearby() {
   const { me, reload } = useMe();
-  const [filters, setFilters] = useState<Filters>(loadFilters);
+  const canUseDistance = Boolean(me?.profile?.hasLocation && me.profile.showDistance);
+  const [filters, setFilters] = useState<Filters>(() => loadFilters(canUseDistance));
   const [people, setPeople] = useState<NearbyPerson[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [status, setStatus] = useState<Status>("loading");
@@ -148,6 +160,7 @@ export function Nearby() {
   function changeDistance(showDistance: boolean) {
     return applyLocationChange(async () => {
       await api("/me/privacy", { method: "PUT", json: { showDistance } });
+      if (!showDistance) clearProximity();
       await Promise.all([reload(), load(filtersRef.current)]);
       return { error: false, text: showDistance ? "Volviste a mostrar tu distancia." : "Ocultaste tu distancia." };
     });
@@ -160,6 +173,7 @@ export function Nearby() {
       setLoc("none");
       setShowLocation(false);
       setLocationUpdatedAt(null);
+      clearProximity();
       await Promise.all([reload(), load(filtersRef.current)]);
       return { error: false, text: "Borraste tu ubicación." };
     });
@@ -175,10 +189,18 @@ export function Nearby() {
   }, []);
 
   function applyFilters(f: Filters) {
+    filtersRef.current = f;
     setFilters(f);
     saveFilters(f);
     setShowFilters(false);
     load(f);
+  }
+
+  function clearProximity() {
+    const f = { ...filtersRef.current, proximity: undefined };
+    filtersRef.current = f;
+    setFilters(f);
+    saveFilters(f);
   }
 
   const active = countFilters(filters);
@@ -211,6 +233,12 @@ export function Nearby() {
 
       <InstallBanner />
       <p className="page-note small country-safety__link"><Link to="/seguridad-por-pais">Avisos de seguridad por país</Link></p>
+      {status === "ready" && filters.proximity && (
+        <div className="page-note">
+          <button className="chip chip--on" onClick={() => applyFilters({ ...filters, proximity: undefined })}
+            aria-label={`Quitar filtro de ${filters.proximity} km`}>Hasta {filters.proximity} km aprox. ×</button>
+        </div>
+      )}
 
       {showLocation && loc === "ok" && me?.profile && (
         <section className="nearby-location" id="nearby-location" aria-labelledby="nearby-location-title">
@@ -300,7 +328,7 @@ export function Nearby() {
         </>
       )}
 
-      {showFilters && <FilterSheet initial={filters} onApply={applyFilters} onClose={() => setShowFilters(false)} />}
+      {showFilters && <FilterSheet initial={filters} canUseDistance={canUseDistance} onApply={applyFilters} onClose={() => setShowFilters(false)} />}
     </div>
   );
 }
@@ -340,7 +368,9 @@ function Chips({ label, options, value, onChange }: { label: string; options: st
   );
 }
 
-function FilterSheet({ initial, onApply, onClose }: { initial: Filters; onApply: (f: Filters) => void; onClose: () => void }) {
+function FilterSheet({ initial, canUseDistance, onApply, onClose }: {
+  initial: Filters; canUseDistance: boolean; onApply: (f: Filters) => void; onClose: () => void;
+}) {
   const [f, setF] = useState<Filters>(initial);
   const set = <K extends keyof Filters>(k: K, v: Filters[K]) => setF({ ...f, [k]: v });
 
@@ -352,6 +382,25 @@ function FilterSheet({ initial, onApply, onClose }: { initial: Filters; onApply:
           <button className="linkbtn" onClick={() => setF(EMPTY)}>Limpiar</button>
         </div>
         <div className="sheet__body form">
+          <label className="field">
+            <span>Distancia aproximada</span>
+            <select className="input" disabled={!canUseDistance} value={canUseDistance ? f.proximity ?? "" : ""}
+              onChange={(e) => {
+                const km = Number(e.target.value);
+                set("proximity", isProximityLimit(km) ? km : undefined);
+              }}>
+              <option value="">Cualquier distancia</option>
+              {PROXIMITY_OPTIONS.map((km) => <option key={km} value={km}>Hasta {km} km</option>)}
+            </select>
+            <small className="muted">{canUseDistance ? "Incluye a quienes muestran su distancia." : "Compartí tu zona y mostrá tu distancia para usar este filtro."}</small>
+          </label>
+          <label className="field">
+            <span>Ordenar por</span>
+            <select className="input" value={f.order} onChange={(e) => set("order", e.target.value === "active" ? "active" : "nearby")}>
+              <option value="nearby">Proximidad</option>
+              <option value="active">Actividad reciente</option>
+            </select>
+          </label>
           <label className="check">
             <input type="checkbox" checked={f.online} onChange={(e) => set("online", e.target.checked)} />
             <span>Solo en línea ahora</span>
@@ -376,7 +425,7 @@ function FilterSheet({ initial, onApply, onClose }: { initial: Filters; onApply:
         </div>
         <div className="row sheet__foot">
           <button className="btn" onClick={onClose}>Cancelar</button>
-          <button className="btn btn--primary" onClick={() => onApply(f)}>Aplicar</button>
+          <button className="btn btn--primary" onClick={() => onApply(canUseDistance ? f : { ...f, proximity: undefined })}>Aplicar</button>
         </div>
       </div>
     </div>

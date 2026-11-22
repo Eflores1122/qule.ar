@@ -3,7 +3,8 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db, schema } from "../db/index.js";
-import { boundingBox, distanceLabel, snapToCell, visibleKm } from "../geo.js";
+import { boundingBox, distanceBand, distanceLabel, snapToCell, visibleKm } from "../geo.js";
+import { isProximityLimit } from "../../../../packages/geo/proximity.js";
 import { ageFrom, blockedWith, thumbUrl, requireProfile, requireUser, type AppEnv } from "../lib.js";
 import { autoHiddenUsers } from "../moderation.js";
 import { isOnline } from "../realtime.js";
@@ -89,6 +90,8 @@ const filtersSchema = z.object({
   online: z.enum(["1"]).optional(),
   withPhoto: z.enum(["1"]).optional(),
   favorites: z.enum(["1"]).optional(),
+  proximity: z.coerce.number().refine(isProximityLimit).optional(),
+  order: z.enum(["nearby", "active"]).default("nearby"),
   offset: z.coerce.number().int().min(0).max(MAX_CANDIDATES).default(0),
 });
 
@@ -107,7 +110,12 @@ nearbyRoutes.get("/nearby", async (c) => {
   const me = c.get("profile")!;
   // Las distancias visibles dan prioridad a la zona. La grilla también incluye actividad de otras zonas.
   const meHasLoc = me.cellLat != null && me.cellLng != null;
-  const f = filtersSchema.parse(c.req.query());
+  const parsed = filtersSchema.safeParse(c.req.query());
+  if (!parsed.success) throw new HTTPException(400, { message: "Filtros inválidos" });
+  const f = parsed.data;
+  if (f.proximity && (!meHasLoc || !me.showDistance)) {
+    throw new HTTPException(400, { message: "Para filtrar por distancia, compartí tu zona y mostrá tu distancia." });
+  }
   const blocked = await blockedWith(u.id);
   // Ocultos por precaución: varios reportes urgentes sin revisar (ver moderation.ts)
   const hidden = await autoHiddenUsers();
@@ -115,10 +123,15 @@ nearbyRoutes.get("/nearby", async (c) => {
     (await db.select({ id: schema.favorite.favoriteId }).from(schema.favorite).where(eq(schema.favorite.userId, u.id))).map((r) => r.id),
   );
 
-  const discoverable = and(ne(profile.userId, u.id), eq(profile.incognito, false), isNull(profile.suspendedAt));
+  const excluded = [...new Set([...blocked, ...hidden])];
+  const discoverable = and(
+    ne(profile.userId, u.id), eq(profile.incognito, false), isNull(profile.suspendedAt),
+    excluded.length ? notInArray(profile.userId, excluded) : undefined,
+  );
   const order = [desc(profile.lastSeenAt), asc(profile.userId)] as const;
-  const localBox = me.showDistance && me.cellLat != null && me.cellLng != null
-    ? boundingBox(me.cellLat, me.cellLng, REGIONAL_KM)
+  const localBox = me.showDistance && me.cellLat != null && me.cellLng != null && (f.proximity || f.order === "nearby")
+    // Dejá margen para el redondeo del último tramo visible.
+    ? boundingBox(me.cellLat, me.cellLng, f.proximity ? f.proximity + 2.5 : REGIONAL_KM)
     : null;
   // Reservá parte de la grilla para los perfiles cercanos que sí eligen mostrar distancia.
   const regional = localBox
@@ -126,9 +139,9 @@ nearbyRoutes.get("/nearby", async (c) => {
       discoverable, eq(profile.showDistance, true),
       between(profile.cellLat, localBox.minLat, localBox.maxLat),
       longitudeWindow(localBox.minLng, localBox.maxLng),
-    )).orderBy(...order).limit(REGIONAL_LIMIT)
+    )).orderBy(...order).limit(f.proximity ? MAX_CANDIDATES : REGIONAL_LIMIT)
     : [];
-  const recent = await db
+  const recent = f.proximity ? [] : await db
     .select()
     .from(profile)
     .where(and(
@@ -146,13 +159,13 @@ nearbyRoutes.get("/nearby", async (c) => {
   const now = Date.now();
 
   const candidates = rows
-    .filter((p) => !blocked.has(p.userId) && !hidden.has(p.userId) && (!f.favorites || favs.has(p.userId)))
+    .filter((p) => !f.favorites || favs.has(p.userId))
     .map((p) => {
       const km = visibleKm(me, p);
       const on = isOnline(p.userId);
-      return { p, km, age: ageFrom(p.birthdate), online: on, recent: on || now - p.lastSeenAt.getTime() < RECENT_MS };
+      return { p, km, band: km == null ? null : distanceBand(km), age: ageFrom(p.birthdate), online: on, recent: on || now - p.lastSeenAt.getTime() < RECENT_MS };
     })
-    .filter(({ p, km, age, online }) =>
+    .filter(({ p, band, age, online }) =>
       inRange(age, f.ageMin, f.ageMax) &&
       inRange(p.heightCm, f.heightMin, f.heightMax) &&
       inRange(p.weightKg, f.weightMin, f.weightMax) &&
@@ -161,15 +174,15 @@ nearbyRoutes.get("/nearby", async (c) => {
       anyOf(f.relationship, p.relationship) &&
       overlap(f.tribes, p.tribes) &&
       overlap(f.lookingFor, p.lookingFor) &&
-      (!f.online || online),
+      (!f.online || online) &&
+      (!f.proximity || (band != null && band <= f.proximity)),
     );
 
-  // Primero la distancia (por celda; quien no tiene ubicación va al final); a igual distancia, quien está en línea va antes
-  const far = Number.POSITIVE_INFINITY;
-  candidates.sort((a, b) =>
-    (a.km ?? far) - (b.km ?? far) ||
-    Number(b.online) - Number(a.online) ||
-    b.p.lastSeenAt.getTime() - a.p.lastSeenAt.getTime());
+  const byActivity = (a: (typeof candidates)[number], b: (typeof candidates)[number]) =>
+    Number(b.online) - Number(a.online) || b.p.lastSeenAt.getTime() - a.p.lastSeenAt.getTime();
+  const noDistance = 102;
+  candidates.sort((a, b) => f.order === "active" ? byActivity(a, b)
+    : (a.band ?? noDistance) - (b.band ?? noDistance) || byActivity(a, b));
 
   // Foto principal pública de cada uno
   const ids = candidates.map((x) => x.p.userId);
