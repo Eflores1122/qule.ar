@@ -179,6 +179,8 @@ La app también manda encabezados de seguridad (CSP, anti-iframe, HSTS en https)
 
 ## 7. Actualizar
 
+Antes de desplegar cambios en la carga o edición de fotos, completá la [checklist de staging](STAGING.md) sobre la versión integrada y dejá los resultados y los pendientes en el PR.
+
 ```bash
 cd /opt/mortero/src && git pull
 docker build -t mortero:latest .
