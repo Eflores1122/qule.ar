@@ -215,17 +215,34 @@ groupRoutes.get("/groups", async (c) => {
   return c.json(rows.map(({ photoKey, ...r }) => ({ ...r, photo: thumbUrl(photoKey), memberCount: counts.get(r.id) ?? 0, pendingCount: pending.get(r.id) ?? 0 })));
 });
 
-/** Todos los grupos, para explorar y pedir ingreso. */
+/** Grupos por página en Explorar. */
+export const EXPLORE_PAGE = 60;
+
+/**
+ * Todos los grupos, para explorar y pedir ingreso: los que tienen más gente primero, de a páginas.
+ * Antes se traían los 200 más nuevos y recién ahí se ordenaban por miembros: cuando hubo más de 200 grupos,
+ * los más viejos (que son los más grandes) dejaron de aparecer.
+ * `offset` pide la página siguiente; `limit` (hasta 300) sirve para recargar de una vez lo que ya se ve.
+ */
 groupRoutes.get("/groups/all", async (c) => {
   const u = c.get("user");
   const q = (c.req.query("q") ?? "").trim().slice(0, 40);
+  const offset = Math.max(0, Math.min(10_000, Number(c.req.query("offset")) || 0));
+  const pageSize = Math.max(1, Math.min(300, Number(c.req.query("limit")) || EXPLORE_PAGE));
   const conds = [eq(group.isGeneral, false), isNull(group.removedAt)];
   if (q) conds.push(or(ilike(group.name, `%${q}%`), ilike(group.description, `%${q}%`))!);
+  // Cuenta con el índice de la clave de group_member (group_id, user_id)
+  const members = sql<number>`(select count(*)::int from ${groupMember} where ${groupMember.groupId} = ${group.id})`;
+  const page = await db.select({ g: group, n: members }).from(group).where(and(...conds))
+    .orderBy(desc(members), desc(group.createdAt), asc(group.id))
+    .limit(pageSize + 1)
+    .offset(offset);
+  const more = page.length > pageSize;
   const hiddenGroups = await autoHiddenGroups();
-  const rows = (await db.select().from(group).where(and(...conds)).orderBy(desc(group.createdAt)).limit(200))
-    .filter((g) => !hiddenGroups.has(g.id)); // ocultos por precaución: varios reportes urgentes sin revisar
+  const visible = page.slice(0, pageSize).filter((r) => !hiddenGroups.has(r.g.id)); // ocultos por precaución: varios reportes urgentes sin revisar
+  const rows = visible.map((r) => r.g);
+  const counts = new Map(visible.map((r) => [r.g.id, r.n]));
   const ids = rows.map((r) => r.id);
-  const counts = await memberCounts(ids);
   const mine = ids.length
     ? await db.select().from(groupMember).where(and(eq(groupMember.userId, u.id), inArray(groupMember.groupId, ids)))
     : [];
@@ -241,9 +258,7 @@ groupRoutes.get("/groups/all", async (c) => {
     pending: states.get(g.id)?.pending ?? false,
     cooldownUntil: states.get(g.id)?.cooldownUntil ?? null,
   }));
-  // Los más concurridos primero
-  list.sort((a, b) => b.memberCount - a.memberCount);
-  return c.json(list);
+  return c.json({ groups: list, nextOffset: more ? offset + pageSize : null });
 });
 
 // ---------- Crear, editar, borrar ----------
