@@ -426,7 +426,7 @@ groupRoutes.post("/groups/:id/requests/:rid/:decision{accept|reject}", async (c)
   const u = c.get("user");
   const { group: g } = await requireMod(c.req.param("id"), u.id);
   const accept = c.req.param("decision") === "accept";
-  const req = await db.transaction(async (tx) => {
+  const applicantId = await db.transaction(async (tx) => {
     await lockActiveGroup(tx, g.id);
     await lockModerator(tx, g.id, u.id);
     const now = new Date();
@@ -441,14 +441,13 @@ groupRoutes.post("/groups/:id/requests/:rid/:decision{accept|reject}", async (c)
       .returning({ userId: groupJoinRequest.userId });
     if (!resolved) throw new HTTPException(409, { message: "Esa solicitud ya fue resuelta" });
     if (accept) await addMember(tx, g.id, resolved.userId, u.id, now);
-    return resolved;
+    return resolved.userId;
   });
   if (accept) {
-    await notifyGroupJoin(g.id, req.userId);
-    emitToUser(req.userId, "group:accepted", { groupId: g.id, name: g.name });
-    pushTo(req.userId, { title: "Te aceptaron en un grupo", body: "Ya podés entrar al chat.", url: `/grupos/${g.id}`, tag: `acc-${g.id}`, kind: "solicitudes" }).catch(() => {});
+    await notifyGroupJoin(g.id, applicantId);
+    notifyRequestAccepted(g, applicantId);
   } else {
-    emitToUser(req.userId, "group:rejected", { groupId: g.id, name: g.name });
+    emitToUser(applicantId, "group:rejected", { groupId: g.id, name: g.name });
     await notifyAdmissionMods(g.id);
   }
   return c.json({ ok: true });
@@ -495,9 +494,14 @@ async function notifyGroupJoin(groupId: string, userId: string) {
   await notifyAdmissionMods(groupId);
 }
 
-async function notifyAdmissionMods(groupId: string) {
-  await notifyMods(groupId, "group:request", { groupId })
+function notifyAdmissionMods(groupId: string) {
+  return notifyMods(groupId, "group:request", { groupId })
     .catch((error) => console.error("Aviso de ingreso a moderación", { groupId, error }));
+}
+
+function notifyRequestAccepted(g: { id: string; name: string }, userId: string) {
+  emitToUser(userId, "group:accepted", { groupId: g.id, name: g.name });
+  pushTo(userId, { title: "Te aceptaron en un grupo", body: "Ya podés entrar al chat.", url: `/grupos/${g.id}`, tag: `acc-${g.id}`, kind: "solicitudes" }).catch(() => {});
 }
 
 type PendingAdmission = { kind: "invite" } | { kind: "request"; moderatorId: string };
@@ -596,8 +600,7 @@ groupRoutes.post("/groups/:id/invites", async (c) => {
   if (state === "requested") {
     // Ya había pedido entrar: invitarle es lo mismo que aceptarle
     await acceptPendingAdmission(g.id, target, { kind: "request", moderatorId: u.id });
-    emitToUser(target, "group:accepted", { groupId: g.id, name: g.name });
-    pushTo(target, { title: "Te aceptaron en un grupo", body: "Ya podés entrar al chat.", url: `/grupos/${g.id}`, tag: `acc-${g.id}`, kind: "solicitudes" }).catch(() => {});
+    notifyRequestAccepted(g, target);
     return c.json({ joined: true });
   }
 
