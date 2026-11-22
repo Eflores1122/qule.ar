@@ -7,7 +7,6 @@ import { db, schema } from "../db/index.js";
 import { authorsFor, blockedWith, isBlocked, newId, requireProfile, requireUser, type AppEnv } from "../lib.js";
 import { emitToUser } from "../realtime.js";
 import { pushTo } from "../push.js";
-import { APP_NAME } from "../brand.js";
 
 const { albumGrant, profileView, favorite, conversation, directMessage, profile } = schema;
 
@@ -168,7 +167,7 @@ premiumRoutes.put("/album/grants/:userId", async (c) => {
     };
     emitToUser(u.id, "dm:message", msg);
     emitToUser(target, "dm:message", msg);
-    pushTo(target, { title: APP_NAME, body: "Tenés un mensaje nuevo", url: `/mensajes/${conv.id}`, tag: `dm-${conv.id}` }).catch(() => {});
+    pushTo(target, { title: "Te llegó un mensaje", body: "Abrí el chat para leerlo.", url: `/mensajes/${conv.id}`, tag: `dm-${conv.id}`, kind: "mensajes" }).catch(() => {});
   }
   return c.json({ ok: true, expiresAt: expiresAt?.toISOString() ?? null, pending: !grant.acceptedAt });
 });

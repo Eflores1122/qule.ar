@@ -60,3 +60,25 @@ export const InfoIcon = () => (
 export const PlusIcon = () => (
   <svg {...base}><path d="M12 5v14M5 12h14" /></svg>
 );
+export const RefreshIcon = () => (
+  <svg {...base}><path d="M20 4v6h-6m6 0a8 8 0 1 0-.7 6" /></svg>
+);
+export const CheckIcon = () => (
+  <svg {...base}><path d="m5 12 4 4L19 6" /></svg>
+);
+export const EditIcon = () => (
+  <svg {...base}><path d="m14 6 4 4M4 20l4.5-1 11-11a2.8 2.8 0 0 0-4-4l-11 11L4 20Z" /></svg>
+);
+export const SettingsIcon = () => (
+  <svg {...base}><path d="M9.5 3h5l.7 2.4 2 .9 2.3-.8 2.5 4.3-1.7 1.8v2l1.7 1.8-2.5 4.3-2.3-.8-2 .9-.7 2.2h-5l-.7-2.2-2-.9-2.3.8L2 15.4l1.7-1.8v-2L2 9.8l2.5-4.3 2.3.8 2-.9L9.5 3Z" /><circle cx="12" cy="12.5" r="3" /></svg>
+);
+export const ChevronRightIcon = () => (
+  <svg {...base}><path d="m9 5 7 7-7 7" /></svg>
+);
+export const CloseIcon = () => (
+  <svg {...base} width={18} height={18}><path d="M6 6l12 12M18 6 6 18" /></svg>
+);
+/** Frases guardadas del chat: un globo de diálogo con renglones. */
+export const PhraseIcon = () => (
+  <svg {...base}><path d="M21 12a8 8 0 0 1-11.8 7L4 20.5l1.5-4.6A8 8 0 1 1 21 12z" /><path d="M9 10h6M9 13.5h4" /></svg>
+);

@@ -7,6 +7,9 @@ import { Avatar } from "../components/Avatar";
 import { BackIcon, ImageIcon, LockIcon, SendIcon, TimerIcon } from "../components/Icons";
 import { useSectionBack } from "../useSectionBack";
 import { DiscreetButton } from "../components/DiscreetScreen";
+import { ReportDialog } from "../components/ReportDialog";
+import { UNSEND_WINDOW_MS } from "../../../../packages/chat/unsend";
+import { SavedPhrasesButton, SavedPhrasesMenu } from "../features/phrases/SavedPhrases";
 
 export function Conversation() {
   const { id = "" } = useParams();
@@ -16,12 +19,16 @@ export function Conversation() {
   const [other, setOther] = useState<Author | null>(null);
   const [messages, setMessages] = useState<Dm[]>([]);
   const [text, setText] = useState("");
+  const [phrasesOpen, setPhrasesOpen] = useState(false);
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
   const [typing, setTyping] = useState(false);
   const [photoMenu, setPhotoMenu] = useState(false);
   const [msgMenu, setMsgMenu] = useState<string | null>(null);
-  const [viewer, setViewer] = useState<{ src: string; seconds: number } | null>(null);
+  const [viewer, setViewer] = useState<{ src: string; seconds: number; messageId: string } | null>(null);
+  const [reporting, setReporting] = useState<Dm | null>(null);
+  const [menuTime, setMenuTime] = useState(Date.now);
+  const deletedIds = useRef(new Set<string>());
   const listRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
   const fileRef = useRef<HTMLInputElement>(null);
@@ -31,6 +38,7 @@ export function Conversation() {
 
   useEffect(() => {
     let alive = true;
+    deletedIds.current.clear();
     const markRead = () =>
       api(`/conversations/${id}/read`, { method: "POST" })
         .then(() => window.dispatchEvent(new Event("mortero:read")))
@@ -38,14 +46,15 @@ export function Conversation() {
     api<{ other: Author }>(`/conversations/${id}`)
       .then((c) => alive && setOther(c.other))
       .catch(() => nav("/mensajes", { replace: true }));
-    api<{ messages: Dm[] }>(`/conversations/${id}/messages`).then((d) => {
+    const loadMessages = () => api<{ messages: Dm[] }>(`/conversations/${id}/messages`).then((d) => {
       if (!alive) return;
-      setMessages(d.messages);
+      setMessages(d.messages.filter((message) => !deletedIds.current.has(message.id)));
       markRead();
-    });
+    }).catch(() => { if (alive) setError("No pudimos actualizar el chat. Volvé a abrirlo para reintentar."); });
+    void loadMessages();
     const s = getSocket();
     const onMsg = (m: Dm) => {
-      if (m.conversationId !== id) return;
+      if (m.conversationId !== id || deletedIds.current.has(m.id)) return;
       setTyping(false);
       setMessages((list) => (list.some((x) => x.id === m.id) ? list : [...list, m]));
       if (m.senderId !== myId) markRead();
@@ -55,7 +64,10 @@ export function Conversation() {
       setMessages((list) => list.map((m) => (m.senderId === myId && !m.readAt ? { ...m, readAt: p.readAt } : m)));
     };
     const onDeleted = (p: { conversationId: string; id: string }) => {
-      if (p.conversationId === id) setMessages((list) => list.filter((m) => m.id !== p.id));
+      if (p.conversationId !== id) return;
+      deletedIds.current.add(p.id);
+      setMessages((list) => list.filter((m) => m.id !== p.id));
+      setViewer((current) => current?.messageId === p.id ? null : current);
     };
     const onOpened = (p: { conversationId: string; id: string }) => {
       if (p.conversationId === id) setMessages((list) => list.map((m) => (m.id === p.id ? { ...m, opened: true } : m)));
@@ -76,6 +88,7 @@ export function Conversation() {
     s.on("dm:deleted", onDeleted);
     s.on("dm:opened", onOpened);
     s.on("dm:typing", onTyping);
+    s.on("connect", loadMessages);
     return () => {
       alive = false;
       s.off("reaction", onReaction);
@@ -84,9 +97,18 @@ export function Conversation() {
       s.off("dm:deleted", onDeleted);
       s.off("dm:opened", onOpened);
       s.off("dm:typing", onTyping);
+      s.off("connect", loadMessages);
       clearTimeout(typingTimer.current);
     };
   }, [id, myId, nav]);
+
+  const menuMessage = messages.find((message) => message.id === msgMenu);
+  const deleteDeadline = menuMessage ? new Date(menuMessage.createdAt).getTime() + UNSEND_WINDOW_MS : 0;
+  useEffect(() => {
+    if (!deleteDeadline) return;
+    const timer = setTimeout(() => setMenuTime(Date.now()), Math.max(0, deleteDeadline - Date.now()));
+    return () => clearTimeout(timer);
+  }, [deleteDeadline]);
 
   useLayoutEffect(() => {
     const el = listRef.current;
@@ -151,7 +173,7 @@ export function Conversation() {
     try {
       const r = await api<{ photo: string; seconds: number }>(`/conversations/${id}/messages/${m.id}/open`, { method: "POST" });
       setMessages((list) => list.map((x) => (x.id === m.id ? { ...x, opened: true } : x)));
-      setViewer({ src: r.photo, seconds: r.seconds });
+      if (!deletedIds.current.has(m.id)) setViewer({ src: r.photo, seconds: r.seconds, messageId: m.id });
     } catch (err) {
       setError((err as Error).message);
       setMessages((list) => list.map((x) => (x.id === m.id ? { ...x, opened: true } : x)));
@@ -160,8 +182,14 @@ export function Conversation() {
 
   async function unsend(m: Dm) {
     setMsgMenu(null);
-    await api(`/conversations/${id}/messages/${m.id}`, { method: "DELETE" }).catch(() => {});
-    setMessages((list) => list.filter((x) => x.id !== m.id));
+    setError("");
+    try {
+      await api(`/conversations/${id}/messages/${m.id}`, { method: "DELETE" });
+      deletedIds.current.add(m.id);
+      setMessages((list) => list.filter((x) => x.id !== m.id));
+    } catch (err) {
+      setError((err as Error).message);
+    }
   }
 
   const lastMine = [...messages].reverse().find((m) => m.senderId === myId);
@@ -182,7 +210,7 @@ export function Conversation() {
         <DiscreetButton />
       </header>
 
-      <div className="chat__list chat__list--dm" ref={listRef} onScroll={onListScroll} onClick={() => setMsgMenu(null)}>
+      <div className="chat__list chat__list--dm" role="log" aria-label="Mensajes" ref={listRef} onScroll={onListScroll} onClick={() => setMsgMenu(null)}>
         {messages.map((m) => {
           const mine = m.senderId === myId;
           return (
@@ -216,19 +244,23 @@ export function Conversation() {
                 <MessageReactions scope="dm" messageId={m.id} reactions={m.reactions ?? []} myId={myId} mine={mine}
                   onUpdate={(reactions) => setMessages((list) => list.map((x) => x.id === m.id ? { ...x, reactions } : x))} />
               )}
-              {m.kind !== "album" && mine && (
+              {m.kind !== "album" && (
                 <>
                   <button
                     className="bubble__more"
                     aria-label="Opciones del mensaje"
                     aria-expanded={msgMenu === m.id}
-                    onClick={(e) => { e.stopPropagation(); setMsgMenu(msgMenu === m.id ? null : m.id); }}
+                    onClick={(e) => { e.stopPropagation(); setMenuTime(Date.now()); setMsgMenu(msgMenu === m.id ? null : m.id); }}
                   >
                     ⋯
                   </button>
                   {msgMenu === m.id && (
                     <div className={`menu menu--bubble ${mine ? "" : "menu--bubble-theirs"}`} role="menu" onClick={(e) => e.stopPropagation()}>
-                      <button role="menuitem" className="danger" onClick={() => unsend(m)}>Desenviar (se borra para los dos)</button>
+                      {mine ? (
+                        menuTime < deleteDeadline
+                          ? <button role="menuitem" className="danger" onClick={() => unsend(m)}>Borrar para ambos</button>
+                          : <span className="muted small">Pasó el plazo de 2 minutos.</span>
+                      ) : <button role="menuitem" onClick={() => { setMsgMenu(null); setReporting(m); }}>Reportar mensaje</button>}
                     </div>
                   )}
                 </>
@@ -251,10 +283,14 @@ export function Conversation() {
             </button>
           </div>
         )}
+        {phrasesOpen && (
+          <SavedPhrasesMenu text={text} onClose={() => setPhrasesOpen(false)} onPick={(p) => { onType(p); setPhrasesOpen(false); }} />
+        )}
         <div className="composer__row">
-          <button type="button" className="iconbtn" aria-label="Mandar foto" aria-expanded={photoMenu} disabled={sending} onClick={() => setPhotoMenu((v) => !v)}>
+          <button type="button" className="iconbtn" aria-label="Mandar foto" aria-expanded={photoMenu} disabled={sending} onClick={() => { setPhotoMenu((v) => !v); setPhrasesOpen(false); }}>
             <ImageIcon />
           </button>
+          <SavedPhrasesButton open={phrasesOpen} onToggle={() => { setPhrasesOpen((v) => !v); setPhotoMenu(false); }} />
           <input
             ref={fileRef}
             type="file"
@@ -268,6 +304,7 @@ export function Conversation() {
           />
           <textarea
             className="composer__input"
+            aria-label="Mensaje"
             rows={1}
             maxLength={2000}
             placeholder="Escribí un mensaje…"
@@ -285,6 +322,7 @@ export function Conversation() {
       </form>
 
       {viewer && <ExpiringViewer src={viewer.src} seconds={viewer.seconds} onClose={() => setViewer(null)} />}
+      {reporting && other && <ReportDialog userId={other.id} name={other.name} messageId={reporting.id} messageKind="dm" onClose={() => setReporting(null)} />}
     </div>
   );
 }

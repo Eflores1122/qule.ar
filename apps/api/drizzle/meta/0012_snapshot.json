@@ -1,5 +1,5 @@
 {
-  "id": "84dbc306-f1a4-40ac-81da-2833d4c4bf12",
+  "id": "c70526a2-1e9d-4022-b665-320b7a7acccd",
   "prevId": "ebecfa08-a975-48c4-a3ab-f17fd154e7e5",
   "version": "7",
   "dialect": "postgresql",
@@ -133,12 +133,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "accepted_at": {
-          "name": "accepted_at",
-          "type": "timestamp with time zone",
-          "primaryKey": false,
-          "notNull": false
-        },
         "created_at": {
           "name": "created_at",
           "type": "timestamp with time zone",
@@ -214,7 +208,23 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "block_blocked_idx": {
+          "name": "block_blocked_idx",
+          "columns": [
+            {
+              "expression": "blocked_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "block_blocker_id_user_id_fk": {
           "name": "block_blocker_id_user_id_fk",
@@ -312,6 +322,21 @@
             }
           ],
           "isUnique": true,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "conv_user_b_idx": {
+          "name": "conv_user_b_idx",
+          "columns": [
+            {
+              "expression": "user_b",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
           "concurrently": false,
           "method": "btree",
           "with": {}
@@ -431,6 +456,21 @@
             },
             {
               "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "dm_photo_key_idx": {
+          "name": "dm_photo_key_idx",
+          "columns": [
+            {
+              "expression": "photo_key",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
@@ -565,18 +605,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "community_country": {
-          "name": "community_country",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
-        "community_city": {
-          "name": "community_city",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "owner_id": {
           "name": "owner_id",
           "type": "text",
@@ -605,29 +633,7 @@
           "default": "now()"
         }
       },
-      "indexes": {
-        "group_community_idx": {
-          "name": "group_community_idx",
-          "columns": [
-            {
-              "expression": "community_country",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            },
-            {
-              "expression": "community_city",
-              "isExpression": false,
-              "asc": true,
-              "nulls": "last"
-            }
-          ],
-          "isUnique": false,
-          "concurrently": false,
-          "method": "btree",
-          "with": {}
-        }
-      },
+      "indexes": {},
       "foreignKeys": {
         "group_owner_id_user_id_fk": {
           "name": "group_owner_id_user_id_fk",
@@ -973,7 +979,23 @@
           "default": "now()"
         }
       },
-      "indexes": {},
+      "indexes": {
+        "group_member_user_idx": {
+          "name": "group_member_user_idx",
+          "columns": [
+            {
+              "expression": "user_id",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        }
+      },
       "foreignKeys": {
         "group_member_group_id_group_id_fk": {
           "name": "group_member_group_id_group_id_fk",
@@ -1235,6 +1257,36 @@
             },
             {
               "expression": "position",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "photo_key_idx": {
+          "name": "photo_key_idx",
+          "columns": [
+            {
+              "expression": "key",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            }
+          ],
+          "isUnique": false,
+          "concurrently": false,
+          "method": "btree",
+          "with": {}
+        },
+        "photo_poster_key_idx": {
+          "name": "photo_poster_key_idx",
+          "columns": [
+            {
+              "expression": "poster_key",
               "isExpression": false,
               "asc": true,
               "nulls": "last"

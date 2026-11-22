@@ -1,6 +1,8 @@
 import {
   pgTable, text, timestamp, boolean, integer, date, jsonb, uniqueIndex, index, primaryKey, doublePrecision,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
+import { encryptedText } from "../crypt.js";
 
 // ---------- Better Auth (no cambiar nombres de campos) ----------
 
@@ -14,6 +16,12 @@ export const user = pgTable("user", {
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
+// Persiste al borrar la cuenta. Guarda una huella con clave y el ID usado para levantar la medida.
+export const restrictedEmail = pgTable("restricted_email", {
+  fingerprint: text("fingerprint").primaryKey(),
+  subjectId: text("subject_id").notNull(),
+}, (t) => [index("restricted_email_subject_idx").on(t.subjectId)]);
+
 export const session = pgTable("session", {
   id: text("id").primaryKey(),
   expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
@@ -23,7 +31,7 @@ export const session = pgTable("session", {
   ipAddress: text("ip_address"),
   userAgent: text("user_agent"),
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
-});
+}, (t) => [index("session_user_idx").on(t.userId)]);
 
 export const account = pgTable("account", {
   id: text("id").primaryKey(),
@@ -39,7 +47,7 @@ export const account = pgTable("account", {
   password: text("password"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-});
+}, (t) => [index("account_user_idx").on(t.userId)]);
 
 export const verification = pgTable("verification", {
   id: text("id").primaryKey(),
@@ -65,8 +73,12 @@ export const profile = pgTable("profile", {
   lookingFor: jsonb("looking_for").$type<string[]>().notNull().default([]),
   relationship: text("relationship"),
   pronouns: text("pronouns"),
-  hivStatus: text("hiv_status"),
-  lastTested: date("last_tested"),
+  gender: encryptedText("gender"),
+  orientation: encryptedText("orientation"),
+  showIdentity: boolean("show_identity").notNull().default(false),
+  // Datos de salud (sensibles, Ley 25.326 art. 2 y 7): se guardan cifrados con DATA_KEY. Ver src/crypt.ts
+  hivStatus: encryptedText("hiv_status"),
+  lastTested: encryptedText("last_tested"),
   // Ubicación: SOLO se guarda el centro de una celda de ~500 m, nunca la posición exacta
   cellLat: doublePrecision("cell_lat"),
   cellLng: doublePrecision("cell_lng"),
@@ -74,6 +86,8 @@ export const profile = pgTable("profile", {
   showDistance: boolean("show_distance").notNull().default(true),
   // Incógnito: no aparecés en la grilla, no se ve si estás en línea y tus visitas no quedan registradas
   incognito: boolean("incognito").notNull().default(false),
+  // Qué avisos quiere recibir. Lo que no está guardado cuenta como "sí" (ver NOTIFY_KINDS en push.ts).
+  notifyPrefs: jsonb("notify_prefs").$type<Partial<Record<string, boolean>>>().notNull().default({}),
   // Moderación: una cuenta suspendida no puede usar la app y no aparece en ningún lado
   suspendedAt: timestamp("suspended_at", { withTimezone: true }),
   suspendReason: text("suspend_reason"),
@@ -83,7 +97,11 @@ export const profile = pgTable("profile", {
   lastSeenAt: timestamp("last_seen_at", { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [index("profile_cell_idx").on(t.cellLat, t.cellLng)]);
+}, (t) => [
+  index("profile_cell_idx").on(t.cellLat, t.cellLng),
+  // La grilla de Cerca: solo quienes se muestran, de la última vez vista hacia atrás (ver routes/nearby.ts)
+  index("profile_grid_idx").on(t.lastSeenAt.desc()).where(sql`${t.incognito} = false and ${t.suspendedAt} is null`),
+]);
 
 export const photo = pgTable("photo", {
   id: text("id").primaryKey(),
@@ -97,7 +115,12 @@ export const photo = pgTable("photo", {
   posterKey: text("poster_key"),
   seconds: integer("seconds"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [index("photo_user_idx").on(t.userId, t.position)]);
+}, (t) => [
+  index("photo_user_idx").on(t.userId, t.position),
+  // /files/:key busca la foto por archivo en cada imagen que se muestra
+  index("photo_key_idx").on(t.key),
+  index("photo_poster_key_idx").on(t.posterKey),
+]);
 
 /** A quién le compartiste tu álbum privado. Se puede revocar en cualquier momento. */
 export const albumGrant = pgTable("album_grant", {
@@ -107,7 +130,7 @@ export const albumGrant = pgTable("album_grant", {
   expiresAt: timestamp("expires_at", { withTimezone: true }),
   acceptedAt: timestamp("accepted_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [primaryKey({ columns: [t.ownerId, t.granteeId] })]);
+}, (t) => [primaryKey({ columns: [t.ownerId, t.granteeId] }), index("album_grant_grantee_idx").on(t.granteeId)]);
 
 /** Quién vio tu perfil (una fila por persona, con la última visita). */
 export const profileView = pgTable("profile_view", {
@@ -120,7 +143,7 @@ export const favorite = pgTable("favorite", {
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   favoriteId: text("favorite_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [primaryKey({ columns: [t.userId, t.favoriteId] })]);
+}, (t) => [primaryKey({ columns: [t.userId, t.favoriteId] }), index("favorite_favorite_idx").on(t.favoriteId)]);
 
 // ---------- Seguridad ----------
 
@@ -128,7 +151,7 @@ export const block = pgTable("block", {
   blockerId: text("blocker_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   blockedId: text("blocked_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [primaryKey({ columns: [t.blockerId, t.blockedId] })]);
+}, (t) => [primaryKey({ columns: [t.blockerId, t.blockedId] }), index("block_blocked_idx").on(t.blockedId)]);
 
 export const report = pgTable("report", {
   id: text("id").primaryKey(),
@@ -138,18 +161,20 @@ export const report = pgTable("report", {
   targetUserId: text("target_user_id").references(() => user.id, { onDelete: "set null" }),
   messageId: text("message_id"),
   messageKind: text("message_kind"), // "group" | "dm"
+  // Reporte de un grupo (por su nombre, su descripción o lo que pasa adentro). Si el grupo se purga, queda la copia.
+  groupId: text("group_id").references(() => group.id, { onDelete: "set null" }),
   // Copia al momento del reporte: el nombre visible, el texto del mensaje y los archivos (la foto del mensaje
   // o, si se reporta un perfil por algo urgente, sus fotos públicas). Esos archivos no se borran mientras
   // el reporte esté abierto o haya terminado en una medida; si se descarta, se liberan.
-  targetName: text("target_name"),
-  messageBody: text("message_body"),
+  targetName: encryptedText("target_name"),
+  messageBody: encryptedText("message_body"),
   evidenceKeys: jsonb("evidence_keys").$type<string[]>().notNull().default([]),
   reason: text("reason").notNull(),
-  details: text("details"),
+  details: encryptedText("details"),
   status: text("status").notNull().default("open"), // open | dismissed | actioned
   resolvedBy: text("resolved_by").references(() => user.id, { onDelete: "set null" }),
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),
-  resolution: text("resolution"),
+  resolution: encryptedText("resolution"),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [index("report_status_idx").on(t.status, t.createdAt)]);
 
@@ -191,10 +216,18 @@ export const group = pgTable("group", {
   description: text("description"),
   communityCountry: text("community_country").$type<"AR" | "MX">(),
   communityCity: text("community_city"),
+  communityMunicipality: text("community_municipality"),
+  topic: text("topic"),
   ownerId: text("owner_id").references(() => user.id, { onDelete: "set null" }),
   isGeneral: boolean("is_general").notNull().default(false),
+  // Foto del grupo (la pone el dueño). El general no tiene: muestra el logo de la app.
+  photoKey: text("photo_key"),
   spamRules: jsonb("spam_rules").$type<SpamRules>().notNull().default(DEFAULT_SPAM_RULES),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  // Dado de baja (por moderación, o por su dueño si tenía reportes): desaparece para todo el mundo pero queda
+  // guardado 90 días como prueba (ver moderation.ts y docs/MODERACION.md). null = activo.
+  removedAt: timestamp("removed_at", { withTimezone: true }),
+  removedReason: text("removed_reason"),
 }, (t) => [index("group_community_idx").on(t.communityCountry, t.communityCity)]);
 
 export const groupMember = pgTable("group_member", {
@@ -204,7 +237,7 @@ export const groupMember = pgTable("group_member", {
   // Silenciado: no llegan avisos de mensajes nuevos (las respuestas a tus mensajes sí)
   muted: boolean("muted").notNull().default(false),
   joinedAt: timestamp("joined_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [primaryKey({ columns: [t.groupId, t.userId] })]);
+}, (t) => [primaryKey({ columns: [t.groupId, t.userId] }), index("group_member_user_idx").on(t.userId)]);
 
 /**
  * Solicitudes de ingreso. Nadie puede meter a otra persona en un grupo: se entra pidiendo o aceptando una invitación (group_invite).
@@ -222,6 +255,7 @@ export const groupJoinRequest = pgTable("group_join_request", {
 }, (t) => [
   index("gjr_group_status_idx").on(t.groupId, t.status),
   index("gjr_user_idx").on(t.userId, t.groupId),
+  index("gjr_resolved_by_idx").on(t.resolvedBy),
 ]);
 
 /**
@@ -255,6 +289,8 @@ export const groupMessage = pgTable("group_message", {
 }, (t) => [
   index("gm_group_sched_idx").on(t.groupId, t.status, t.scheduledAt),
   index("gm_user_idx").on(t.groupId, t.userId, t.scheduledAt),
+  // Al borrar una cuenta se borran sus mensajes: sin esto había que recorrer la tabla entera
+  index("gm_author_idx").on(t.userId),
 ]);
 
 // ---------- Mensajes privados ----------
@@ -265,21 +301,27 @@ export const conversation = pgTable("conversation", {
   userB: text("user_b").notNull().references(() => user.id, { onDelete: "cascade" }),
   lastMessageAt: timestamp("last_message_at", { withTimezone: true }).notNull().defaultNow(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [uniqueIndex("conv_pair_idx").on(t.userA, t.userB)]);
+}, (t) => [uniqueIndex("conv_pair_idx").on(t.userA, t.userB), index("conv_user_b_idx").on(t.userB)]);
 
 export const directMessage = pgTable("direct_message", {
   id: text("id").primaryKey(),
   conversationId: text("conversation_id").notNull().references(() => conversation.id, { onDelete: "cascade" }),
   senderId: text("sender_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   kind: text("kind").notNull().default("text"), // text | photo | album
-  body: text("body"),
+  body: encryptedText("body"),
   photoKey: text("photo_key"),
   // Foto temporal: se ve una sola vez y después se borra del servidor
   expiring: boolean("expiring").notNull().default(false),
   openedAt: timestamp("opened_at", { withTimezone: true }),
   readAt: timestamp("read_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [index("dm_conv_idx").on(t.conversationId, t.createdAt)]);
+}, (t) => [
+  index("dm_conv_idx").on(t.conversationId, t.createdAt),
+  // /files/:key busca si el archivo es foto de un mensaje privado
+  index("dm_photo_key_idx").on(t.photoKey),
+  // Al borrar una cuenta se borran sus mensajes: sin esto había que recorrer la tabla entera
+  index("dm_sender_idx").on(t.senderId),
+]);
 
 // ---------- Toques y reacciones ----------
 
@@ -303,4 +345,4 @@ export const reaction = pgTable("reaction", {
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   kind: text("kind").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [primaryKey({ columns: [t.messageId, t.userId] }), index("reaction_msg_idx").on(t.messageId)]);
+}, (t) => [primaryKey({ columns: [t.messageId, t.userId] }), index("reaction_msg_idx").on(t.messageId), index("reaction_user_idx").on(t.userId)]);

@@ -24,9 +24,20 @@ export const env = {
   ADMIN_USER_IDS: (process.env.ADMIN_USER_IDS ?? "").split(",").map((s) => s.trim()).filter(Boolean),
   // Carpeta con la web compilada (en producción el API la sirve)
   WEB_DIST: process.env.WEB_DIST ?? path.join(root, "apps/web/dist"),
+  // Clave que cifra los datos de salud en la base (32 bytes en base64). Obligatoria en producción; en desarrollo
+  // se crea sola en DATA_DIR. Si se pierde, esos datos no se recuperan: guardala también fuera del servidor.
+  DATA_KEY: process.env.DATA_KEY,
   // Encabezado del que sale la IP real de cada persona (límite de intentos y sesiones). Tiene que ser uno que el
   // proxy de adelante pise siempre: cf-connecting-ip con el túnel de Cloudflare, x-real-ip con el nginx de deploy/.
   CLIENT_IP_HEADER: (process.env.CLIENT_IP_HEADER ?? "cf-connecting-ip").toLowerCase(),
+  // Dónde se guardan fotos y videos: "disk" (por defecto, en DATA_DIR/uploads) o "s3" (Cloudflare R2 u otro
+  // compatible con S3). Con s3 hacen falta los cinco S3_*. Ver docs/DEPLOY.md, "Fotos en R2".
+  STORAGE: process.env.STORAGE === "s3" ? "s3" : "disk",
+  S3_ENDPOINT: process.env.S3_ENDPOINT, // R2: https://<cuenta>.r2.cloudflarestorage.com
+  S3_BUCKET: process.env.S3_BUCKET,
+  S3_REGION: process.env.S3_REGION ?? "auto", // R2 usa "auto"
+  S3_ACCESS_KEY_ID: process.env.S3_ACCESS_KEY_ID,
+  S3_SECRET_ACCESS_KEY: process.env.S3_SECRET_ACCESS_KEY,
 };
 
 if (process.env.NODE_ENV === "production" && !process.env.BETTER_AUTH_SECRET) {

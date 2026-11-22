@@ -5,11 +5,17 @@ import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { BackIcon, PlusIcon } from "../components/Icons";
 import { InvitePeopleSheet } from "../components/Invite";
-import { communityLabel, GroupCommunityFields } from "../components/GroupCommunity";
+import { communityLabel, GroupCommunityFields, GroupTopicSelect } from "../components/GroupCommunity";
+import { ReportDialog } from "../components/ReportDialog";
+import { slowModeText } from "../features/groups/groupRules";
+import { useTabData } from "../features/navigation/tabData";
+import { GroupPhotoSetting } from "../components/GroupPhoto";
+import { GroupAvatar } from "../components/GroupAvatar";
 
 export function GroupInfo() {
   const { id = "" } = useParams();
   const { me } = useMe();
+  const { refreshGroups } = useTabData();
   const nav = useNavigate();
   const [info, setInfo] = useState<Info | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
@@ -19,6 +25,7 @@ export function GroupInfo() {
   const [error, setError] = useState("");
   const [memberMenu, setMemberMenu] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<null | "leave" | "delete">(null);
+  const [reporting, setReporting] = useState(false);
 
   const isMod = info?.role === "owner" || info?.role === "moderator";
   const isOwner = info?.role === "owner";
@@ -82,12 +89,23 @@ export function GroupInfo() {
         <h1 className="topbar__title topbar__title--sm">{info.isGeneral ? "# " : ""}{info.name}</h1>
       </header>
 
+      <section className="section group-head">
+        <GroupAvatar name={info.name} photo={info.photo} general={info.isGeneral} size="big" />
+        {isOwner && !info.isGeneral && <GroupPhotoSetting groupId={id} photo={info.photo} onChange={(photo) => {
+          setInfo({ ...info, photo });
+          refreshGroups("refresh");
+        }} />}
+      </section>
+
       <section className="section">
-        {info.description && <p className="profile__about">{info.description}</p>}
+        <h2 className="section__title">Sobre el grupo</h2>
+        {info.description && <p className="profile__about group-description">{info.description}</p>}
         {info.community && <p className="muted small">{communityLabel(info.community)}</p>}
+        {info.topic && <p className="muted small">{info.topic}</p>}
         <p className="muted small hint">
           {info.memberCount} {info.memberCount === 1 ? "miembro" : "miembros"} · Tu rol: {ROLE_LABEL[info.role!]}
         </p>
+        <p className="muted small">{slowModeText(info.rules)}</p>
       </section>
 
       <section className="section">
@@ -207,7 +225,10 @@ export function GroupInfo() {
         </section>
       )}
 
-      {isOwner && !info.isGeneral && <GroupSettings info={info} onSaved={load} />}
+      {isOwner && !info.isGeneral && <GroupSettings info={info} onSaved={async () => {
+        refreshGroups("refresh");
+        await load();
+      }} />}
 
       {!info.isGeneral && (
         <section className="section">
@@ -217,7 +238,11 @@ export function GroupInfo() {
                 <p>¿Salir de {info.name}? Para volver vas a tener que pedir ingreso de nuevo.{isOwner && " Como sos el dueño, el grupo pasa a un moderador o al miembro más antiguo. Si no queda nadie, se cierra."}</p>
                 <div className="row">
                   <button className="btn" onClick={() => setConfirm(null)}>Cancelar</button>
-                  <button className="btn btn--danger" onClick={() => act(async () => { await api(`/groups/${id}/leave`, { method: "POST" }); nav("/grupos"); })}>Salir</button>
+                  <button className="btn btn--danger" onClick={() => act(async () => {
+                    await api(`/groups/${id}/leave`, { method: "POST" });
+                    refreshGroups("clear");
+                    nav("/grupos");
+                  })}>Salir</button>
                 </div>
               </div>
             ) : confirm === "delete" ? (
@@ -232,11 +257,14 @@ export function GroupInfo() {
               <>
                 <button className="btn" onClick={() => setConfirm("leave")}>Salir del grupo</button>
                 {isOwner && <button className="btn btn--ghost btn--dangertext" onClick={() => setConfirm("delete")}>Borrar grupo</button>}
+                <button type="button" className="btn btn--ghost btn--dangertext" onClick={() => setReporting(true)}>Reportar este grupo</button>
               </>
             )}
           </div>
         </section>
       )}
+
+      {reporting && <ReportDialog groupId={id} name={info.name} onClose={() => setReporting(false)} />}
 
       {info.isGeneral && (
         <section className="section">
@@ -251,6 +279,7 @@ function GroupSettings({ info, onSaved }: { info: Info; onSaved: () => void }) {
   const [name, setName] = useState(info.name);
   const [description, setDescription] = useState(info.description ?? "");
   const [community, setCommunity] = useState(info.community);
+  const [topic, setTopic] = useState(info.topic ?? "");
   const [rules, setRules] = useState<SpamRules>(info.rules);
   const [state, setState] = useState<"idle" | "saving" | "ok">("idle");
   const [error, setError] = useState("");
@@ -265,7 +294,7 @@ function GroupSettings({ info, onSaved }: { info: Info; onSaved: () => void }) {
     setState("saving");
     setError("");
     try {
-      await api(`/groups/${info.id}`, { method: "PATCH", json: { name, description: description || null, community, rules } });
+      await api(`/groups/${info.id}`, { method: "PATCH", json: { name, description: description || null, community, topic: topic || null, rules } });
       setState("ok");
       onSaved();
     } catch (err) {
@@ -287,6 +316,7 @@ function GroupSettings({ info, onSaved }: { info: Info; onSaved: () => void }) {
       </label>
 
       <GroupCommunityFields value={community} onChange={(updated) => { setCommunity(updated); setState("idle"); }} />
+      <GroupTopicSelect value={topic} onChange={(updated) => { setTopic(updated); setState("idle"); }} emptyLabel="Sin interés específico" />
 
       <h3 className="subhead">Antispam</h3>
       <p className="muted small">

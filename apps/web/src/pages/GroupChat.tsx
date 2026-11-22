@@ -4,10 +4,13 @@ import { api, getSocket, type GroupInfo, type GroupMessage, type ReactionEvent }
 import { MessageReactions } from "../components/Reactions";
 import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
+import { GroupAvatar } from "../components/GroupAvatar";
 import { BackIcon, ClockIcon, DotsIcon, InfoIcon, SendIcon } from "../components/Icons";
 import { JoinButton } from "../components/JoinButton";
 import { ReportDialog } from "../components/ReportDialog";
 import { communityLabel } from "../components/GroupCommunity";
+import { slowModeText } from "../features/groups/groupRules";
+import { SavedPhrasesButton, SavedPhrasesMenu } from "../features/phrases/SavedPhrases";
 
 const fmtTime = (iso: string) =>
   new Date(iso).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
@@ -27,6 +30,7 @@ export function GroupChat() {
   const [queued, setQueued] = useState<GroupMessage[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [text, setText] = useState("");
+  const [phrasesOpen, setPhrasesOpen] = useState(false);
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
@@ -60,6 +64,7 @@ export function GroupChat() {
     }
   }
   const [reporting, setReporting] = useState<GroupMessage | null>(null);
+  const [reportingGroupId, setReportingGroupId] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const listRef = useRef<HTMLDivElement>(null);
   const stickToBottom = useRef(true);
@@ -232,14 +237,10 @@ export function GroupChat() {
     setMessages((list) => list.filter((x) => x.id !== m.id));
   }
 
-  const windowSecs = info ? info.rules.burst * info.rules.intervalSeconds : 0;
-  const rulesText = info
-    ? `Modo lento · ${info.rules.burst} ${info.rules.burst === 1 ? "mensaje" : "mensajes"} cada ${windowSecs < 60 ? `${windowSecs} s` : `${Math.round((windowSecs / 60) * 10) / 10} min`}`
-    : "";
-
   if (!info) return <div className="chat" />;
+  const rulesText = slowModeText(info.rules);
 
-  // Vista previa para quien no es miembro: no ve los mensajes, solo puede pedir ingreso
+  // Vista previa para quien todavía no es miembro del grupo
   if (!isMember) {
     return (
       <div className="page">
@@ -248,14 +249,31 @@ export function GroupChat() {
           <h1 className="topbar__title topbar__title--sm">{info.name}</h1>
         </header>
         <div className="preview">
-          <span className="gcard__icon gcard__icon--big" aria-hidden>{info.name.charAt(0).toUpperCase()}</span>
+          <GroupAvatar name={info.name} photo={info.photo} general={info.isGeneral} size="big" />
           <h2>{info.name}</h2>
-          {info.description && <p className="muted">{info.description}</p>}
+          {info.description && <p className="muted group-description">{info.description}</p>}
           {info.community && <p className="muted small">{communityLabel(info.community)}</p>}
+          {info.topic && <p className="muted small">{info.topic}</p>}
           <p className="muted small">{info.memberCount} {info.memberCount === 1 ? "miembro" : "miembros"} · {rulesText}</p>
+          <div className="preview__request">
+            {info.pending && info.pendingMessage && (
+              <div className="preview__request-message">
+                <h3 className="small muted">Tu mensaje</h3>
+                <p className="group-description">{info.pendingMessage}</p>
+              </div>
+            )}
+            <JoinButton g={info} onChange={() => setInfoTick((t) => t + 1)} />
+          </div>
           <p className="small">Los mensajes de este grupo solo los ven sus miembros.</p>
-          <JoinButton g={info} onChange={() => setInfoTick((t) => t + 1)} />
+          {!info.isGeneral && (
+            <button type="button" className="btn btn--small btn--ghost btn--dangertext" onClick={() => setReportingGroupId(info.id)}>
+              Reportar este grupo
+            </button>
+          )}
         </div>
+        {reportingGroupId === id && (
+          <ReportDialog groupId={info.id} name={info.name} onClose={() => setReportingGroupId(null)} />
+        )}
       </div>
     );
   }
@@ -263,17 +281,18 @@ export function GroupChat() {
   return (
     <div className="chat">
       <header className="topbar">
+        <GroupAvatar name={info.name} photo={info.photo} general={info.isGeneral} size="sm" />
         <div className="topbar__grow">
-          <h1 className="topbar__title">{info.isGeneral ? "# " : ""}{info.name}</h1>
+          <h1 className="topbar__title topbar__title--sm"><Link to={`/grupos/${id}/info`}>{info.isGeneral ? "# " : ""}{info.name}</Link></h1>
           <p className="topbar__sub"><ClockIcon /> {rulesText}</p>
         </div>
-        <Link to={`/grupos/${id}/info`} className="iconbtn iconbtn--badge" aria-label={`Info del grupo${info.pendingCount ? `, ${info.pendingCount} solicitudes pendientes` : ""}`}>
-          <InfoIcon />
+        <Link to={`/grupos/${id}/info`} className="btn btn--small group-details-link" aria-label={`Ver detalles${info.pendingCount ? `, ${info.pendingCount} solicitudes pendientes` : ""}`}>
+          <InfoIcon /> Ver detalles
           {info.pendingCount > 0 && <b className="badge">{info.pendingCount}</b>}
         </Link>
       </header>
 
-      <div className="chat__list" ref={listRef} onScroll={onScroll}>
+      <div className="chat__list" role="log" aria-label="Mensajes del grupo" ref={listRef} onScroll={onScroll}>
         {hasMore && (
           <button className="btn btn--ghost btn--small chat__older" onClick={loadOlder}>Ver mensajes anteriores</button>
         )}
@@ -379,10 +398,15 @@ export function GroupChat() {
             <button type="button" className="iconbtn" aria-label="Cancelar respuesta" onClick={() => setReplyTo(null)}>✕</button>
           </div>
         )}
+        {phrasesOpen && (
+          <SavedPhrasesMenu text={text} onClose={() => setPhrasesOpen(false)} onPick={(p) => { setText(p); setPhrasesOpen(false); inputRef.current?.focus(); }} />
+        )}
         <div className="composer__row">
+          <SavedPhrasesButton open={phrasesOpen} onToggle={() => setPhrasesOpen((v) => !v)} />
           <textarea
             ref={inputRef}
             className="composer__input"
+            aria-label={`Mensaje para #${info?.name ?? "el grupo"}`}
             rows={1}
             maxLength={1000}
             placeholder={`Escribí en #${info?.name ?? ""}…`}

@@ -1,9 +1,22 @@
 import type { GroupCommunity } from "../api";
+import { GROUP_TOPICS } from "../options";
 
 const COUNTRIES = { AR: "Argentina", MX: "México" } as const;
 
 export function communityLabel(community: GroupCommunity) {
-  return `${community.city}, ${COUNTRIES[community.country]}`;
+  return [community.city, community.municipality, COUNTRIES[community.country]].filter(Boolean).join(", ");
+}
+
+export function GroupTopicSelect({ value, onChange, emptyLabel }: { value: string; onChange: (topic: string) => void; emptyLabel: string }) {
+  return (
+    <label className="field">
+      <span>Interés del grupo</span>
+      <select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
+        <option value="">{emptyLabel}</option>
+        {GROUP_TOPICS.map((topic) => <option key={topic}>{topic}</option>)}
+      </select>
+    </label>
+  );
 }
 
 export function GroupCountrySelect(
@@ -46,7 +59,14 @@ export function GroupCommunityFields(
           </label>
         )}
       </div>
-      {value && <p className="muted small">La ciudad aparece en el directorio de grupos.</p>}
+      {value && (
+        <label className="field">
+          <span>Municipio o localidad (opcional)</span>
+          <input className="input" value={value.municipality ?? ""} maxLength={60}
+            onChange={(e) => onChange({ ...value, municipality: e.target.value })} />
+        </label>
+      )}
+      {value && <p className="muted small">La ubicación del grupo aparece en el directorio.</p>}
     </>
   );
 }

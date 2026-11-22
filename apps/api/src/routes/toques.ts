@@ -9,7 +9,6 @@ import { authorsFor, blockedWith, isBlocked, newId, reactionsFor, requireProfile
 import { limit } from "../ratelimit.js";
 import { emitToGroup, emitToUser } from "../realtime.js";
 import { pushTo } from "../push.js";
-import { APP_NAME } from "../brand.js";
 
 const { toque, reaction, profile, directMessage, conversation, groupMessage, groupMember } = schema;
 
@@ -42,7 +41,7 @@ toqueRoutes.post("/users/:id/toques", async (c) => {
   const [p] = await db.select({ suspendedAt: profile.suspendedAt }).from(profile).where(eq(profile.userId, to));
   if (!p || p.suspendedAt) throw new HTTPException(404, { message: "Perfil no disponible" });
   if (await myRecentToque(me.id, to)) throw new HTTPException(429, { message: "Ya le mandaste un toque hace poco" });
-  limit(me.id, "toque");
+  await limit(me.id, "toque");
 
   const now = new Date();
   const id = newId();
@@ -50,7 +49,7 @@ toqueRoutes.post("/users/:id/toques", async (c) => {
   const [author] = (await authorsFor([me.id])).values();
   emitToUser(to, "toque", { id, kind: r.data.kind, from: author, createdAt: now.toISOString() });
   // Discreto, como los mensajes: no dice quién ni qué
-  pushTo(to, { title: APP_NAME, body: "Te mandaron un toque", url: "/toques", tag: "toques" }).catch(() => {});
+  pushTo(to, { title: "Te mandaron un toque", body: "Abrí Toques para verlo.", url: "/toques", tag: "toques", kind: "toques" }).catch(() => {});
   return c.json({ kind: r.data.kind, at: now.toISOString() });
 });
 

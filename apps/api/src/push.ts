@@ -5,7 +5,20 @@ import { generateVAPIDKeys, sendNotification, setVapidDetails } from "web-push";
 import { db, schema } from "./db/index.js";
 import { env } from "./env.js";
 
-const { pushSubscription } = schema;
+const { profile, pushSubscription } = schema;
+
+/**
+ * Tipos de aviso que cada persona puede apagar desde Yo → Notificaciones.
+ * Los de moderación y la notificación de prueba no tienen tipo: llegan siempre.
+ */
+export const NOTIFY_KINDS = ["mensajes", "toques", "respuestas", "grupos", "solicitudes"] as const;
+export type NotifyKind = (typeof NOTIFY_KINDS)[number];
+
+/** Si la persona quiere este tipo de aviso. Lo que no eligió cuenta como "sí". */
+export async function wantsNotice(userId: string, kind: NotifyKind): Promise<boolean> {
+  const [p] = await db.select({ prefs: profile.notifyPrefs }).from(profile).where(eq(profile.userId, userId));
+  return p?.prefs?.[kind] !== false;
+}
 
 /**
  * Claves VAPID: en producción vienen por variables de entorno.
@@ -36,14 +49,16 @@ if (pushEnabled) {
 }
 
 // always: mostrarla aunque la persona tenga la app abierta en esa pantalla (para la notificación de prueba)
-export type PushPayload = { title: string; body: string; url: string; tag?: string; always?: boolean };
+// kind: qué tipo de aviso es; si la persona lo apagó, no se manda. Sin kind se manda siempre.
+export type PushPayload = { title: string; body: string; url: string; tag?: string; always?: boolean; kind?: NotifyKind };
 
 /**
  * Manda una notificación a todos los dispositivos de alguien.
  * Los textos son discretos a propósito: aparecen en la pantalla bloqueada.
  */
-export async function pushTo(userId: string, payload: PushPayload): Promise<number> {
+export async function pushTo(userId: string, { kind, ...payload }: PushPayload): Promise<number> {
   if (!pushEnabled) return 0;
+  if (kind && !(await wantsNotice(userId, kind))) return 0;
   const subs = await db.select().from(pushSubscription).where(eq(pushSubscription.userId, userId));
   let sent = 0;
   await Promise.all(

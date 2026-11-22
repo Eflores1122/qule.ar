@@ -10,9 +10,10 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@mortero/brand": "*",
     "@electric-sql/pglite": "^0.5.16",
     "@hono/node-server": "^2.1.9",
+    "@mortero/brand": "*",
+    "@socket.io/cluster-adapter": "^0.3.0",
     "@types/nodemailer": "^8.0.2",
     "better-auth": "^1.7.26",
     "drizzle-orm": "^0.45.4",

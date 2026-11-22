@@ -2,7 +2,9 @@ import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router";
 import { api, type InvitableGroup, type InviteCandidate, type InviteCandidates, type InviteState, type MyInvite } from "../api";
 import { Avatar } from "./Avatar";
+import { GroupAvatar } from "./GroupAvatar";
 import { GroupIcon } from "./Icons";
+import { DialogFocus } from "./DialogFocus";
 
 /**
  * Botón de invitar según dónde está la persona en el grupo.
@@ -115,6 +117,7 @@ export function InvitePeopleSheet({ groupId, groupName, onClose, onChange }: {
   return (
     <div className="sheet-backdrop" onClick={onClose}>
       <div className="sheet sheet--list invite-sheet" role="dialog" aria-modal aria-labelledby="invite-title" onClick={(e) => e.stopPropagation()}>
+        <DialogFocus onClose={onClose} />
         <h2 id="invite-title">Invitar a {groupName}</h2>
         <input
           className="input"
@@ -224,6 +227,7 @@ export function InviteToGroups({ userId, name }: { userId: string; name: string 
       {open && (
         <div className="sheet-backdrop" onClick={() => setOpen(false)}>
           <div className="sheet sheet--list" role="dialog" aria-modal aria-labelledby="invite-groups-title" onClick={(e) => e.stopPropagation()}>
+            <DialogFocus onClose={() => setOpen(false)} />
             <h2 id="invite-groups-title">Invitar a {name}</h2>
             <p className="muted small">Estos son los grupos que moderás. {name} recibe la invitación y elige si entra.</p>
             {error && <p className="error" role="alert">{error}</p>}
@@ -231,7 +235,7 @@ export function InviteToGroups({ userId, name }: { userId: string; name: string 
               {groups.map((g) => (
                 <li key={g.id} className="member">
                   <span className="member__who">
-                    <span className="gcard__icon gcard__icon--sm" aria-hidden>{g.name.charAt(0).toUpperCase()}</span>
+                    <GroupAvatar name={g.name} photo={g.photo} size="sm" />
                     <b>{g.name}</b>
                   </span>
                   <InviteAction state={g.state} onInvite={() => invite(g)} />
@@ -276,7 +280,7 @@ export function MyInvites({ invites, onChange }: { invites: MyInvite[]; onChange
         {invites.map((inv) => (
           <li key={inv.id} className="req">
             <div className="req__who">
-              <span className="gcard__icon" aria-hidden>{inv.group.name.charAt(0).toUpperCase()}</span>
+              <GroupAvatar name={inv.group.name} photo={inv.group.photo} />
               <span>
                 <b>{inv.group.name}</b>
                 <span className="gcard__meta">

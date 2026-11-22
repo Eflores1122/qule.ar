@@ -2,13 +2,12 @@ import { and, eq, inArray, ne } from "drizzle-orm";
 import { db, schema } from "./db/index.js";
 import { blockedWith } from "./lib.js";
 import { pushTo } from "./push.js";
-import { APP_NAME } from "./brand.js";
+import { hit } from "./shared.js";
 
 const { groupMember, groupMessage, pushSubscription } = schema;
 
 /** Como mucho un aviso de "mensajes nuevos" por grupo y persona cada este tiempo, para no saturar. */
 const GROUP_PUSH_EVERY_MS = 10 * 60_000;
-const lastGroupPush = new Map<string, number>();
 
 /**
  * Avisa por push que hay un mensaje nuevo en un grupo (ya publicado, no en cola).
@@ -40,18 +39,17 @@ export async function notifyGroupMessage(msg: typeof groupMessage.$inferSelect) 
   }
 
   const url = `/grupos/${msg.groupId}`;
-  const now = Date.now();
   for (const m of members) {
     if (!subscribed.has(m.userId) || blocked.has(m.userId)) continue;
-    const key = `${m.userId}:${msg.groupId}`;
+    // Se cuenta para todos los procesos del API juntos (ver shared.ts)
+    const key = `grppush:${m.userId}:${msg.groupId}`;
     if (m.userId === repliedTo) {
-      lastGroupPush.set(key, now);
-      pushTo(m.userId, { title: APP_NAME, body: "Te respondieron en un grupo", url, tag: `grp-${msg.groupId}` }).catch(() => {});
+      await hit(key, 1, GROUP_PUSH_EVERY_MS, true);
+      pushTo(m.userId, { title: "Te respondieron en un grupo", body: "Abrí el grupo para ver la respuesta.", url, kind: "respuestas", tag: `grp-${msg.groupId}` }).catch(() => {});
       continue;
     }
     if (m.muted) continue;
-    if (now - (lastGroupPush.get(key) ?? 0) < GROUP_PUSH_EVERY_MS) continue;
-    lastGroupPush.set(key, now);
-    pushTo(m.userId, { title: APP_NAME, body: "Hay mensajes nuevos en un grupo", url, tag: `grp-${msg.groupId}` }).catch(() => {});
+    if (!(await hit(key, 1, GROUP_PUSH_EVERY_MS))) continue;
+    pushTo(m.userId, { title: "Mensajes nuevos en un grupo", body: "Abrí el grupo para leerlos.", url, kind: "grupos", tag: `grp-${msg.groupId}` }).catch(() => {});
   }
 }

@@ -98,6 +98,19 @@ test("selección regional de Gente", async (t) => {
     assert.equal(invalid.status, 400);
   });
 
+  await t.test("combina nombre, rol, intención e identidad compartida", async () => {
+    const target = eq(schema.profile.userId, "local-mx");
+    await db.update(schema.profile).set({
+      position: "Versátil activo", lookingFor: ["Sexo casual"], gender: "No binarie", orientation: "Bisexual", showIdentity: true,
+    }).where(target);
+    const query = new URLSearchParams({
+      q: "mexico perfil", position: "Versátil", lookingFor: "Sexo casual", gender: "No binarie", orientation: "Bisexual",
+    });
+    assert.deepEqual((await load(query.toString())).people.map(({ id }) => id), ["local-mx"]);
+    await db.update(schema.profile).set({ showIdentity: false }).where(target);
+    assert.deepEqual((await load(query.toString())).people, []);
+  });
+
   await t.test("con la distancia oculta, la actividad reciente guía la selección", async () => {
     await db.update(schema.profile).set({ showDistance: false }).where(eq(schema.profile.userId, user.id));
     const { people } = await load();

@@ -1,22 +1,22 @@
-import { createReadStream } from "node:fs";
-import { Readable } from "node:stream";
 import { and, asc, eq, or } from "drizzle-orm";
 import { mailEnabled } from "../mail.js";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db, schema } from "../db/index.js";
-import { ageFrom, mediaOut, newId, requireProfile, requireUser, type AppEnv } from "../lib.js";
+import { ageFrom, isBlocked, mediaOut, newId, requireProfile, requireUser, type AppEnv } from "../lib.js";
 import { syncGroupRoom } from "../realtime.js";
-import { deleteImage, MAX_UPLOAD_BYTES, MAX_VIDEO_BYTES, readImage, saveImage, saveVideo, videoEnabled, videoFile } from "../storage.js";
+import { deleteImage, MAX_UPLOAD_BYTES, MAX_VIDEO_BYTES, readImage, saveImage, saveVideo, videoEnabled, videoFile, type VideoSource } from "../storage.js";
 import { googleEnabled } from "../auth.js";
 import { hasAlbumAccess } from "./premium.js";
 import { isAdmin } from "./admin.js";
 import { APP_NAME } from "../brand.js";
 import { expiringIsOver } from "../expiring.js";
-import { deleteImageUnlessEvidence, isEvidence } from "../moderation.js";
+import { checkMinorSignals, deleteImageUnlessEvidence, isEvidence } from "../moderation.js";
 import { limit } from "../ratelimit.js";
 import { TERMS_VERSION } from "../legal.js";
+import { NOTIFY_KINDS } from "../push.js";
+import { GENDERS, ORIENTATIONS } from "../../../../packages/discovery/options.js";
 
 const { profile, photo, user, group, groupMember, directMessage, conversation } = schema;
 const MAX_PHOTOS = 6;
@@ -34,6 +34,9 @@ const profileInput = z.object({
   lookingFor: z.array(shortText).max(10).default([]),
   relationship: shortText.nullish(),
   pronouns: shortText.nullish(),
+  gender: z.enum(GENDERS).nullish(),
+  orientation: z.enum(ORIENTATIONS).nullish(),
+  showIdentity: z.boolean().optional(),
   hivStatus: shortText.nullish(),
   lastTested: z.iso.date().nullish(),
   // Solo cuenta en el alta del perfil
@@ -53,20 +56,29 @@ meRoutes.get("/files/:key", requireUser, async (c) => {
   // Foto o video de álbum privado (o la miniatura de un video): solo dueño o gente con acceso vigente
   const [ph] = await db.select().from(photo).where(or(eq(photo.key, key), eq(photo.posterKey, key)));
   if (ph?.isPrivate && !(await hasAlbumAccess(ph.userId, viewer))) return c.notFound();
+  if (ph && !ph.isPrivate && ph.userId !== viewer && await isBlocked(ph.userId, viewer)) return c.notFound();
   const video = await videoFile(key);
   if (video) {
     if (!ph) return c.notFound();
     return serveVideo(c.req.header("range"), video);
   }
   // Foto de mensaje privado: solo las dos personas de la charla; si es temporal, solo quien la recibe tras abrirla
-  const [dm] = await db.select().from(directMessage).where(eq(directMessage.photoKey, key));
-  // Archivo que ya no usa ningún mensaje ni perfil (desenviado, borrado): solo existe como prueba de un reporte,
+  const [dm] = ph ? [] : await db.select({
+    conversationId: directMessage.conversationId, senderId: directMessage.senderId,
+    expiring: directMessage.expiring, openedAt: directMessage.openedAt,
+  }).from(directMessage).where(eq(directMessage.photoKey, key));
+  // Foto de un grupo: la ve cualquiera con sesión, igual que el nombre del grupo al explorar
+  // (la de un grupo dado de baja solo la ve moderación)
+  const [grp] = ph || dm ? [] : await db.select({ removedAt: group.removedAt }).from(group).where(eq(group.photoKey, key)).limit(1);
+  const gr = grp && (!grp.removedAt || isAdmin(c.get("user")));
+  // Archivo que ya no usa ningún mensaje, perfil ni grupo (desenviado, borrado): solo existe como prueba de un reporte,
   // y solo moderación lo puede pedir
-  if (!ph && !dm && !(isAdmin(c.get("user")) && (await isEvidence(key)))) return c.notFound();
+  if (!ph && !dm && !gr && !(isAdmin(c.get("user")) && (await isEvidence(key)))) return c.notFound();
   if (dm) {
     const [conv] = await db.select().from(conversation).where(eq(conversation.id, dm.conversationId));
     const inConv = conv && (conv.userA === viewer || conv.userB === viewer);
     if (!inConv) return c.notFound();
+    if (await isBlocked(conv.userA, conv.userB)) return c.notFound();
     // Ya vista: después de unos segundos no se sirve más, aunque el archivo todavía no se haya borrado
     if (dm.expiring && (dm.senderId === viewer || !dm.openedAt || expiringIsOver(dm.openedAt))) return c.notFound();
   }
@@ -76,8 +88,8 @@ meRoutes.get("/files/:key", requireUser, async (c) => {
 });
 
 /** Sirve un video por partes (Range): Safari no reproduce videos sin esto, y así se puede adelantar. */
-function serveVideo(range: string | undefined, v: { file: string; size: number }) {
-  const headers: Record<string, string> = { "Content-Type": "video/mp4", "Accept-Ranges": "bytes" };
+async function serveVideo(range: string | undefined, v: VideoSource) {
+  const headers: Record<string, string> = { "Content-Type": "video/mp4", "Accept-Ranges": "bytes", "Cache-Control": "no-store" };
   let start = 0;
   let end = v.size - 1;
   let status = 200;
@@ -96,7 +108,7 @@ function serveVideo(range: string | undefined, v: { file: string; size: number }
     headers["Content-Range"] = `bytes ${start}-${end}/${v.size}`;
   }
   headers["Content-Length"] = String(end - start + 1);
-  const body = Readable.toWeb(createReadStream(v.file, { start, end })) as ReadableStream;
+  const body = await v.open(start, end);
   return new Response(body, { status, headers });
 }
 
@@ -120,6 +132,7 @@ meRoutes.get("/me", requireUser, async (c) => {
 meRoutes.put("/me/profile", requireUser, async (c) => {
   const u = c.get("user");
   const existing = c.get("profile");
+  if (existing?.suspendedAt) throw new HTTPException(403, { message: "La cuenta está suspendida" });
   const parsed = profileInput.safeParse(await c.req.json());
   if (!parsed.success) throw new HTTPException(400, { message: parsed.error.issues[0].message });
   const data = parsed.data;
@@ -137,6 +150,8 @@ meRoutes.put("/me/profile", requireUser, async (c) => {
       termsVersion: TERMS_VERSION,
       termsAcceptedAt: new Date(),
     });
+    checkMinorSignals({ userId: u.id, name: fields.displayName }, { "el nombre": fields.displayName, "la descripción": fields.about })
+      .catch((e) => console.error("checkMinorSignals", e));
     // Todo el mundo entra al chat general
     const [general] = await db.select().from(group).where(eq(group.isGeneral, true));
     if (general) {
@@ -147,6 +162,8 @@ meRoutes.put("/me/profile", requireUser, async (c) => {
     // La fecha de nacimiento no se puede cambiar después del alta
     const { birthdate: _ignored, acceptTerms: _a, ...rest } = data;
     await db.update(profile).set({ ...rest, updatedAt: new Date() }).where(eq(profile.userId, u.id));
+    checkMinorSignals({ userId: u.id, name: rest.displayName }, { "el nombre": rest.displayName, "la descripción": rest.about })
+      .catch((e) => console.error("checkMinorSignals", e));
   }
   return c.json({ ok: true });
 });
@@ -163,13 +180,24 @@ meRoutes.put("/me/terms", requireUser, requireProfile, async (c) => {
   return c.json({ termsVersion: TERMS_VERSION });
 });
 
+/** Qué avisos quiere recibir. Se manda solo lo que cambia; lo demás queda como estaba. */
+const notifyInput = z.object(Object.fromEntries(NOTIFY_KINDS.map((k) => [k, z.boolean().optional()]))).strict();
+meRoutes.put("/me/notificaciones", requireUser, requireProfile, async (c) => {
+  const u = c.get("user");
+  const parsed = notifyInput.safeParse(await c.req.json().catch(() => null));
+  if (!parsed.success) throw new HTTPException(400, { message: "Esos avisos no existen" });
+  const prefs = { ...c.get("profile")!.notifyPrefs, ...parsed.data };
+  await db.update(profile).set({ notifyPrefs: prefs }).where(eq(profile.userId, u.id));
+  return c.json({ notifyPrefs: prefs });
+});
+
 /** Hasta cuántas fotos y videos puede tener el álbum privado. */
 const MAX_ALBUM = 40;
 
 /** Subir una foto (al perfil o al álbum) o un video (solo al álbum). Se sube de a un archivo; la web manda varios seguidos. */
 meRoutes.post("/me/photos", requireUser, requireProfile, async (c) => {
   const u = c.get("user");
-  limit(u.id, "upload");
+  await limit(u.id, "upload");
   const body = await c.req.parseBody();
   const file = body.file;
   if (!(file instanceof File)) throw new HTTPException(400, { message: "Falta el archivo" });

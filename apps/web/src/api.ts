@@ -31,7 +31,8 @@ export const upload = <T,>(path: string, file: File, extra: Record<string, strin
 
 let socket: Socket | null = null;
 export function getSocket(): Socket {
-  if (!socket) socket = io({ path: "/socket.io", withCredentials: true });
+  // Solo WebSocket: el API corre en varios procesos y así cada conexión queda entera en uno (ver apps/api/src/cluster.ts)
+  if (!socket) socket = io({ path: "/socket.io", withCredentials: true, transports: ["websocket"] });
   return socket;
 }
 export function closeSocket() {
@@ -68,9 +69,15 @@ export type Profile = {
   lookingFor: string[];
   relationship: string | null;
   pronouns: string | null;
+  gender: string | null;
+  orientation: string | null;
+  showIdentity: boolean;
   hivStatus: string | null;
   lastTested: string | null;
 };
+
+/** Tipos de aviso que se pueden apagar. Tienen que coincidir con NOTIFY_KINDS de la API (push.ts). */
+export type NotifyKind = "mensajes" | "toques" | "respuestas" | "grupos" | "solicitudes";
 
 export type Me = {
   user: { id: string; email: string; name: string; isAdmin: boolean };
@@ -78,6 +85,8 @@ export type Me = {
     hasLocation: boolean;
     showDistance: boolean;
     incognito: boolean;
+    /** Avisos que apagó (false). Lo que no está cuenta como prendido. */
+    notifyPrefs: Partial<Record<NotifyKind, boolean>>;
     suspendedAt: string | null;
     suspendReason: string | null;
     /** Versión de los términos que aceptó (null: cuenta anterior a los términos) */
@@ -86,7 +95,7 @@ export type Me = {
   photos: (Media & { id: string; position: number; isPrivate: boolean })[];
 };
 
-export type PublicProfile = Omit<Profile, "birthdate"> & {
+export type PublicProfile = Omit<Profile, "birthdate" | "showIdentity"> & {
   id: string;
   photos: string[];
   isMe: boolean;
@@ -151,14 +160,17 @@ export type SpamRules = {
   maxQueued: number;
 };
 
-export type GroupCommunity = { country: "AR" | "MX"; city: string };
+export type GroupCommunity = { country: "AR" | "MX"; city: string; municipality?: string | null };
 
 export type MyGroup = {
   id: string;
   name: string;
   description: string | null;
   community: GroupCommunity | null;
+  topic: string | null;
   isGeneral: boolean;
+  /** Foto del grupo (miniatura). null: sin foto. */
+  photo: string | null;
   role: Role;
   memberCount: number;
   pendingCount: number;
@@ -169,6 +181,8 @@ export type GroupListing = {
   name: string;
   description: string | null;
   community: GroupCommunity | null;
+  topic: string | null;
+  photo: string | null;
   memberCount: number;
   role: Role | null;
   pending: boolean;
@@ -177,6 +191,7 @@ export type GroupListing = {
 
 export type GroupInfo = GroupListing & {
   isGeneral: boolean;
+  pendingMessage: string | null;
   muted: boolean;
   rules: SpamRules;
   pendingCount: number;
@@ -190,14 +205,14 @@ export type InviteState = "member" | "invited" | "requested" | "declined" | null
 /** Alguien para invitar a un grupo, de la lista larga (como la grilla de Gente). */
 export type InviteCandidate = Author & { online: boolean; distance: string | null; state: InviteState };
 export type InviteCandidates = { people: InviteCandidate[]; total: number; hasMore: boolean; hasLocation: boolean };
-export type InvitableGroup = { id: string; name: string; state: InviteState };
+export type InvitableGroup = { id: string; name: string; photo: string | null; state: InviteState };
 /** Invitación pendiente de un grupo (la ven dueño y moderadores). */
 export type SentInvite = { id: string; createdAt: string; user: Author };
 /** Invitación que me mandaron. */
 export type MyInvite = {
   id: string;
   createdAt: string;
-  group: { id: string; name: string; description: string | null; memberCount: number };
+  group: { id: string; name: string; description: string | null; photo: string | null; memberCount: number };
   invitedBy: Author | null;
 };
 

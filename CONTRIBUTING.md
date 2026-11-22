@@ -44,6 +44,7 @@ Son la razón de ser de la app. Si un cambio va en contra de alguna, mejor charl
 
 - Uno por tema, chico si se puede.
 - Contá qué cambia y cómo lo probaste. Si toca la pantalla, sumá una captura.
+- Si tocás el selector de fotos, la conversión HEIC/HEIF, el recorte o el editor, seguí la [checklist de staging](docs/STAGING.md) y dejá los resultados en el PR. Incluye el recorrido completo desde Google Fotos en un teléfono; marcá lo que quede pendiente.
 - Si toca la pantalla, seguí [docs/LOOK.md](docs/LOOK.md): nada de colores, tamaños ni radios sueltos, todo con las variables de la marca. Antes de mandarlo corré `npm run check` (marca + tipos + build); en el PR lo corre solo.
 - Todos los textos de la app van en español rioplatense, con voseo ("Tenés un mensaje nuevo").
 - Si encontrás un problema de seguridad o privacidad, **no abras un issue público**: escribile a la persona que mantiene el repo por mensaje privado en GitHub.

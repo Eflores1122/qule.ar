@@ -140,6 +140,8 @@ export const fontSizes = {
   "text-base": "15px",
   "text-lg": "16px",
   "text-xl": "18px",
+  /** Campos donde se escribe. Con menos de 16 px el iPhone hace zoom al tocarlos y la pantalla queda ampliada. */
+  "text-input": "16px",
   "title-xs": "20px",
   "title-sm": "22px",
   "title-md": "24px",
