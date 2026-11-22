@@ -187,7 +187,9 @@ export type GroupInfo = GroupListing & {
   pendingCount: number;
 };
 
-export type JoinRequest = { id: string; message: string | null; createdAt: string; user: Author };
+export type JoinRequest = { id: string; message: string | null; createdAt: string; newAccount: boolean; user: Author };
+/** Una página de solicitudes: `total` (con los filtros puestos) viene solo en la primera. */
+export type JoinRequestPage = { items: JoinRequest[]; nextCursor: string | null; total: number | null };
 export type Member = Author & { role: Role; joinedAt: string };
 
 /** Dónde está una persona respecto de un grupo, para invitarla. */

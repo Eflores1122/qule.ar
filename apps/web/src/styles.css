@@ -642,3 +642,7 @@ button.quote:hover { background: var(--surface-3); }
 /* Tarjeta del grupo en el panel de moderación */
 .rcard__group > span { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
 .rcard__groupdesc { color: var(--text); overflow-wrap: anywhere; }
+
+/* Solicitudes de ingreso: nombre y, abajo, hace cuánto pidió */
+.req__name { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
+.req-panel { display: flex; flex-direction: column; gap: 10px; }

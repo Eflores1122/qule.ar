@@ -8,6 +8,7 @@ import { DEFAULT_SPAM_RULES } from "../db/schema.js";
 import { ageFrom, authorsFor, blockedWith, newId, requireProfile, requireUser, thumbUrl, type AppEnv } from "../lib.js";
 import { distanceLabel, visibleKm } from "../geo.js";
 import { autoHiddenGroups, autoHiddenUsers, deleteImageUnlessEvidence, forbiddenGroupText, groupIsEvidence, reportMinorGroupAttempt } from "../moderation.js";
+import { requestFilters, requestPage } from "../joinRequests.js";
 import { limit } from "../ratelimit.js";
 import { MAX_UPLOAD_BYTES, saveImage } from "../storage.js";
 import { emitToGroup, emitToUser, isOnline, serializeGroupMessages, syncGroupRoom } from "../realtime.js";
@@ -404,22 +405,19 @@ groupRoutes.delete("/groups/:id/requests/mine", async (c) => {
   return c.json({ ok: true });
 });
 
-/** Solicitudes pendientes (dueño y moderadores). */
+/**
+ * Solicitudes pendientes (dueño y moderadores), de la más nueva a la más vieja,
+ * de a REQUESTS_PAGE por página. Filtros opcionales: con/sin foto pública,
+ * cuenta nueva y rango de edad. `total` viene solo en la primera página.
+ */
 groupRoutes.get("/groups/:id/requests", async (c) => {
   const u = c.get("user");
   const { group: g } = await requireMod(c.req.param("id"), u.id);
-  const rows = await db
-    .select()
-    .from(groupJoinRequest)
-    .where(and(eq(groupJoinRequest.groupId, g.id), eq(groupJoinRequest.status, "pending")))
-    .orderBy(asc(groupJoinRequest.createdAt));
-  const authors = await authorsFor(rows.map((r) => r.userId));
-  return c.json(rows.map((r) => ({
-    id: r.id,
-    message: r.message,
-    createdAt: r.createdAt.toISOString(),
-    user: authors.get(r.userId) ?? { id: r.userId, name: "Cuenta borrada", age: 0, photo: null },
-  })));
+  const parsed = requestFilters.safeParse(c.req.query());
+  if (!parsed.success) throw new HTTPException(400, { message: "Filtro inválido" });
+  const page = await requestPage(g.id, parsed.data);
+  if (!page) throw new HTTPException(400, { message: "Página inválida" });
+  return c.json(page);
 });
 
 groupRoutes.post("/groups/:id/requests/:rid/:decision{accept|reject}", async (c) => {

@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { api, getSocket, ROLE_LABEL, type GroupInfo as Info, type JoinRequest, type Member, type SentInvite, type SpamRules } from "../api";
+import { api, getSocket, ROLE_LABEL, type GroupInfo as Info, type Member, type SentInvite, type SpamRules } from "../api";
 import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { BackIcon, PlusIcon } from "../components/Icons";
 import { InvitePeopleSheet } from "../components/Invite";
+import { JoinRequests } from "../components/JoinRequests";
 import { ReportDialog } from "../components/ReportDialog";
 import { slowModeText } from "../features/groups/groupRules";
 import { useTabData } from "../features/navigation/tabData";
@@ -18,7 +19,6 @@ export function GroupInfo() {
   const nav = useNavigate();
   const [info, setInfo] = useState<Info | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
-  const [requests, setRequests] = useState<JoinRequest[]>([]);
   const [invites, setInvites] = useState<SentInvite[]>([]);
   const [inviting, setInviting] = useState(false);
   const [error, setError] = useState("");
@@ -36,14 +36,8 @@ export function GroupInfo() {
       if (!g.role) return nav(`/grupos/${id}`, { replace: true });
       setMembers(await api<Member[]>(`/groups/${id}/members`));
       if ((g.role === "owner" || g.role === "moderator") && !g.isGeneral) {
-        const [reqs, invs] = await Promise.all([
-          api<JoinRequest[]>(`/groups/${id}/requests`),
-          api<SentInvite[]>(`/groups/${id}/invites`),
-        ]);
-        setRequests(reqs);
-        setInvites(invs);
+        setInvites(await api<SentInvite[]>(`/groups/${id}/invites`));
       } else {
-        setRequests([]);
         setInvites([]);
       }
     } catch {
@@ -135,26 +129,8 @@ export function GroupInfo() {
 
       {isMod && !info.isGeneral && (
         <section className="section">
-          <h2 className="section__title">Solicitudes <span className="muted">{requests.length}</span></h2>
-          {requests.length === 0 ? (
-            <p className="muted">No hay solicitudes pendientes.</p>
-          ) : (
-            <ul className="reqs">
-              {requests.map((r) => (
-                <li key={r.id} className="req">
-                  <Link to={`/perfil/${r.user.id}`} className="req__who">
-                    <Avatar src={r.user.photo} name={r.user.name} size={44} />
-                    <span><b>{r.user.name}</b> <span className="muted">{r.user.age}</span></span>
-                  </Link>
-                  {r.message && <p className="req__msg">“{r.message}”</p>}
-                  <div className="row">
-                    <button className="btn btn--small" onClick={() => act(() => api(`/groups/${id}/requests/${r.id}/reject`, { method: "POST" }))}>Rechazar</button>
-                    <button className="btn btn--small btn--primary" onClick={() => act(() => api(`/groups/${id}/requests/${r.id}/accept`, { method: "POST" }))}>Aceptar</button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
+          <h2 className="section__title">Solicitudes <span className="muted">{info.pendingCount}</span></h2>
+          <JoinRequests groupId={id} onChanged={load} />
           <p className="muted small hint">Si rechazás a alguien, puede volver a pedir ingreso en 7 días.</p>
         </section>
       )}
