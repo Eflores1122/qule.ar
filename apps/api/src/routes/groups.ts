@@ -47,15 +47,38 @@ async function requireMod(groupId: string, userId: string) {
   return r as typeof r & { member: NonNullable<typeof r.member> };
 }
 
+/**
+ * Cuántos miembros tiene cada grupo. Se guarda un minuto en memoria: el grupo general tiene miles de miembros
+ * y contarlos en cada pedido de la lista de grupos era de lo más pesado para la base. Al entrar o salir alguien
+ * se olvida el número de ese grupo (forgetMemberCount), así que quien entra ve el número nuevo enseguida.
+ */
+const COUNT_TTL_MS = 60_000;
+const countCache = new Map<string, { n: number; at: number }>();
+const forgetMemberCount = (groupId: string) => countCache.delete(groupId);
+
 async function memberCounts(ids: string[]) {
   const map = new Map<string, number>();
-  if (!ids.length) return map;
+  const now = Date.now();
+  const missing: string[] = [];
+  for (const id of new Set(ids)) {
+    const hit = countCache.get(id);
+    if (hit && now - hit.at < COUNT_TTL_MS) map.set(id, hit.n);
+    else missing.push(id);
+  }
+  if (!missing.length) return map;
   const rows = await db
     .select({ groupId: groupMember.groupId, n: sql<number>`count(*)::int` })
     .from(groupMember)
-    .where(inArray(groupMember.groupId, ids))
+    .where(inArray(groupMember.groupId, missing))
     .groupBy(groupMember.groupId);
-  for (const r of rows) map.set(r.groupId, r.n);
+  const counted = new Map(rows.map((r) => [r.groupId, r.n]));
+  for (const id of missing) {
+    const n = counted.get(id) ?? 0;
+    map.set(id, n);
+    countCache.set(id, { n, at: now });
+  }
+  // Que no crezca sin límite con grupos borrados
+  if (countCache.size > 5000) for (const [id, v] of countCache) if (now - v.at >= COUNT_TTL_MS) countCache.delete(id);
   return map;
 }
 
@@ -234,6 +257,7 @@ groupRoutes.post("/groups", async (c) => {
   const id = newId();
   await db.insert(group).values({ id, name: data.name, description: data.description ?? null, ownerId: u.id });
   await db.insert(groupMember).values({ groupId: id, userId: u.id, role: "owner" });
+  forgetMemberCount(id);
   syncGroupRoom(u.id, id, true);
   return c.json({ id });
 });
@@ -430,6 +454,7 @@ const MAX_PENDING_INVITES = 50;
 async function joinGroup(g: typeof group.$inferSelect, userId: string, by: string | null) {
   const now = new Date();
   await db.insert(groupMember).values({ groupId: g.id, userId }).onConflictDoNothing();
+  forgetMemberCount(g.id);
   await db
     .update(groupJoinRequest)
     .set({ status: "accepted", resolvedBy: by, resolvedAt: now })
@@ -761,6 +786,7 @@ groupRoutes.delete("/groups/:id/members/:uid", async (c) => {
     throw new HTTPException(403, { message: "Solo el dueño puede expulsar a otro moderador" });
   }
   await db.delete(groupMember).where(and(eq(groupMember.groupId, g.id), eq(groupMember.userId, target)));
+  forgetMemberCount(g.id);
   // Queda registrado para el período de espera antes de volver a pedir ingreso
   await db.insert(groupJoinRequest).values({
     id: newId(), groupId: g.id, userId: target, status: "removed", resolvedBy: u.id, resolvedAt: new Date(),
@@ -777,6 +803,7 @@ groupRoutes.post("/groups/:id/leave", async (c) => {
   if (g.isGeneral) throw new HTTPException(400, { message: "Del chat general no se puede salir" });
   if (!member) return c.json({ ok: true });
   await db.delete(groupMember).where(and(eq(groupMember.groupId, g.id), eq(groupMember.userId, u.id)));
+  forgetMemberCount(g.id);
   syncGroupRoom(u.id, g.id, false);
 
   if (member.role === "owner") {

@@ -1,10 +1,10 @@
-import { and, desc, eq, isNull, ne } from "drizzle-orm";
+import { eq, inArray, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db, schema } from "../db/index.js";
 import { distanceLabel, snapToCell, visibleKm } from "../geo.js";
-import { ageFrom, blockedWith, firstPublicPhotoKeys, thumbUrl, requireProfile, requireUser, type AppEnv } from "../lib.js";
+import { ageFrom, firstPublicPhotoKeys, thumbUrl, requireProfile, requireUser, type AppEnv } from "../lib.js";
 import { autoHiddenUsers } from "../moderation.js";
 import { isOnline } from "../realtime.js";
 
@@ -88,82 +88,121 @@ const filtersSchema = z.object({
 
 export type NearbyFilters = z.infer<typeof filtersSchema>;
 
-/** Grilla de gente cerca, de la más cercana a la más lejana. */
+/** Fecha de nacimiento límite para tener al menos `years` años hoy (misma cuenta que ageFrom). */
+function bornOnOrBefore(years: number, now = new Date()): string {
+  const mm = String(now.getMonth() + 1).padStart(2, "0");
+  const dd = String(now.getDate()).padStart(2, "0");
+  return `${String(now.getFullYear() - years).padStart(4, "0")}-${mm}-${dd}`;
+}
+
+type Candidate = { user_id: string; cell_lat: number | null; cell_lng: number | null; show_distance: boolean; seen: number };
+
+/**
+ * Grilla de gente cerca, de la más cercana a la más lejana.
+ *
+ * Es el pedido más usado de la app, así que se hace en dos pasos para no cargar perfiles enteros de más:
+ * 1. Postgres aplica todos los filtros y devuelve solo lo necesario para ordenar (id, celda y última vez visto).
+ * 2. Se ordena acá (en línea vive en memoria) y se buscan nombre, edad y foto solo de la página que se muestra.
+ */
 nearbyRoutes.get("/nearby", async (c) => {
-  const u = c.get("user");
-  const me = c.get("profile")!;
+  return c.json(await nearbyPage(c.get("profile")!, filtersSchema.parse(c.req.query())));
+});
+
+type Me = { userId: string; cellLat: number | null; cellLng: number | null; showDistance: boolean };
+
+/** Una página de la grilla para `me`. Separada de la ruta para poder probarla sin sesión (ver nearby.test.ts). */
+export async function nearbyPage(me: Me, f: NearbyFilters) {
+  const u = { id: me.userId };
   // Mostramos a todes, sin límite de distancia: al principio somos pocas personas y la idea es que se encuentren.
   // Con ubicación, se ordena de más cerca a más lejos; sin ubicación, por quién está en línea.
   const meHasLoc = me.cellLat != null && me.cellLng != null;
-  const f = filtersSchema.parse(c.req.query());
-  const [blocked, hidden, favorites, rows] = await Promise.all([
-    blockedWith(u.id),
+
+  const conds = [
+    sql`p.user_id <> ${u.id}`,
+    sql`p.incognito = false`, // en incógnito no se aparece en la grilla
+    sql`p.suspended_at is null`,
+    sql`not exists (select 1 from block b where (b.blocker_id = ${u.id} and b.blocked_id = p.user_id) or (b.blocker_id = p.user_id and b.blocked_id = ${u.id}))`,
+  ];
+  // Las fechas van como texto AAAA-MM-DD, igual que se guardan
+  if (f.ageMin != null) conds.push(sql`p.birthdate <= ${bornOnOrBefore(f.ageMin)}::date`);
+  if (f.ageMax != null) conds.push(sql`p.birthdate > ${bornOnOrBefore(f.ageMax + 1)}::date`);
+  if (f.heightMin != null) conds.push(sql`p.height_cm >= ${f.heightMin}`);
+  if (f.heightMax != null) conds.push(sql`p.height_cm <= ${f.heightMax}`);
+  if (f.weightMin != null) conds.push(sql`p.weight_kg >= ${f.weightMin}`);
+  if (f.weightMax != null) conds.push(sql`p.weight_kg <= ${f.weightMax}`);
+  const textArray = (xs: string[]) => sql`array[${sql.join(xs.map((x) => sql`${x}`), sql`, `)}]::text[]`;
+  if (f.bodyType.length) conds.push(sql`p.body_type = any(${textArray(f.bodyType)})`);
+  if (f.position.length) conds.push(sql`p.position = any(${textArray(f.position)})`);
+  if (f.relationship.length) conds.push(sql`p.relationship = any(${textArray(f.relationship)})`);
+  if (f.tribes.length) conds.push(sql`jsonb_exists_any(p.tribes, ${textArray(f.tribes)})`);
+  if (f.lookingFor.length) conds.push(sql`jsonb_exists_any(p.looking_for, ${textArray(f.lookingFor)})`);
+  if (f.favorites) conds.push(sql`exists (select 1 from favorite fv where fv.user_id = ${u.id} and fv.favorite_id = p.user_id)`);
+  if (f.withPhoto) conds.push(sql`exists (select 1 from photo ph where ph.user_id = p.user_id and ph.is_private = false)`);
+
+  // Sin pasar por el ORM: son miles de filas chicas y convertirlas una por una era lo que más tiempo llevaba
+  const [hidden, favorites, result] = await Promise.all([
+    // Ocultos por precaución: varios reportes urgentes sin revisar (ver moderation.ts)
     autoHiddenUsers(),
     db.select({ id: schema.favorite.favoriteId }).from(schema.favorite).where(eq(schema.favorite.userId, u.id)),
-    db.select({
-      userId: profile.userId, displayName: profile.displayName, birthdate: profile.birthdate,
-      lastSeenAt: profile.lastSeenAt, cellLat: profile.cellLat, cellLng: profile.cellLng, showDistance: profile.showDistance,
-      heightCm: profile.heightCm, weightKg: profile.weightKg, bodyType: profile.bodyType, position: profile.position,
-      relationship: profile.relationship, tribes: profile.tribes, lookingFor: profile.lookingFor,
-    }).from(profile).where(and(ne(profile.userId, u.id), eq(profile.incognito, false), isNull(profile.suspendedAt)))
-      .orderBy(desc(profile.lastSeenAt)).limit(3000),
+    db.execute(sql`
+      select p.user_id, p.cell_lat, p.cell_lng, p.show_distance, (extract(epoch from p.last_seen_at) * 1000)::float8 as seen
+      from profile p
+      where ${sql.join(conds, sql` and `)}
+      order by p.last_seen_at desc
+      limit 3000`),
   ]);
+  const rows = (result as unknown as { rows: Candidate[] }).rows;
   const favs = new Set(favorites.map((r) => r.id));
-
-  const anyOf = (wanted: string[], value: string | null) => !wanted.length || (value != null && wanted.includes(value));
-  const overlap = (wanted: string[], values: string[]) => !wanted.length || values.some((v) => wanted.includes(v));
-  const inRange = (v: number | null, min?: number, max?: number) =>
-    (min == null && max == null) || (v != null && (min == null || v >= min) && (max == null || v <= max));
   const now = Date.now();
 
   const candidates = rows
-    .filter((p) => !blocked.has(p.userId) && !hidden.has(p.userId) && (!f.favorites || favs.has(p.userId)))
+    .filter((p) => !hidden.has(p.user_id))
     .map((p) => {
-      const km = visibleKm(me, p);
-      const on = isOnline(p.userId);
-      return { p, km, age: ageFrom(p.birthdate), online: on, recent: on || now - p.lastSeenAt.getTime() < RECENT_MS };
+      const km = visibleKm(me, { cellLat: p.cell_lat, cellLng: p.cell_lng, showDistance: p.show_distance });
+      const on = isOnline(p.user_id);
+      return { id: p.user_id, seen: p.seen, km, online: on, recent: on || now - p.seen < RECENT_MS };
     })
-    .filter(({ p, km, age, online }) =>
-      inRange(age, f.ageMin, f.ageMax) &&
-      inRange(p.heightCm, f.heightMin, f.heightMax) &&
-      inRange(p.weightKg, f.weightMin, f.weightMax) &&
-      anyOf(f.bodyType, p.bodyType) &&
-      anyOf(f.position, p.position) &&
-      anyOf(f.relationship, p.relationship) &&
-      overlap(f.tribes, p.tribes) &&
-      overlap(f.lookingFor, p.lookingFor) &&
-      (!f.online || online),
-    );
+    .filter((x) => !f.online || x.online);
 
   // Primero la distancia (por celda; quien no tiene ubicación va al final); a igual distancia, quien está en línea va antes
   const far = Number.POSITIVE_INFINITY;
   candidates.sort((a, b) =>
     (a.km ?? far) - (b.km ?? far) ||
     Number(b.online) - Number(a.online) ||
-    b.p.lastSeenAt.getTime() - a.p.lastSeenAt.getTime());
+    b.seen - a.seen);
 
-  // Solo el filtro con foto necesita saber quién tiene foto antes de paginar.
-  const photoCandidates = f.withPhoto ? candidates : candidates.slice(f.offset, f.offset + PAGE);
-  const first = await firstPublicPhotoKeys(photoCandidates.map((x) => x.p.userId));
+  const page = candidates.slice(f.offset, f.offset + PAGE);
+  const ids = page.map((x) => x.id);
+  const [details, first] = await Promise.all([
+    ids.length
+      ? db.select({ userId: profile.userId, displayName: profile.displayName, birthdate: profile.birthdate })
+          .from(profile).where(inArray(profile.userId, ids))
+      : [],
+    firstPublicPhotoKeys(ids),
+  ]);
+  const byId = new Map(details.map((d) => [d.userId, d]));
 
-  const filtered = f.withPhoto ? candidates.filter((x) => first.has(x.p.userId)) : candidates;
-  const page = filtered.slice(f.offset, f.offset + PAGE);
-
-  return c.json({
+  return {
     needLocation: false,
     hasLocation: meHasLoc,
-    hasMore: filtered.length > f.offset + PAGE,
-    total: filtered.length,
-    people: page.map(({ p, km, age, online, recent }) => ({
-      id: p.userId,
-      name: p.displayName,
-      age,
-      photo: thumbUrl(first.get(p.userId)),
-      online,
-      recent,
-      favorite: favs.has(p.userId),
-      // Si cualquiera de los dos eligió esconder la distancia, km es null (ver visibleKm)
-      distance: km != null ? distanceLabel(km) : null,
-    })),
-  });
-});
+    hasMore: candidates.length > f.offset + PAGE,
+    total: candidates.length,
+    people: page.flatMap(({ id, km, online, recent }) => {
+      const d = byId.get(id);
+      if (!d) return []; // borró la cuenta entre los dos pasos
+      return [{
+        id,
+        name: d.displayName,
+        age: ageFrom(d.birthdate),
+        photo: thumbUrl(first.get(id)),
+        online,
+        recent,
+        favorite: favs.has(id),
+        // Si cualquiera de los dos eligió esconder la distancia, km es null (ver visibleKm)
+        distance: km != null ? distanceLabel(km) : null,
+      }];
+    }),
+  };
+}
+
+export const parseNearbyFilters = (q: Record<string, string>) => filtersSchema.parse(q);
