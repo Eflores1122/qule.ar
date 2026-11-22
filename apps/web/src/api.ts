@@ -74,7 +74,7 @@ export type Profile = {
 };
 
 /** Tipos de aviso que se pueden apagar. Tienen que coincidir con NOTIFY_KINDS de la API (push.ts). */
-export type NotifyKind = "mensajes" | "toques" | "respuestas" | "grupos" | "solicitudes";
+export type NotifyKind = "mensajes" | "toques" | "respuestas" | "grupos" | "solicitudes" | "moderacion";
 
 export type StaffAccess = "owner" | "reports" | "sanctions" | "appeals";
 

@@ -16,8 +16,15 @@ const NOTICES: { kind: NotifyKind; label: string; hint?: string }[] = [
   { kind: "solicitudes", label: "Solicitudes e invitaciones", hint: "Pedidos para entrar a tus grupos, invitaciones y cuando te aceptan." },
 ];
 
+/** Solo para quien es del equipo de moderación. */
+const STAFF_NOTICE: { kind: NotifyKind; label: string; hint?: string } = {
+  kind: "moderacion",
+  label: "Moderación",
+  hint: "Reportes urgentes y pedidos de revisión. Si lo apagás, igual los ves al entrar a Moderación.",
+};
+
 /** Qué avisos le llegan. Se guarda en la cuenta, así vale para todos los dispositivos. */
-function NoticePrefs({ initial }: { initial: Partial<Record<NotifyKind, boolean>> }) {
+function NoticePrefs({ initial, staff }: { initial: Partial<Record<NotifyKind, boolean>>; staff: boolean }) {
   const [prefs, setPrefs] = useState(initial);
   const [error, setError] = useState("");
 
@@ -39,7 +46,7 @@ function NoticePrefs({ initial }: { initial: Partial<Record<NotifyKind, boolean>
     <>
       <p className="muted small prefs__lead">¿Qué avisos querés recibir?</p>
       <ul className="prefs">
-        {NOTICES.map((n) => {
+        {(staff ? [...NOTICES, STAFF_NOTICE] : NOTICES).map((n) => {
           const on = prefs[n.kind] !== false;
           return (
             <li key={n.kind} className="setting">
@@ -59,7 +66,7 @@ function NoticePrefs({ initial }: { initial: Partial<Record<NotifyKind, boolean>
   );
 }
 
-function NotificationsSetting({ prefs }: { prefs: Partial<Record<NotifyKind, boolean>> }) {
+function NotificationsSetting({ prefs, staff }: { prefs: Partial<Record<NotifyKind, boolean>>; staff: boolean }) {
   const [state, setState] = useState<PushState | null>(null);
   const [busy, setBusy] = useState(false);
   const [test, setTest] = useState("");
@@ -107,7 +114,7 @@ function NotificationsSetting({ prefs }: { prefs: Partial<Record<NotifyKind, boo
             <button className="linkbtn" onClick={sendTest} disabled={busy}>Mandarme una de prueba</button>
             {test && <span className="muted" role="status"> · {test}</span>}
           </p>
-          <NoticePrefs initial={prefs} />
+          <NoticePrefs initial={prefs} staff={staff} />
         </>
       )}
     </section>
@@ -203,7 +210,7 @@ export function Settings() {
       </header>
 
       <ThemeSetting />
-      <NotificationsSetting prefs={me.profile.notifyPrefs ?? {}} />
+      <NotificationsSetting prefs={me.profile.notifyPrefs ?? {}} staff={(me.user.access ?? []).length > 0} />
       {error && <p className="notice notice--error" role="alert">{error}</p>}
       <section className="section">
         <h2 className="section__title">Privacidad y ubicación</h2>

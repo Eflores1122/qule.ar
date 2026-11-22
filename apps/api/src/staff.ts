@@ -69,7 +69,10 @@ export async function grant(userId: string, perms: StaffPermission[], by: string
 }
 
 
-/** Aviso discreto (push) a quienes tienen un permiso. No dice quién ni por qué. */
+/**
+ * Aviso discreto (push) a quienes tienen un permiso. No dice quién ni por qué.
+ * Cada persona del equipo lo puede apagar (aviso "moderacion"); lo pendiente se sigue viendo en el panel.
+ */
 export async function notifyStaff(p: StaffPermission, msg: { title: string; body: string; url: string; tag: string }) {
-  for (const id of await staffIdsWith(p)) pushTo(id, msg).catch(() => {});
+  for (const id of await staffIdsWith(p)) pushTo(id, { ...msg, kind: "moderacion" }).catch(() => {});
 }
