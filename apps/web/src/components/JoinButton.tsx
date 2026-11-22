@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { api, type GroupListing } from "../api";
+import { DialogFocus } from "./DialogFocus";
 
 const fmtDate = (iso: string) => new Date(iso).toLocaleDateString("es-AR", { day: "numeric", month: "long" });
 
@@ -54,6 +55,7 @@ export function JoinButton({ g, onChange }: { g: GroupListing; onChange: () => v
       {asking && (
         <div className="sheet-backdrop" onClick={() => setAsking(false)}>
           <div className="sheet" role="dialog" aria-modal aria-labelledby="join-title" onClick={(e) => e.stopPropagation()}>
+            <DialogFocus onClose={() => setAsking(false)} />
             <h2 id="join-title">Pedir ingreso a {g.name}</h2>
             <p className="muted small">El dueño o los moderadores del grupo aceptan o rechazan tu solicitud.</p>
             <textarea

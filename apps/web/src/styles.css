@@ -503,6 +503,8 @@ a.gcard:hover { background: var(--surface); }
 .sheet-backdrop { position: fixed; inset: 0; background: var(--backdrop); display: flex; align-items: flex-end; justify-content: center; z-index: var(--z-sheet); }
 .sheet { width: 100%; max-width: 480px; background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-4xl) var(--radius-4xl) 0 0; padding: 20px 16px calc(20px + var(--safe-b)); display: flex; flex-direction: column; gap: 14px; }
 .sheet h2 { font-size: var(--text-xl); }
+/* El foco que DialogFocus le da a la hoja al abrirse es solo para el lector de pantalla y el teclado: no se dibuja */
+.sheet:focus { outline: none; }
 @media (min-width: 600px) {
   .sheet-backdrop { align-items: center; }
   .sheet { border-radius: var(--radius-4xl); }

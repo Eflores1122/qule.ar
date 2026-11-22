@@ -291,7 +291,7 @@ export function GroupChat() {
         </Link>
       </header>
 
-      <div className="chat__list" ref={listRef} onScroll={onScroll}>
+      <div className="chat__list" role="log" aria-label="Mensajes del grupo" ref={listRef} onScroll={onScroll}>
         {hasMore && (
           <button className="btn btn--ghost btn--small chat__older" onClick={loadOlder}>Ver mensajes anteriores</button>
         )}
@@ -403,6 +403,7 @@ export function GroupChat() {
           <textarea
             ref={inputRef}
             className="composer__input"
+            aria-label={`Mensaje para #${info?.name ?? "el grupo"}`}
             rows={1}
             maxLength={1000}
             placeholder={`Escribí en #${info?.name ?? ""}…`}

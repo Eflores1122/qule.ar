@@ -193,7 +193,7 @@ export function Conversation() {
         )}
       </header>
 
-      <div className="chat__list chat__list--dm" ref={listRef} onScroll={onListScroll} onClick={() => setMsgMenu(null)}>
+      <div className="chat__list chat__list--dm" role="log" aria-label="Mensajes" ref={listRef} onScroll={onListScroll} onClick={() => setMsgMenu(null)}>
         {messages.map((m) => {
           const mine = m.senderId === myId;
           return (
@@ -280,6 +280,7 @@ export function Conversation() {
           />
           <textarea
             className="composer__input"
+            aria-label="Mensaje"
             rows={1}
             maxLength={2000}
             placeholder="Escribí un mensaje…"

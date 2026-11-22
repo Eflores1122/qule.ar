@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { api } from "../api";
 import { REPORT_REASONS, URGENT_REASONS } from "../options";
+import { DialogFocus } from "./DialogFocus";
 
 type Props = {
   // Se reporta a una persona (userId) o a un grupo (groupId)
@@ -30,6 +31,7 @@ export function ReportDialog({ userId, groupId, name, messageId, messageKind, on
   return (
     <div className="sheet-backdrop" onClick={onClose}>
       <div className="sheet" role="dialog" aria-modal aria-labelledby="report-title" onClick={(e) => e.stopPropagation()}>
+        <DialogFocus onClose={onClose} />
         {state === "done" ? (
           <>
             <h2 id="report-title">Gracias por avisar</h2>
