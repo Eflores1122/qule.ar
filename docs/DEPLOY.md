@@ -99,7 +99,12 @@ Si el servidor ya tiene otros sitios, este bloque se suma sin tocar los demás.
 
 ## 6. Backups
 
-Todas las noches `deploy/backup.sh` guarda la base y las fotos **cifradas y fuera del servidor**, con [restic](https://restic.net). Se cifran en el servidor antes de salir (AES-256): el proveedor del almacenamiento no puede ver nada. Se guardan 14 días, lo que dice la política de privacidad.
+Todas las noches `deploy/backup.sh` hace dos copias:
+
+- **Local, siempre:** un volcado de la base en `~/mortero/backups`, para volver atrás en un minuto si un deploy sale mal (el deploy también lo corre antes de actualizar). Mientras no esté configurada la copia de afuera, guarda también las fotos (sin miniaturas) y dura 14 días. Con copia afuera, solo la base y 3 días.
+- **Afuera y cifrada,** con [restic](https://restic.net), cuando existe `~/mortero/backup.env`: la base y las fotos. Se cifran en el servidor antes de salir (AES-256): el proveedor del almacenamiento no puede ver nada. Se guardan 14 días, lo que dice la política de privacidad.
+
+Si falta `backup.env`, el script avisa en el log y hace solo la parte local: nunca se queda sin backup.
 
 Si se pierde el servidor, los backups siguen estando. Si se pierde **la contraseña de restic**, no se pueden recuperar: por eso se guarda también fuera del servidor.
 

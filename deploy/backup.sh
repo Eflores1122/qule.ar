@@ -1,20 +1,50 @@
 #!/usr/bin/env bash
-# Backup diario de qule.ar, CIFRADO y FUERA del servidor (restic). Ver docs/DEPLOY.md, "6. Backups".
+# Backup diario de qule.ar. Ver docs/DEPLOY.md, "6. Backups".
 #
 # Corre con la misma cuenta que hace el deploy y usa Docker:
 #   0 4 * * * "$HOME/mortero/src/deploy/backup.sh" >> "$HOME/mortero/backup.log" 2>&1
 #
-# - La base va directo de pg_dump a restic: nunca queda un volcado sin cifrar en el disco.
-# - Las fotos y videos se suben desde el volumen de la app (sin las miniaturas, que se regeneran solas).
-# - Se guardan 14 días, que es lo que promete la política de privacidad. Lo más viejo se borra.
-# - Los domingos verifica que el repositorio esté sano y que se pueda leer una parte de los datos.
+# Dos partes:
+# - Local, SIEMPRE: un volcado de la base en BACKUP_DIR, para volver atrás en un minuto si un deploy sale mal.
+#   Mientras no haya copia afuera, también las fotos y se guarda 14 días (lo que promete la política de privacidad).
+#   Con copia afuera, solo la base y 3 días.
+# - Afuera y CIFRADA con restic, si existe backup.env: la base va directo de pg_dump a restic, y las fotos y videos
+#   desde el volumen (sin miniaturas). 14 días. Los domingos verifica el repositorio.
+# Si falta backup.env, avisa y hace solo la parte local: nunca se queda sin ningún backup.
 set -euo pipefail
+umask 077
 
 ENV_FILE="${BACKUP_ENV:-$HOME/mortero/backup.env}"
-if [ ! -r "$ENV_FILE" ]; then
-  echo "$(date +%FT%T%z) ERROR: falta $ENV_FILE (copialo de deploy/backup.env.example)" >&2
-  exit 1
+DEST="${BACKUP_DIR:-$HOME/mortero/backups}"
+DB_CONTAINER="${DB_CONTAINER:-mortero-db}"
+DATA_VOLUME="${DATA_VOLUME:-mortero-data}"
+STAMP="$(date +%Y-%m-%d_%H%M)"
+REMOTE=0
+[ -r "$ENV_FILE" ] && REMOTE=1
+
+# ---------- Local ----------
+mkdir -p "$DEST"
+chmod 700 "$DEST"
+docker exec "$DB_CONTAINER" pg_dump -U mortero -d mortero -Fc > "$DEST/db_$STAMP.dump"
+if [ "$REMOTE" = 0 ]; then
+  docker run --rm -v "$DATA_VOLUME":/data:ro -v "$DEST":/backup busybox \
+    sh -c "tar czf /backup/fotos_$STAMP.tar.gz -C /data --exclude uploads/thumbs uploads && chmod 600 /backup/fotos_$STAMP.tar.gz"
+  LOCAL_KEEP_DAYS="${LOCAL_KEEP_DAYS:-14}"
+else
+  LOCAL_KEEP_DAYS="${LOCAL_KEEP_DAYS:-3}"
 fi
+find "$DEST" -name 'db_*.dump' -mtime +"$LOCAL_KEEP_DAYS" -delete
+# Con copia afuera las fotos no quedan en el disco local; sin ella, 14 días como la base
+if [ "$REMOTE" = 1 ]; then find "$DEST" -name 'fotos_*.tar.gz' -delete
+else find "$DEST" -name 'fotos_*.tar.gz' -mtime +"$LOCAL_KEEP_DAYS" -delete; fi
+echo "$(date +%FT%T%z) backup local ok: $STAMP"
+
+if [ "$REMOTE" = 0 ]; then
+  echo "$(date +%FT%T%z) AVISO: falta $ENV_FILE, no hay copia fuera del servidor (ver docs/DEPLOY.md, 6)" >&2
+  exit 0
+fi
+
+# ---------- Afuera, cifrado ----------
 set -a
 # shellcheck disable=SC1090
 . "$ENV_FILE"
@@ -27,8 +57,6 @@ if [ ! -r "$RESTIC_PASSWORD_FILE" ]; then
 fi
 
 KEEP_DAYS="${KEEP_DAYS:-14}"
-DB_CONTAINER="${DB_CONTAINER:-mortero-db}"
-DATA_VOLUME="${DATA_VOLUME:-mortero-data}"
 RESTIC_BIN="${RESTIC_BIN:-$HOME/mortero/bin/restic}"
 RESTIC_IMAGE="${RESTIC_IMAGE:-restic/restic:0.17.3}"
 HOST_TAG="qule"
