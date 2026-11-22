@@ -85,6 +85,18 @@ docker logs -f mortero-app   # tiene que decir "qule.ar API escuchando"
 
 Las migraciones de la base se aplican solas al arrancar. La app escucha solo en `127.0.0.1:3010`: el único acceso desde afuera es por nginx.
 
+### Varios núcleos
+
+Node usa un solo núcleo por proceso. Con Postgres (`DATABASE_URL`), la app arranca varios procesos del API y reparte las conexiones entre ellos (ver `apps/api/src/cluster.ts`):
+
+- Por defecto, uno por núcleo menos uno, que queda para Postgres, hasta 4. En un servidor de 4 núcleos son 3.
+- `WORKERS=2` en `app.env` lo fija a mano. `WORKERS=1` vuelve a un solo proceso, como antes.
+- Primero arranca el proceso líder: corre las migraciones y las tareas que no se pueden repetir (publicar los mensajes en cola, borrar las fotos vencidas). Después arrancan los demás. En el log aparece `escuchando` una vez por proceso.
+- Lo que tienen que compartir (quién está en línea, los límites contra el spam y contra quien prueba contraseñas, el chat en vivo) pasa por el proceso principal, sin servicios extra.
+- El chat en vivo va solo por WebSocket. Quien tenga la app abierta desde antes del deploy se reconecta cuando la app se actualiza.
+- Si un proceso se cae, se levanta otro solo. Si el líder no llega a arrancar (por ejemplo, falla una migración), se corta todo y Docker lo reinicia con el error en el log.
+- Cada proceso usa su propia memoria. Mirá `docker stats` después de subir: si el servidor queda justo, bajá `WORKERS`.
+
 ## 5. nginx y HTTPS
 
 ```bash

@@ -3,6 +3,7 @@ import { drizzleAdapter } from "better-auth/adapters/drizzle";
 import { db, schema } from "./db/index.js";
 import { env } from "./env.js";
 import { resetMail, sendMail, welcomeMail } from "./mail.js";
+import { clustered, hit } from "./shared.js";
 
 export const googleEnabled = Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
 
@@ -27,6 +28,14 @@ export const auth = betterAuth({
       "/request-password-reset": { window: 60 * 60, max: 3 },
       "/reset-password": { window: 60 * 60, max: 10 },
     },
+    // Con varios procesos del API, los intentos se cuentan en todos juntos (ver shared.ts). Si no, cada proceso
+    // llevaría su propia cuenta y alcanzaría con repartir los intentos para multiplicar el límite.
+    ...(clustered
+      ? { customStorage: { consume: async (key: string, rule: { window: number; max: number }) => {
+          const allowed = await hit(`auth:${key}`, rule.max, rule.window * 1000);
+          return { allowed, retryAfter: allowed ? null : rule.window };
+        } } }
+      : {}),
   },
   database: drizzleAdapter(db, {
     provider: "pg",

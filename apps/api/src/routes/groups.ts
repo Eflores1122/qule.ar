@@ -11,6 +11,7 @@ import { autoHiddenGroups, autoHiddenUsers, deleteImageUnlessEvidence, forbidden
 import { limit } from "../ratelimit.js";
 import { MAX_UPLOAD_BYTES, saveImage } from "../storage.js";
 import { emitToGroup, emitToUser, isOnline, serializeGroupMessages, syncGroupRoom } from "../realtime.js";
+import { broadcast, onBroadcast } from "../shared.js";
 import { pushTo } from "../push.js";
 import { notifyGroupMessage } from "../groupNotify.js";
 
@@ -50,11 +51,13 @@ async function requireMod(groupId: string, userId: string) {
 /**
  * Cuántos miembros tiene cada grupo. Se guarda un minuto en memoria: el grupo general tiene miles de miembros
  * y contarlos en cada pedido de la lista de grupos era de lo más pesado para la base. Al entrar o salir alguien
- * se olvida el número de ese grupo (forgetMemberCount), así que quien entra ve el número nuevo enseguida.
+ * se olvida el número de ese grupo en todos los procesos del API (forgetMemberCount), así que quien entra ve el
+ * número nuevo enseguida.
  */
 const COUNT_TTL_MS = 60_000;
 const countCache = new Map<string, { n: number; at: number }>();
-const forgetMemberCount = (groupId: string) => countCache.delete(groupId);
+const forgetMemberCount = (groupId: string) => broadcast("forgetMemberCount", groupId);
+onBroadcast("forgetMemberCount", (id) => countCache.delete(String(id)));
 
 async function memberCounts(ids: string[]) {
   const map = new Map<string, number>();
@@ -320,7 +323,7 @@ groupRoutes.post("/groups/:id/photo", async (c) => {
   const { group: g, member } = await membership(c.req.param("id"), u.id);
   if (g.isGeneral) throw new HTTPException(400, { message: "El chat general usa el logo de la app" });
   if (member?.role !== "owner") throw new HTTPException(403, { message: "Solo el dueño puede cambiar la foto del grupo" });
-  limit(u.id, "upload");
+  await limit(u.id, "upload");
   const file = (await c.req.parseBody()).file;
   if (!(file instanceof File)) throw new HTTPException(400, { message: "Falta la foto" });
   if (file.type.startsWith("video/")) throw new HTTPException(400, { message: "La foto del grupo no puede ser un video" });

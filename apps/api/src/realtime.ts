@@ -1,18 +1,19 @@
 import type { Server as HttpServer } from "node:http";
 import { and, eq, inArray, lte } from "drizzle-orm";
+import { createAdapter } from "@socket.io/cluster-adapter";
 import { Server } from "socket.io";
 import { auth } from "./auth.js";
 import { db, schema } from "./db/index.js";
 import { authorsFor, blockedWith, reactionsFor } from "./lib.js";
 import { notifyGroupMessage } from "./groupNotify.js";
+import { clustered, socketClosed, socketOpened } from "./shared.js";
 
 const { groupMember, groupMessage } = schema;
 
 let io: Server | null = null;
 
-/** Quién tiene la app abierta ahora (cantidad de pestañas o dispositivos conectados). */
-const online = new Map<string, number>();
-export const isOnline = (userId: string) => online.has(userId);
+/** Quién tiene la app abierta ahora, en cualquier proceso del API (ver shared.ts). */
+export { isOnline } from "./shared.js";
 
 function touchLastSeen(userId: string) {
   db.update(schema.profile)
@@ -24,9 +25,17 @@ function touchLastSeen(userId: string) {
 export const userRoom = (id: string) => `user:${id}`;
 export const groupRoom = (id: string) => `group:${id}`;
 
-/** El socket solo recibe: todo lo que se manda pasa por la API HTTP. */
-export function attachRealtime(server: HttpServer) {
-  io = new Server(server, { path: "/socket.io" });
+/**
+ * El socket solo recibe: todo lo que se manda pasa por la API HTTP.
+ * Con varios procesos, cada evento llega a los sockets de todos (adaptador de cluster) y la conexión es solo
+ * por WebSocket: así cada conexión queda en un proceso, sin necesidad de "sesiones pegajosas".
+ * `publishQueued`: este proceso publica los mensajes en cola (uno solo, el líder).
+ */
+export function attachRealtime(server: HttpServer, opts: { publishQueued: boolean }) {
+  io = new Server(server, {
+    path: "/socket.io",
+    ...(clustered ? { adapter: createAdapter(), transports: ["websocket"] } : {}),
+  });
 
   io.use(async (socket, next) => {
     const headers = new Headers();
@@ -45,7 +54,7 @@ export function attachRealtime(server: HttpServer) {
   io.on("connection", async (socket) => {
     const userId: string = socket.data.userId;
     socket.join(userRoom(userId));
-    online.set(userId, (online.get(userId) ?? 0) + 1);
+    socketOpened(userId);
     touchLastSeen(userId);
     // "Escribiendo…": lo único que el socket acepta del cliente. Se verifica que sea parte de la charla.
     const convOther = new Map<string, string | null>();
@@ -63,16 +72,14 @@ export function attachRealtime(server: HttpServer) {
       if (other) io?.to(userRoom(other)).emit("dm:typing", { conversationId });
     });
     socket.on("disconnect", () => {
-      const n = (online.get(userId) ?? 1) - 1;
-      if (n <= 0) online.delete(userId);
-      else online.set(userId, n);
+      socketClosed(userId);
       touchLastSeen(userId);
     });
     const groups = await db.select().from(groupMember).where(eq(groupMember.userId, userId));
     for (const g of groups) socket.join(groupRoom(g.groupId));
   });
 
-  setInterval(() => publishDue().catch((e) => console.error("publishDue", e)), 1000);
+  if (opts.publishQueued) setInterval(() => publishDue().catch((e) => console.error("publishDue", e)), 1000);
 }
 
 /** Hace que todos los sockets de un usuario entren a (o salgan de) la sala de un grupo. */

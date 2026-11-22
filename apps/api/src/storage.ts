@@ -5,6 +5,7 @@ import { promisify } from "node:util";
 import path from "node:path";
 import sharp from "sharp";
 import { env } from "./env.js";
+import { clustered } from "./shared.js";
 
 // Por ahora las fotos se guardan en disco. Más adelante: un driver para Cloudflare R2.
 const dir = path.join(env.DATA_DIR, "uploads");
@@ -85,9 +86,9 @@ export const videoEnabled = await run(FFMPEG, ["-version"]).then(() => true, () 
  */
 /**
  * Videos procesándose a la vez. ffmpeg usa mucho procesador: si varias personas suben videos juntas, los que
- * sobran esperan su turno en vez de trabar el servidor para todes.
+ * sobran esperan su turno en vez de trabar el servidor para todes. Con varios procesos del API, uno por proceso.
  */
-const MAX_VIDEO_JOBS = 2;
+const MAX_VIDEO_JOBS = clustered ? 1 : 2;
 let videoJobs = 0;
 const videoQueue: (() => void)[] = [];
 async function videoSlot<T>(job: () => Promise<T>): Promise<T> {
