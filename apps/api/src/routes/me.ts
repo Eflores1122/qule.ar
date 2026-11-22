@@ -1,4 +1,4 @@
-import { and, asc, eq, or } from "drizzle-orm";
+import { and, asc, desc, eq, or } from "drizzle-orm";
 import { mailEnabled } from "../mail.js";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
@@ -122,6 +122,16 @@ meRoutes.get("/me", requireUser, async (c) => {
       : null,
     photos: photos.map((x) => ({ id: x.id, position: x.position, isPrivate: x.isPrivate, ...mediaOut(x) })),
   });
+});
+
+meRoutes.get("/me/reports", requireUser, requireProfile, async (c) => {
+  const { report } = schema;
+  const rows = await db.select({
+    id: report.id, reason: report.reason, createdAt: report.createdAt, reviewedAt: report.resolvedAt,
+  }).from(report).where(eq(report.reporterId, c.get("user").id))
+    .orderBy(desc(report.createdAt), desc(report.id)).limit(50);
+  c.header("Cache-Control", "no-store");
+  return c.json(rows);
 });
 
 meRoutes.put("/me/profile", requireUser, async (c) => {

@@ -22,6 +22,7 @@ import { Conversation } from "./pages/Conversation";
 import { ProfilePage } from "./pages/Profile";
 import { EditProfile } from "./pages/MyProfile";
 import { MyProfileOverview } from "./pages/MyProfileOverview";
+import { MyReports } from "./pages/MyReports";
 import { Settings } from "./pages/Settings";
 import { ChatIcon, GridIcon, GroupIcon, UserIcon } from "./components/Icons";
 import { Nearby } from "./pages/Nearby";
@@ -77,6 +78,7 @@ export function App() {
           <Route path="/yo" element={<MyProfileOverview />} />
           <Route path="/yo/editar" element={<EditProfile />} />
           <Route path="/yo/configuracion" element={<Settings />} />
+          <Route path="/yo/reportes" element={<MyReports />} />
           <Route path="/visitas" element={<Views />} />
           <Route path="/favoritos" element={<Favorites />} />
           <Route path="/toques" element={<Toques />} />
@@ -159,11 +161,14 @@ function ShellContent() {
     s.on("group:rejected", rejected);
     s.on("group:removed", removed);
     s.on("group:invite", invited);
+    const reportReviewed = () => show("Revisamos un reporte tuyo", "/yo/reportes");
+    s.on("report:reviewed", reportReviewed);
     return () => {
       s.off("group:accepted", accepted);
       s.off("group:rejected", rejected);
       s.off("group:removed", removed);
       s.off("group:invite", invited);
+      s.off("report:reviewed", reportReviewed);
     };
   }, []);
 

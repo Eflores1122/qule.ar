@@ -44,6 +44,7 @@ export function MyProfileOverview() {
               <img src="/reacciones/rayo.svg" alt="" width={18} height={18} /> Toques
               {unseen > 0 && <span className="badge badge--inline" aria-label={`${unseen} sin ver`}>{unseen}</span>}
             </Link>
+            <Link to="/yo/reportes" className="quicklink">Mis reportes</Link>
             {me.user.isAdmin && <Link to="/admin" className="quicklink quicklink--wide">Moderación</Link>}
           </nav>
         </section>

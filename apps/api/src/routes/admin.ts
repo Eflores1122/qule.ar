@@ -8,7 +8,7 @@ import { db, schema } from "../db/index.js";
 import { env } from "../env.js";
 import { authorsFor, newId, requireProfile, requireUser, type AppEnv } from "../lib.js";
 import { pushEnabled, pushTo, vapidPublicKey } from "../push.js";
-import { disconnectUser, emitToGroup } from "../realtime.js";
+import { disconnectUser, emitToGroup, emitToUser } from "../realtime.js";
 import { deleteImage } from "../storage.js";
 import { AUTO_DETAILS_PREFIX, autoHiddenGroups, autoHiddenUsers, deleteImageUnlessEvidence, isUrgent, releaseEvidence, REMOVED_GROUP_DAYS } from "../moderation.js";
 import { removeGroup } from "./groups.js";
@@ -176,12 +176,16 @@ adminRoutes.get("/admin/reports", async (c) => {
 
 async function closeReports(ids: string[], adminId: string, status: "dismissed" | "actioned", resolution: string) {
   if (!ids.length) return;
-  await db
+  const closed = await db
     .update(report)
     .set({ status, resolvedBy: adminId, resolvedAt: new Date(), resolution })
-    .where(and(inArray(report.id, ids), eq(report.status, "open")));
+    .where(and(inArray(report.id, ids), eq(report.status, "open")))
+    .returning({ id: report.id, reporterId: report.reporterId });
+  for (const id of new Set(closed.flatMap((entry) => entry.reporterId ? [entry.reporterId] : []))) {
+    emitToUser(id, "report:reviewed", {});
+  }
   // Descartado: la copia del mensaje y los archivos guardados como prueba se liberan
-  if (status === "dismissed") await releaseEvidence(ids);
+  if (status === "dismissed") await releaseEvidence(closed.map((entry) => entry.id));
 }
 
 adminRoutes.post("/admin/reports/:id/dismiss", async (c) => {
