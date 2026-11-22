@@ -13,12 +13,34 @@ function isHeicPhoto(file: File, bytes: ArrayBuffer): boolean {
     || /\.hei[cf]$/i.test(file.name);
 }
 
+async function readPhotoBytes(file: File): Promise<ArrayBuffer> {
+  const bytes = await file.arrayBuffer().catch(() => null);
+  if (bytes?.byteLength) return bytes;
+
+  // Algunos proveedores entregan un archivo remoto a través del selector nativo.
+  // Probamos la otra API de lectura del navegador antes de darlo por inaccesible.
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    const fail = () => reject(new Error("No pudimos abrir la foto. Descargala al dispositivo y volvé a elegirla."));
+    reader.onload = () => {
+      if (reader.result instanceof ArrayBuffer && reader.result.byteLength) resolve(reader.result);
+      else fail();
+    };
+    reader.onerror = fail;
+    reader.onabort = fail;
+    reader.readAsArrayBuffer(file);
+  });
+}
+
 export async function preparePhotoForUpload(file: File): Promise<File> {
   if (file.size > MAX_PHOTO_BYTES) throw new Error("La foto pesa demasiado (máx. 12 MB)");
   // El selector puede entregar un archivo respaldado por un proveedor de fotos en la nube.
   // Leemos sus bytes antes de que el navegador intente enviarlo como parte del formulario.
-  const bytes = await file.arrayBuffer().catch(() => null);
-  if (!bytes?.byteLength) throw new Error("No pudimos abrir la foto. Descargala al dispositivo y volvé a elegirla.");
+  const bytes = await readPhotoBytes(file);
+  // El selector puede entregar un JPEG convertido y conservar el nombre o MIME de la HEIC original.
+  const signature = new Uint8Array(bytes, 0, Math.min(3, bytes.byteLength));
+  const isJpeg = signature[0] === 0xff && signature[1] === 0xd8 && signature[2] === 0xff;
+  if (isJpeg) return new File([bytes], file.name, { type: "image/jpeg" });
   const readable = new File([bytes], file.name, { type: file.type });
   if (!isHeicPhoto(file, bytes)) return readable;
 
@@ -32,4 +54,20 @@ export async function preparePhotoForUpload(file: File): Promise<File> {
   }
   if (jpeg.size > MAX_PHOTO_BYTES) throw new Error("La foto convertida pesa demasiado (máx. 12 MB)");
   return new File([jpeg], `${file.name.replace(/\.[^.]+$/, "") || "foto"}.jpg`, { type: jpeg.type });
+}
+
+/** Devuelve una imagen ya decodificada para que el recortador pueda dibujarla al abrirse. */
+export async function preparePhotoForCrop(file: File): Promise<HTMLImageElement> {
+  const prepared = await preparePhotoForUpload(file);
+  const url = URL.createObjectURL(prepared);
+  try {
+    const image = new Image();
+    image.src = url;
+    await image.decode();
+    return image;
+  } catch {
+    throw new Error("No pudimos leer esta imagen. Probá con otra.");
+  } finally {
+    URL.revokeObjectURL(url);
+  }
 }
