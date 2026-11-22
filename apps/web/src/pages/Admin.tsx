@@ -55,6 +55,7 @@ export function Admin() {
   const [suspending, setSuspending] = useState<Report | null>(null);
   const [removing, setRemoving] = useState<Report | null>(null);
   const [error, setError] = useState("");
+  const [initialLoadPending, setInitialLoadPending] = useState(true);
   const [permissionDenied, setPermissionDenied] = useState(false);
 
   const adminApi: typeof api = useCallback(async <T,>(path: string, init?: Parameters<typeof api>[1]) => {
@@ -68,13 +69,14 @@ export function Admin() {
 
   const load = useCallback(async () => {
     try {
-      const nextStats = await adminApi<Stats>("/admin/stats");
+      setStats(await adminApi<Stats>("/admin/stats"));
       if (tab === "suspended") setSuspended(await adminApi<Suspended[]>("/admin/suspended"));
       else if (tab === "groups") setRemoved(await adminApi<RemovedGroup[]>("/admin/groups/removed"));
       else setReports(await adminApi<Report[]>(`/admin/reports?status=${tab}`));
-      setStats(nextStats);
     } catch (e) {
       setError((e as Error).message);
+    } finally {
+      setInitialLoadPending(false);
     }
   }, [adminApi, tab]);
 
@@ -93,16 +95,29 @@ export function Admin() {
   }
 
   if (permissionDenied) return <Navigate to="/" replace />;
+  if (initialLoadPending) {
+    return <div className="page"><div className="empty"><p className="muted" role="status">Cargando…</p></div></div>;
+  }
+
+  const topbar = (
+    <header className="topbar topbar--thread">
+      <button className="iconbtn" onClick={() => nav("/yo")} aria-label="Volver"><BackIcon /></button>
+      <h1 className="topbar__title topbar__title--sm">Moderación</h1>
+    </header>
+  );
+
   if (!stats) {
-    return error ? <p className="notice notice--error" role="alert">No pudimos cargar el panel.</p> : null;
+    return (
+      <div className="page">
+        {topbar}
+        <p className="notice notice--error" role="alert">No pudimos cargar el panel.</p>
+      </div>
+    );
   }
 
   return (
     <div className="page">
-      <header className="topbar topbar--thread">
-        <button className="iconbtn" onClick={() => nav("/yo")} aria-label="Volver"><BackIcon /></button>
-        <h1 className="topbar__title topbar__title--sm">Moderación</h1>
-      </header>
+      {topbar}
 
       <dl className="kpis">
         <div><dt>Perfiles</dt><dd>{stats.users}</dd></div>
