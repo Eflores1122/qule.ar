@@ -72,3 +72,10 @@ export const SettingsIcon = () => (
 export const ChevronRightIcon = () => (
   <svg {...base}><path d="m9 5 7 7-7 7" /></svg>
 );
+export const CloseIcon = () => (
+  <svg {...base} width={18} height={18}><path d="M6 6l12 12M18 6 6 18" /></svg>
+);
+/** Frases guardadas del chat: un globo de diálogo con renglones. */
+export const PhraseIcon = () => (
+  <svg {...base}><path d="M21 12a8 8 0 0 1-11.8 7L4 20.5l1.5-4.6A8 8 0 1 1 21 12z" /><path d="M9 10h6M9 13.5h4" /></svg>
+);
