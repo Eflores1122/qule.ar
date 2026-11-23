@@ -75,7 +75,10 @@ export const ChevronRightIcon = () => (
 export const CloseIcon = () => (
   <svg {...base} width={18} height={18}><path d="M6 6l12 12M18 6 6 18" /></svg>
 );
-/** Frases guardadas del chat: un globo de diálogo con renglones. */
+/**
+ * Frases guardadas del chat: un globo rectangular con dos renglones.
+ * Rectangular para que los renglones queden centrados y no se confunda con el globo redondo de Mensajes.
+ */
 export const PhraseIcon = () => (
-  <svg {...base}><path d="M21 12a8 8 0 0 1-11.8 7L4 20.5l1.5-4.6A8 8 0 1 1 21 12z" /><path d="M9 10h6M9 13.5h4" /></svg>
+  <svg {...base}><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v8a2.5 2.5 0 0 1-2.5 2.5H9l-5 4z" /><path d="M8 8.5h8M8 12.5h5" /></svg>
 );
