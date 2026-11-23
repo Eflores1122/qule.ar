@@ -47,6 +47,19 @@ export const requestFilters = z.object({
 });
 export type RequestFilters = z.infer<typeof requestFilters>;
 
+/** Solicitudes que se resuelven como mucho en un pedido de lote. */
+export const BULK_MAX = 200;
+
+/**
+ * Aceptar o rechazar en lote: o estas solicitudes (`ids`), o las que coinciden con estos filtros
+ * (`filtros`, de la más nueva a la más vieja, hasta BULK_MAX por pedido).
+ */
+export const bulkInput = z.object({
+  action: z.enum(["accept", "reject"]),
+  ids: z.array(z.string().min(1).max(64)).min(1).max(BULK_MAX).optional(),
+  filtros: requestFilters.omit({ cursor: true }).optional(),
+}).refine((b) => (b.ids ? 1 : 0) + (b.filtros ? 1 : 0) === 1, { message: "Elegí solicitudes o filtros" });
+
 /**
  * Fechas de nacimiento que corresponden a un rango de edad, hoy.
  * Tener `min` años o más ⇔ nació el (hoy - min años) o antes.
@@ -64,6 +77,22 @@ export function birthdateRange(min: number | undefined, max: number | undefined,
 }
 
 /**
+ * Condiciones de "pendientes de este grupo que coinciden con los filtros". Usan `user` y `profile`,
+ * así que la consulta tiene que unir esas tablas. La lista y el lote usan las mismas.
+ */
+export function pendingConds(groupId: string, f: Omit<RequestFilters, "cursor">, now = new Date()): SQL[] {
+  const conds: SQL[] = [eq(groupJoinRequest.groupId, groupId), eq(groupJoinRequest.status, "pending")];
+  const hasPublicPhoto = sql`exists (select 1 from ${photo} where ${photo.userId} = ${groupJoinRequest.userId} and ${photo.isPrivate} = false)`;
+  if (f.foto === "con") conds.push(hasPublicPhoto);
+  if (f.foto === "sin") conds.push(not(hasPublicPhoto));
+  if (f.nueva) conds.push(gt(user.createdAt, new Date(now.getTime() - NEW_ACCOUNT_DAYS * 86_400_000)));
+  const { bornOnOrBefore, bornAfter } = birthdateRange(f.edadMin, f.edadMax, now);
+  if (bornOnOrBefore) conds.push(lte(profile.birthdate, bornOnOrBefore));
+  if (bornAfter) conds.push(gt(profile.birthdate, bornAfter));
+  return conds;
+}
+
+/**
  * Una página de solicitudes pendientes de un grupo, de la más nueva a la más vieja.
  * `total` (cuántas hay con estos filtros) viene solo en la primera página.
  * Devuelve null si el cursor no es válido.
@@ -73,14 +102,7 @@ export async function requestPage(groupId: string, f: RequestFilters, now = new 
   if (f.cursor && !cursor) return null;
 
   const newSince = new Date(now.getTime() - NEW_ACCOUNT_DAYS * 86_400_000);
-  const conds: SQL[] = [eq(groupJoinRequest.groupId, groupId), eq(groupJoinRequest.status, "pending")];
-  const hasPublicPhoto = sql`exists (select 1 from ${photo} where ${photo.userId} = ${groupJoinRequest.userId} and ${photo.isPrivate} = false)`;
-  if (f.foto === "con") conds.push(hasPublicPhoto);
-  if (f.foto === "sin") conds.push(not(hasPublicPhoto));
-  if (f.nueva) conds.push(gt(user.createdAt, newSince));
-  const { bornOnOrBefore, bornAfter } = birthdateRange(f.edadMin, f.edadMax, now);
-  if (bornOnOrBefore) conds.push(lte(profile.birthdate, bornOnOrBefore));
-  if (bornAfter) conds.push(gt(profile.birthdate, bornAfter));
+  const conds = pendingConds(groupId, f, now);
 
   const pageConds = cursor
     ? [...conds, or(

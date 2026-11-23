@@ -27,7 +27,18 @@ function query(f: Filters, cursor?: string | null) {
 /** ¿`a` va después de `b` en la lista (más vieja)? Mismo orden que la API: fecha y después id. */
 const after = (a: JoinRequest, b: JoinRequest) => a.createdAt < b.createdAt || (a.createdAt === b.createdAt && a.id < b.id);
 
+/** Los mismos filtros, como objeto para el pedido de lote. */
+function filterBody(f: Filters) {
+  return Object.fromEntries(new URLSearchParams(query(f).slice(1)));
+}
+
 type State = { items: JoinRequest[]; cursor: string | null; total: number };
+type Decision = "accept" | "reject";
+/** Lo que hay que confirmar: las elegidas o todas las que coinciden con los filtros. */
+type BulkAsk = { action: Decision; scope: "picked" | "all"; n: number };
+type BulkResult = { resolved: number; remaining: number };
+/** Lo mismo que BULK_MAX en la API. */
+const BULK_MAX = 200;
 
 /**
  * Solicitudes para entrar a un grupo (solo dueño y moderadores):
@@ -39,6 +50,9 @@ export function JoinRequests({ groupId, onChanged }: { groupId: string; onChange
   const [data, setData] = useState<State | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
   const [error, setError] = useState("");
+  const [picked, setPicked] = useState<Set<string>>(new Set());
+  const [ask, setAsk] = useState<BulkAsk | null>(null);
+  const [progress, setProgress] = useState<{ done: number; of: number } | null>(null);
   const asked = useRef(0);
   const key = query(f);
 
@@ -67,6 +81,8 @@ export function JoinRequests({ groupId, onChanged }: { groupId: string; onChange
   // Al cambiar los filtros, de cero (la edad espera a que termines de escribir)
   useEffect(() => {
     setData(null);
+    setPicked(new Set());
+    setAsk(null);
     const t = setTimeout(() => refresh(false), f.edadMin || f.edadMax ? 400 : 0);
     return () => clearTimeout(t);
   }, [refresh, f.edadMin, f.edadMax]);
@@ -101,7 +117,14 @@ export function JoinRequests({ groupId, onChanged }: { groupId: string; onChange
 
   async function decide(r: JoinRequest, decision: "accept" | "reject") {
     setError("");
-    const drop = () => setData((prev) => prev && { ...prev, items: prev.items.filter((x) => x.id !== r.id), total: Math.max(0, prev.total - 1) });
+    const drop = () => {
+      setData((prev) => prev && { ...prev, items: prev.items.filter((x) => x.id !== r.id), total: Math.max(0, prev.total - 1) });
+      setPicked((cur) => {
+        const next = new Set(cur);
+        next.delete(r.id);
+        return next;
+      });
+    };
     try {
       await api(`/groups/${groupId}/requests/${r.id}/${decision}`, { method: "POST" });
       drop();
@@ -112,6 +135,51 @@ export function JoinRequests({ groupId, onChanged }: { groupId: string; onChange
     }
     onChanged();
   }
+
+  /** Resuelve en lote. "all" va de a BULK_MAX hasta llegar a las que confirmaste, aunque entren nuevas mientras tanto. */
+  async function runBulk({ action, scope, n }: BulkAsk) {
+    setAsk(null);
+    setError("");
+    setProgress({ done: 0, of: n });
+    let done = 0;
+    try {
+      if (scope === "picked") {
+        const ids = [...picked];
+        for (let i = 0; i < ids.length; i += BULK_MAX) {
+          const r = await api<BulkResult>(`/groups/${groupId}/requests/bulk`, { method: "POST", json: { action, ids: ids.slice(i, i + BULK_MAX) } });
+          done += r.resolved;
+          setProgress({ done, of: n });
+        }
+      } else {
+        while (done < n) {
+          const r = await api<BulkResult>(`/groups/${groupId}/requests/bulk`, { method: "POST", json: { action, filtros: filterBody(f) } });
+          done += r.resolved;
+          setProgress({ done: Math.min(done, n), of: n });
+          if (!r.resolved || !r.remaining) break;
+        }
+      }
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setProgress(null);
+      setPicked(new Set());
+      await refresh(false);
+      onChanged();
+    }
+  }
+
+  function toggle(id: string) {
+    setPicked((cur) => {
+      const next = new Set(cur);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  const visible = data?.items ?? [];
+  const allVisible = visible.length > 0 && visible.every((r) => picked.has(r.id));
+  const busy = progress !== null;
 
   const set = <K extends keyof Filters>(k: K, v: Filters[K]) => setF((cur) => ({ ...cur, [k]: v }));
   const active = key !== "" || ageOpen;
@@ -146,21 +214,68 @@ export function JoinRequests({ groupId, onChanged }: { groupId: string; onChange
 
       {error && <div className="notice notice--error" role="alert">{error}</div>}
 
+      {data && data.total > 0 && (
+        <div className="req-bulk">
+          {progress ? (
+            <p className="muted small" role="status">Resolviendo… {progress.done} de {progress.of}</p>
+          ) : ask ? (
+            <div className={`confirm ${ask.action === "reject" ? "confirm--danger" : ""}`}>
+              <p>
+                {ask.action === "accept"
+                  ? `¿Aceptar ${ask.n} ${ask.n === 1 ? "solicitud" : "solicitudes"}? Entran al grupo y les avisamos.`
+                  : `¿Rechazar ${ask.n} ${ask.n === 1 ? "solicitud" : "solicitudes"}? Pueden volver a pedir en 7 días.`}
+                {ask.scope === "all" && key ? " Son las que coinciden con los filtros." : ""}
+              </p>
+              <div className="row">
+                <button type="button" className="btn" onClick={() => setAsk(null)}>Cancelar</button>
+                <button type="button" className={`btn ${ask.action === "accept" ? "btn--primary" : "btn--danger"}`} onClick={() => runBulk(ask)}>
+                  {ask.action === "accept" ? "Aceptar" : "Rechazar"} {ask.n}
+                </button>
+              </div>
+            </div>
+          ) : (
+            <>
+              <label className="check">
+                <input type="checkbox" checked={allVisible} onChange={() => setPicked(allVisible ? new Set() : new Set(visible.map((r) => r.id)))} />
+                <span>Elegir todas las que se ven ({visible.length})</span>
+              </label>
+              {picked.size > 0 ? (
+                <div className="row">
+                  <button type="button" className="btn btn--small" onClick={() => setAsk({ action: "reject", scope: "picked", n: picked.size })}>Rechazar {picked.size}</button>
+                  <button type="button" className="btn btn--small btn--primary" onClick={() => setAsk({ action: "accept", scope: "picked", n: picked.size })}>Aceptar {picked.size}</button>
+                </div>
+              ) : data.total > 1 && (
+                <>
+                  <p className="muted small">{key ? `Las ${data.total} que coinciden con los filtros:` : `Las ${data.total}, de una:`}</p>
+                  <div className="row">
+                    <button type="button" className="btn btn--small" onClick={() => setAsk({ action: "reject", scope: "all", n: data.total })}>Rechazar todas</button>
+                    <button type="button" className="btn btn--small" onClick={() => setAsk({ action: "accept", scope: "all", n: data.total })}>Aceptar todas</button>
+                  </div>
+                </>
+              )}
+            </>
+          )}
+        </div>
+      )}
+
       {data && data.items.length > 0 && (
         <ul className="reqs">
           {data.items.map((r) => (
-            <li key={r.id} className="req">
-              <Link to={`/perfil/${r.user.id}`} className="req__who">
-                <Avatar src={r.user.photo} name={r.user.name} size={44} />
-                <span className="req__name">
-                  <span><b>{r.user.name}</b> <span className="muted">{r.user.age}</span></span>
-                  <span className="muted small">{since(r.createdAt)}{r.newAccount ? " · cuenta nueva" : ""}</span>
-                </span>
-              </Link>
+            <li key={r.id} className={`req ${picked.has(r.id) ? "req--picked" : ""}`}>
+              <div className="req__top">
+                <input type="checkbox" className="req__pick" checked={picked.has(r.id)} onChange={() => toggle(r.id)} disabled={busy} aria-label={`Elegir a ${r.user.name}`} />
+                <Link to={`/perfil/${r.user.id}`} className="req__who">
+                  <Avatar src={r.user.photo} name={r.user.name} size={44} />
+                  <span className="req__name">
+                    <span><b>{r.user.name}</b> <span className="muted">{r.user.age}</span></span>
+                    <span className="muted small">{since(r.createdAt)}{r.newAccount ? " · cuenta nueva" : ""}</span>
+                  </span>
+                </Link>
+              </div>
               {r.message && <p className="req__msg">“{r.message}”</p>}
               <div className="row">
-                <button className="btn btn--small" onClick={() => decide(r, "reject")}>Rechazar</button>
-                <button className="btn btn--small btn--primary" onClick={() => decide(r, "accept")}>Aceptar</button>
+                <button className="btn btn--small" disabled={busy} onClick={() => decide(r, "reject")}>Rechazar</button>
+                <button className="btn btn--small btn--primary" disabled={busy} onClick={() => decide(r, "accept")}>Aceptar</button>
               </div>
             </li>
           ))}

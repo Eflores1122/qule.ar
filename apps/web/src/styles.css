@@ -670,3 +670,8 @@ button.quote:hover { background: var(--surface-3); }
 /* Solicitudes de ingreso: nombre y, abajo, hace cuánto pidió */
 .req__name { display: flex; flex-direction: column; line-height: 1.25; min-width: 0; }
 .req-panel { display: flex; flex-direction: column; gap: 10px; }
+/* Solicitudes en lote: casilla en cada tarjeta y barra arriba de la lista */
+.req-bulk { display: flex; flex-direction: column; gap: 10px; }
+.req__top { display: flex; align-items: center; gap: 12px; min-width: 0; }
+.req__pick { width: 22px; height: 22px; margin: 0; flex: none; accent-color: var(--accent); }
+.req--picked { border-color: var(--accent); }
