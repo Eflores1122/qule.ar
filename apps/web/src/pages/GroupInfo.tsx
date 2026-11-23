@@ -1,6 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
-import { api, getSocket, ROLE_LABEL, type GroupInfo as Info, type JoinRequest, type Member, type SentInvite, type SpamRules } from "../api";
+import { api, getSocket, ROLE_LABEL, type GroupInfo as Info, type JoinRequest, type Member, type MemberPage, type SentInvite, type SpamRules } from "../api";
 import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { BackIcon, PlusIcon } from "../components/Icons";
@@ -18,6 +18,10 @@ export function GroupInfo() {
   const nav = useNavigate();
   const [info, setInfo] = useState<Info | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
+  // Las recargas por socket o invitaciones llaman a load() sin cantidad: el ref conserva lo que se ve.
+  const visibleMembers = useRef(0);
+  const [memberNext, setMemberNext] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [requests, setRequests] = useState<JoinRequest[]>([]);
   const [invites, setInvites] = useState<SentInvite[]>([]);
   const [inviting, setInviting] = useState(false);
@@ -29,12 +33,23 @@ export function GroupInfo() {
   const isMod = info?.role === "owner" || info?.role === "moderator";
   const isOwner = info?.role === "owner";
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (keepMembers = visibleMembers.current) => {
     try {
       const g = await api<Info>(`/groups/${id}`);
       setInfo(g);
       if (!g.role) return nav(`/grupos/${id}`, { replace: true });
-      setMembers(await api<Member[]>(`/groups/${id}/members`));
+      // De a 25; si hace falta (por ejemplo al expulsar a alguien), se vuelven a pedir las páginas ya abiertas.
+      const first = await api<MemberPage>(`/groups/${id}/members`);
+      let list = first.members;
+      let next = first.nextOffset;
+      while (next != null && list.length < keepMembers) {
+        const more = await api<MemberPage>(`/groups/${id}/members?offset=${next}`);
+        list = [...list, ...more.members];
+        next = more.nextOffset;
+      }
+      visibleMembers.current = list.length;
+      setMembers(list);
+      setMemberNext(next);
       if ((g.role === "owner" || g.role === "moderator") && !g.isGeneral) {
         const [reqs, invs] = await Promise.all([
           api<JoinRequest[]>(`/groups/${id}/requests`),
@@ -76,6 +91,25 @@ export function GroupInfo() {
       await load();
     } catch (e) {
       setError((e as Error).message);
+    }
+  }
+
+  async function loadMoreMembers() {
+    if (memberNext == null || loadingMore) return;
+    setError("");
+    setLoadingMore(true);
+    try {
+      const page = await api<MemberPage>(`/groups/${id}/members?offset=${memberNext}`);
+      setMembers((prev) => {
+        const nextList = [...prev, ...page.members];
+        visibleMembers.current = nextList.length;
+        return nextList;
+      });
+      setMemberNext(page.nextOffset);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoadingMore(false);
     }
   }
 
@@ -182,7 +216,7 @@ export function GroupInfo() {
 
       {!info.isGeneral && (
         <section className="section">
-          <h2 className="section__title">Miembros <span className="muted">{members.length}</span></h2>
+          <h2 className="section__title">Miembros <span className="muted">{info.memberCount}</span></h2>
           <ul className="members">
             {members.map((m) => {
               const isMe = m.id === me?.user.id;
@@ -219,6 +253,13 @@ export function GroupInfo() {
               );
             })}
           </ul>
+          {memberNext != null && (
+            <div className="center">
+              <button className="btn btn--small" disabled={loadingMore} onClick={loadMoreMembers}>
+                {loadingMore ? "Cargando…" : "Ver más"}
+              </button>
+            </div>
+          )}
         </section>
       )}
 
