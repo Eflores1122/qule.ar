@@ -10,6 +10,8 @@ import { JoinButton } from "../components/JoinButton";
 import { ReportDialog } from "../components/ReportDialog";
 import { slowModeText } from "../features/groups/groupRules";
 import { SavedPhrasesButton, SavedPhrasesMenu } from "../features/phrases/SavedPhrases";
+import { useDraft } from "../features/chat/useDraft";
+import { useMessageMenuPosition } from "../useMessageMenuPosition";
 
 const fmtTime = (iso: string) =>
   new Date(iso).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
@@ -28,10 +30,10 @@ export function GroupChat() {
   const [messages, setMessages] = useState<GroupMessage[]>([]);
   const [queued, setQueued] = useState<GroupMessage[]>([]);
   const [hasMore, setHasMore] = useState(false);
-  const [text, setText] = useState("");
+  const [editing, setEditing] = useState<string | null>(null);
+  const [text, setText] = useDraft(`group:${me?.user.id ?? ""}:${id}`, editing === null);
   const [phrasesOpen, setPhrasesOpen] = useState(false);
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
-  const [editing, setEditing] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [replyTo, setReplyTo] = useState<GroupMessage | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -66,6 +68,7 @@ export function GroupChat() {
   const [reportingGroupId, setReportingGroupId] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const listRef = useRef<HTMLDivElement>(null);
+  const positionMessageMenu = useMessageMenuPosition(listRef);
   const stickToBottom = useRef(true);
 
   const isMember = Boolean(info?.role);
@@ -189,6 +192,8 @@ export function GroupChat() {
     e?.preventDefault();
     const body = text.trim();
     if (!body) return;
+    // Mandar con el botón le saca el foco al campo y cierra el teclado. Se lo devolvemos.
+    inputRef.current?.focus();
     setNotice(null);
     // Se vacía al toque; si falla, se devuelve el texto
     setText("");
@@ -345,7 +350,7 @@ export function GroupChat() {
                 <DotsIcon />
               </button>
               {menuFor === m.id && (
-                <div className="menu" role="menu">
+                <div className="menu" role="menu" ref={positionMessageMenu}>
                   {m.status === "published" && <ReactionPicker current={myReaction(m.reactions ?? [], me?.user.id)} onPick={(k) => react(m, k)} />}
                   {m.status === "published" && <button role="menuitem" onClick={() => startReply(m)}>Responder</button>}
                   {mine ? (
@@ -425,7 +430,7 @@ export function GroupChat() {
               }
             }}
           />
-          <button className="sendbtn" aria-label="Mandar" disabled={!text.trim()}>
+          <button className="sendbtn" aria-label="Mandar" disabled={!text.trim()} onMouseDown={(e) => e.preventDefault()}>
             <SendIcon />
           </button>
         </div>
