@@ -11,6 +11,7 @@ import { useMessageMenuPosition } from "../useMessageMenuPosition";
 import { SavedPhrasesButton, SavedPhrasesMenu } from "../features/phrases/SavedPhrases";
 import { useDraft } from "../features/chat/useDraft";
 import { batchReadReceipts } from "../features/messages/readReceipts";
+import { ShareAlbumMenu } from "../features/chat/ShareAlbumMenu";
 
 export function Conversation() {
   const { id = "" } = useParams();
@@ -25,7 +26,7 @@ export function Conversation() {
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
   const [typing, setTyping] = useState(false);
-  const [photoMenu, setPhotoMenu] = useState(false);
+  const [photoMenu, setPhotoMenu] = useState<false | "options" | "album">(false);
   const [msgMenu, setMsgMenu] = useState<string | null>(null);
   const [viewer, setViewer] = useState<{ src: string; seconds: number } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -277,11 +278,17 @@ export function Conversation() {
       {error && <div className="notice notice--error" role="alert">{error}</div>}
 
       <form className="composer" onSubmit={send}>
-        {photoMenu && (
+        {photoMenu === "album" && other && (
+          <ShareAlbumMenu userId={other.id} name={other.name} onBack={() => setPhotoMenu("options")} />
+        )}
+        {photoMenu === "options" && (
           <div className="photo-menu" role="menu">
             <button type="button" role="menuitem" onClick={() => pickPhoto(false)}><ImageIcon /> Foto</button>
             <button type="button" role="menuitem" onClick={() => pickPhoto(true)}>
               <TimerIcon /> Foto temporal <span className="muted small">se ve una vez, {10} s</span>
+            </button>
+            <button type="button" role="menuitem" onClick={() => setPhotoMenu("album")}>
+              <LockIcon /> Álbum privado <span className="muted small">compartilo</span>
             </button>
           </div>
         )}
@@ -289,7 +296,7 @@ export function Conversation() {
           <SavedPhrasesMenu text={text} onClose={() => setPhrasesOpen(false)} onPick={(p) => { onType(p); setPhrasesOpen(false); }} />
         )}
         <div className="composer__row">
-          <button type="button" className="iconbtn" aria-label="Mandar foto" aria-expanded={photoMenu} disabled={sending} onClick={() => { setPhotoMenu((v) => !v); setPhrasesOpen(false); }}>
+          <button type="button" className="iconbtn" aria-label="Mandar foto" aria-expanded={Boolean(photoMenu)} disabled={sending} onClick={() => { setPhotoMenu((v) => (v ? false : "options")); setPhrasesOpen(false); }}>
             <ImageIcon />
           </button>
           <SavedPhrasesButton open={phrasesOpen} onToggle={() => { setPhrasesOpen((v) => !v); setPhotoMenu(false); }} />
