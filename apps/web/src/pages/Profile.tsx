@@ -7,17 +7,10 @@ import { useTabData } from "../features/navigation/tabData";
 import { InviteToGroups } from "../components/Invite";
 import { ReportDialog } from "../components/ReportDialog";
 import { StaffDialog } from "../components/StaffDialog";
-import { albumCount, AlbumGrid, AlbumViewer, untilLabel } from "../components/AlbumViewer";
+import { albumCount, AlbumGrid, AlbumViewer, SHARE_OPTIONS, untilLabel } from "../components/AlbumViewer";
 import { ProfileCover, ProfileStats } from "../components/ProfileContent";
 import { ReactionIcon, ReactionPicker } from "../components/Reactions";
 import { reactionLabel } from "../reactions";
-
-const SHARE_OPTIONS: { hours: number | null; label: string }[] = [
-  { hours: 1, label: "1 hora" },
-  { hours: 24, label: "24 horas" },
-  { hours: 168, label: "7 días" },
-  { hours: null, label: "Sin límite" },
-];
 
 export function ProfilePage() {
   const { id = "" } = useParams();
