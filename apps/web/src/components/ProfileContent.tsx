@@ -1,5 +1,6 @@
 import { useState, type ReactNode } from "react";
 import type { PublicProfile } from "../api";
+import { hasPlaceLabel } from "../features/place/hasPlace";
 
 type CoverProps = {
   photos: string[];
@@ -53,7 +54,7 @@ export function ProfileCover({ photos, displayName, age, status, back, aside }: 
   );
 }
 
-type StatsInput = Pick<PublicProfile, "about" | "heightCm" | "weightKg" | "bodyType" | "position" | "relationship" | "pronouns" | "hivStatus" | "lastTested" | "tribes" | "lookingFor">;
+type StatsInput = Pick<PublicProfile, "about" | "heightCm" | "weightKg" | "bodyType" | "position" | "relationship" | "pronouns" | "hasPlace" | "hivStatus" | "lastTested" | "tribes" | "lookingFor">;
 
 export function ProfileStats({ p, empty = null }: { p: StatsInput; empty?: ReactNode }) {
   const rows: [string, string | null][] = [
@@ -63,6 +64,7 @@ export function ProfileStats({ p, empty = null }: { p: StatsInput; empty?: React
     ["Rol", p.position],
     ["Relación", p.relationship],
     ["Pronombres", p.pronouns],
+    ["Lugar", hasPlaceLabel(p.hasPlace)],
     ["Estado serológico", p.hivStatus],
     ["Último test", p.lastTested ? new Date(p.lastTested + "T12:00").toLocaleDateString("es-AR", { month: "long", year: "numeric" }) : null],
   ];

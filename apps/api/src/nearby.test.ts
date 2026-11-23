@@ -58,6 +58,7 @@ before(async () => {
         bodyType: maybe(pick(BODY)),
         position: maybe(pick(POS)),
         relationship: maybe(pick(REL)),
+        hasPlace: maybe(pick(["si", "no"]), 0.6),
         tribes: some(TRIBES),
         lookingFor: some(LOOKING),
         // Varias personas en la misma celda, para que se desempate por última vez visto
@@ -121,6 +122,7 @@ async function reference(me: { userId: string; cellLat: number | null; cellLng: 
     .filter(({ p, age }) =>
       inRange(age, f.ageMin, f.ageMax) && inRange(p.heightCm, f.heightMin, f.heightMax) && inRange(p.weightKg, f.weightMin, f.weightMax) &&
       anyOf(f.bodyType, p.bodyType) && anyOf(f.position, p.position) && anyOf(f.relationship, p.relationship) &&
+      anyOf(f.hasPlace, p.hasPlace) &&
       overlap(f.tribes, p.tribes) && overlap(f.lookingFor, p.lookingFor) && (!f.withPhoto || first.has(p.userId)) && !f.online)
     .sort((a, b) => (a.km ?? Infinity) - (b.km ?? Infinity) || b.p.lastSeenAt.getTime() - a.p.lastSeenAt.getTime());
   const page = list.slice(f.offset, f.offset + 60);
@@ -145,6 +147,11 @@ const CASES: Record<string, string>[] = [
   { ageMax: "40", heightMin: "170", weightMax: "80" },
   { bodyType: "atletico,grande", position: "versatil" },
   { relationship: "soltero" },
+  { hasPlace: "si" },
+  { hasPlace: "no", offset: "60" },
+  { hasPlace: "si,no" },
+  { hasPlace: "inventado" }, // un valor que no existe se ignora: no filtra
+  { hasPlace: "no", position: "activo", ageMax: "50" },
   { tribes: "oso,geek" },
   { lookingFor: "citas", tribes: "nutria" },
   { withPhoto: "1" },
@@ -220,4 +227,14 @@ test("no aparecen bloqueos, ocultos por reportes, incógnito ni suspendidos", as
   assert.equal(seen.size, got.total);
   for (const id of ["u3", "u22", "u40", "u59", "u700", ME]) assert.ok(!seen.has(id), id);
   assert.ok(seen.has("u800"), "dos reportes no alcanzan para ocultar");
+});
+
+test("tener lugar: sin filtro no deja a nadie afuera, y con los dos solo quedan quienes lo dijeron", async () => {
+  const me = MES["con ubicación"];
+  const all = await nearbyPage(me, parseNearbyFilters({}));
+  const si = await nearbyPage(me, parseNearbyFilters({ hasPlace: "si" }));
+  const no = await nearbyPage(me, parseNearbyFilters({ hasPlace: "no" }));
+  const both = await nearbyPage(me, parseNearbyFilters({ hasPlace: "si,no" }));
+  assert.equal(both.total, si.total + no.total);
+  assert.ok(all.total > both.total, "quien no lo dijo aparece sin filtro");
 });
