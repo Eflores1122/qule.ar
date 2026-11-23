@@ -30,6 +30,12 @@ La regla: **las ideas arrancan en Discusiones**. Cuando una idea se acuerda, se 
 
 Si cambiás la base de datos, editá `apps/api/src/db/schema.ts` y corré `npm run db:generate`. Incluí la migración generada en el PR.
 
+## Organización del frontend
+
+Poné los componentes y la lógica específicos de cada funcionalidad en `apps/web/src/features/<funcionalidad>/`. Por ejemplo, las reglas de grupos están en [`features/groups/groupRules.ts`](apps/web/src/features/groups/groupRules.ts). Las pantallas asociadas a rutas van en `apps/web/src/pages/`. Los componentes que se reutilizan entre varias funcionalidades, como `Avatar` y los íconos, van en `apps/web/src/components/`.
+
+Para reorganizar código existente, mové una funcionalidad por vez en un PR chico. Limitá ese PR a los movimientos y a los cambios de imports necesarios para conservar el comportamiento. Si otro PR abierto toca un archivo que querés mover, esperá a que se resuelva. [Acuerdo de la discusión #72](https://github.com/RGabrielR/qule.ar/discussions/72#discussioncomment-19800640)
+
 ## Cosas que no se negocian
 
 Son la razón de ser de la app. Si un cambio va en contra de alguna, mejor charlarlo antes en Discusiones.
