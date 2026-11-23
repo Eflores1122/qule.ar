@@ -83,7 +83,7 @@ export type Profile = {
 };
 
 /** Tipos de aviso que se pueden apagar. Tienen que coincidir con NOTIFY_KINDS de la API (push.ts). */
-export type NotifyKind = "mensajes" | "toques" | "respuestas" | "grupos" | "solicitudes" | "moderacion";
+export type NotifyKind = "mensajes" | "toques" | "respuestas" | "grupos" | "solicitudes" | "moderacion" | "moderacion_urgente";
 
 export type StaffAccess = "owner" | "reports" | "sanctions" | "appeals";
 
@@ -236,6 +236,6 @@ export type MyInvite = {
 
 export const ROLE_LABEL: Record<Role, string> = { owner: "Dueño", moderator: "Moderador", member: "Miembro" };
 
-export type ConversationSummary = { id: string; other: Author; last: Dm; unread: number };
+export type ConversationSummary = { id: string; lastMessageAt: string; other: Author; last: Dm; unread: number };
 
 export type Viewer = Author & { viewedAt: string };

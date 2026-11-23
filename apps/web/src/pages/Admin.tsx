@@ -1,45 +1,14 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, Navigate, useNavigate } from "react-router";
+import { Navigate, useNavigate } from "react-router";
 import { api, ApiError, type Author, type StaffAccess } from "../api";
 import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { BackIcon } from "../components/Icons";
 import { DialogFocus } from "../components/DialogFocus";
 import { PERMISSION_LABELS } from "../staff";
-
-type ReportedGroup = {
-  // id null: el grupo ya se purgó (pasaron los 90 días); queda el nombre que tenía al reportarlo
-  id: string | null;
-  name: string;
-  description: string | null;
-  memberCount: number;
-  removedAt: string | null;
-  autoHidden: boolean;
-};
-
-type Report = {
-  id: string;
-  reason: string;
-  details: string | null;
-  status: "open" | "dismissed" | "actioned";
-  urgent: boolean;
-  automatic: boolean;
-  targetAutoHidden: boolean;
-  resolution: string | null;
-  createdAt: string;
-  messageId: string | null;
-  messageKind: "group" | "dm" | null;
-  message: { body: string | null; photo: boolean; deleted: boolean } | null;
-  reporter: Author | null;
-  /** Quién reportó solo lo ve la administración general */
-  reporterHidden: boolean;
-  // Reporte de una persona (id null: la cuenta se borró) o de un grupo (target null y group con datos)
-  target: (Omit<Author, "id"> & { id: string | null }) | null;
-  group: ReportedGroup | null;
-  evidenceFiles: number;
-  targetSuspendedAt: string | null;
-  targetReportCount: number;
-};
+import { ModerationNotices } from "../features/moderation/ModerationNotices";
+import { ReportGroups } from "../features/moderation/ReportGroups";
+import type { Report } from "../features/moderation/types";
 
 type Suspended = Author & {
   reason: string | null;
@@ -179,6 +148,8 @@ export function Admin() {
         {has("appeals") && <div className={stats.openAppeals ? "kpi--alert" : ""}><dt>Revisiones pedidas</dt><dd>{stats.openAppeals}</dd></div>}
       </dl>
 
+      <ModerationNotices owner={has("owner")} />
+
       <div className="tabs tabs--scroll" role="tablist">
         {tabs.map((t) => (
           <button key={t.id} role="tab" aria-selected={tab === t.id} onClick={() => setTab(t.id)}>{t.label}</button>
@@ -188,89 +159,15 @@ export function Admin() {
       {error && <div className="notice notice--error" role="alert">{error}</div>}
 
       {(tab === "open" || tab === "closed") && reports && (
-        reports.length === 0 ? (
-          <div className="empty"><p className="muted">{tab === "open" ? "No hay reportes pendientes. 🎉" : "Todavía no se resolvió ningún reporte."}</p></div>
-        ) : (
-          <ul className="reports">
-            {reports.map((r) => (
-              <li key={r.id} className="rcard">
-                <div className="rcard__head">
-                  <span className="rcard__pills">
-                    {r.urgent && r.status === "open" && <span className="pill pill--urgent">Urgente</span>}
-                    {r.group && <span className="pill">Grupo</span>}
-                    <span className="pill pill--reason">{r.reason}</span>
-                  </span>
-                  <time className="muted small">{fmt(r.createdAt)}</time>
-                </div>
-
-                {r.group ? (
-                  <div className="rcard__who rcard__group">
-                    <span>
-                      <b>{r.group.name}</b>
-                      <span className="muted small rcard__count">
-                        {r.group.id ? `${r.group.memberCount} ${r.group.memberCount === 1 ? "miembro" : "miembros"}` : "ya borrado del todo"}
-                        {r.group.removedAt && " · dado de baja"}
-                        {r.group.autoHidden && !r.group.removedAt && " · oculto hasta revisar"}
-                      </span>
-                      {r.group.description && <span className="small rcard__groupdesc">{r.group.description}</span>}
-                    </span>
-                  </div>
-                ) : r.target && (
-                  <Link to={r.target.id ? `/perfil/${r.target.id}` : "#"} className="rcard__who">
-                    <Avatar src={r.target.photo} name={r.target.name} size={40} />
-                    <span>
-                      <b>{r.target.name}</b> <span className="muted">{r.target.age || ""}</span>
-                      <span className="muted small rcard__count">
-                        {r.targetReportCount} {r.targetReportCount === 1 ? "reporte" : "reportes"} en total
-                        {r.targetSuspendedAt && " · suspendida"}
-                        {r.targetAutoHidden && !r.targetSuspendedAt && " · oculta de la grilla hasta revisar"}
-                      </span>
-                    </span>
-                  </Link>
-                )}
-
-                {r.message && (
-                  <blockquote className="rcard__msg">
-                    <span className="muted small">{r.messageKind === "group" ? "Mensaje en un grupo" : "Mensaje privado"}{r.message.deleted && " (ya borrado)"}</span>
-                    {r.message.body && <p>{r.message.body}</p>}
-                    {r.message.photo && <p className="muted">[foto]</p>}
-                    {r.message.deleted && r.message.body && <span className="muted small">Copia guardada al reportarlo</span>}
-                  </blockquote>
-                )}
-                {r.details && <p className="rcard__details">“{r.details}”</p>}
-                {r.evidenceFiles > 0 && (
-                  <p className="muted small">
-                    {r.evidenceFiles === 1 ? "1 archivo guardado" : `${r.evidenceFiles} archivos guardados`} como prueba. No lo descargues: si hay que
-                    denunciar, lo pide la fiscalía (ver el protocolo).
-                  </p>
-                )}
-                <p className="muted small">
-                  {r.automatic
-                    ? "Alerta automática de la app: revisalo y decidí."
-                    : r.reporterHidden ? "Reportado por una persona de la app" : `Reportado por ${r.reporter?.name ?? "una cuenta borrada"}`}
-                </p>
-                {r.status === "open" ? (
-                  <div className="rcard__actions">
-                    {has("reports") && (
-                      <button className="btn btn--small" onClick={() => act(() => api(`/admin/reports/${r.id}/dismiss`, { method: "POST" }))}>Descartar</button>
-                    )}
-                    {has("reports") && r.message && !r.message.deleted && (
-                      <button className="btn btn--small" onClick={() => act(() => api(`/admin/reports/${r.id}/delete-message`, { method: "POST" }))}>Borrar mensaje</button>
-                    )}
-                    {has("owner") && r.group?.id && !r.group.removedAt && (
-                      <button className="btn btn--small btn--danger" onClick={() => setRemoving(r)}>Dar de baja el grupo</button>
-                    )}
-                    {(has("sanctions") || (has("reports") && r.reason === "menor de edad")) && !r.group && r.target?.id && !r.targetSuspendedAt && (
-                      <button className="btn btn--small btn--danger" onClick={() => setSuspending(r)}>Suspender</button>
-                    )}
-                  </div>
-                ) : (
-                  <p className="small rcard__resolution">{r.status === "dismissed" ? "Descartado" : r.resolution}</p>
-                )}
-              </li>
-            ))}
-          </ul>
-        )
+        <ReportGroups
+          key={tab}
+          reports={reports}
+          status={tab}
+          has={has}
+          act={act}
+          onSuspend={setSuspending}
+          onRemoveGroup={setRemoving}
+        />
       )}
 
       {tab === "suspended" && suspended && (

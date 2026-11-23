@@ -15,15 +15,18 @@ type Share = PublicProfile["myShares"][number];
 /**
  * Compartirle a alguien mis álbumes privados desde su perfil, cada uno por separado y con su plazo.
  * Solo aparecen los álbumes que tienen algo adentro.
+ * inline: la lista se ve de entrada, sin el botón que la abre (en el menú de fotos del chat).
  */
-export function ShareAlbums({ userId, name, me, shares, onChange }: {
+export function ShareAlbums({ userId, name, me, shares, onChange, inline = false }: {
   userId: string;
   name: string;
   me: Me;
   shares: Share[];
   onChange: (shares: Share[]) => void;
+  inline?: boolean;
 }) {
-  const [open, setOpen] = useState(false);
+  const [toggled, setOpen] = useState(false);
+  const open = inline || toggled;
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
   const albums = me.albums.flatMap((a) => {
@@ -56,14 +59,16 @@ export function ShareAlbums({ userId, name, me, shares, onChange }: {
 
   return (
     <div className="share-album">
-      {shared.length > 0 && (
+      {shared.length > 0 && !inline && (
         <p className="small">
           <LockIcon /> {shared.length === 1 ? `Le compartiste «${shared[0].name}»` : `Le compartiste ${shared.length} álbumes`}
         </p>
       )}
-      <button className="btn btn--ghost" onClick={() => setOpen(!open)} aria-expanded={open}>
-        <LockIcon /> {shared.length ? "Cambiar qué álbumes ve" : albums.length === 1 ? "Compartirle mi álbum privado" : "Compartirle un álbum privado"}
-      </button>
+      {!inline && (
+        <button className="btn btn--ghost" onClick={() => setOpen(!open)} aria-expanded={open}>
+          <LockIcon /> {shared.length ? "Cambiar qué álbumes ve" : albums.length === 1 ? "Compartirle mi álbum privado" : "Compartirle un álbum privado"}
+        </button>
+      )}
       {open && (
         <ul className="share-album__list" aria-label={`Tus álbumes para ${name}`}>
           {albums.map((a) => {
