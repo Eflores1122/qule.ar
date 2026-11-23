@@ -1,14 +1,6 @@
 import { useEffect, useRef, useState, type TouchEvent } from "react";
 import type { Media } from "../api";
 
-/** Por cuánto tiempo se puede compartir el álbum privado (en horas; null = sin límite). Igual que en la API. */
-export const SHARE_OPTIONS: { hours: number | null; label: string }[] = [
-  { hours: 1, label: "1 hora" },
-  { hours: 24, label: "24 horas" },
-  { hours: 168, label: "7 días" },
-  { hours: null, label: "Sin límite" },
-];
-
 /** "por 3 h más", "hasta el lunes 14:30", etc. Para mostrar cuánto falta para que venza un acceso. */
 export function untilLabel(iso: string | null) {
   if (!iso) return "sin límite";

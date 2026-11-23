@@ -259,12 +259,7 @@ export function Conversation() {
 
       <form className="composer" onSubmit={send}>
         {photoMenu === "album" && other && (
-          <ShareAlbumMenu
-            userId={other.id}
-            onBack={() => setPhotoMenu("options")}
-            onDone={() => setPhotoMenu(false)}
-            onError={(message) => { setError(message); setPhotoMenu(false); }}
-          />
+          <ShareAlbumMenu userId={other.id} name={other.name} onBack={() => setPhotoMenu("options")} />
         )}
         {photoMenu === "options" && (
           <div className="photo-menu" role="menu">
