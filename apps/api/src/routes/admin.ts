@@ -12,7 +12,7 @@ import { deleteImage } from "../storage.js";
 import { AUTO_DETAILS_PREFIX, autoHiddenGroups, autoHiddenUsers, deleteImageUnlessEvidence, isUrgent, releaseEvidence, REMOVED_GROUP_DAYS } from "../moderation.js";
 import { removeGroup } from "./groups.js";
 import { appealReviewedMail, sendMail, suspendedMail } from "../mail.js";
-import { accessFor, grant, isOwner, logAction, requireAccess, STAFF_PERMISSIONS, staffIdsWith } from "../staff.js";
+import { accessFor, grant, isOwner, logAction, notifyStaff, requireAccess, STAFF_PERMISSIONS, staffIdsWith } from "../staff.js";
 
 const { report, profile, session, groupMessage, directMessage, pushSubscription, user, group, appeal, staffPermission, modAction } = schema;
 
@@ -203,16 +203,42 @@ adminRoutes.post("/admin/reports/:id/delete-message", requireAccess("reports"), 
   return c.json({ ok: true });
 });
 
+// Suspensión preventiva: quien tiene solo el permiso Reportes puede suspender ante un reporte abierto por menor de edad,
+// para no dejar la cuenta activa hasta que aparezca alguien con Suspensiones. Después otra persona la confirma o la levanta.
+// Se marca en el registro (sin migración): está pendiente si la última de estas acciones sobre la cuenta es la preventiva.
+const SUSPENDED = "Suspendió una cuenta";
+const PREVENTIVE = "Suspendió una cuenta de forma preventiva (menor de edad)";
+const CONFIRMED = "Confirmó una suspensión preventiva";
+const KEPT_ON_APPEAL = "Mantuvo una suspensión al revisarla";
+
+/** De estas cuentas suspendidas, cuáles tienen una suspensión preventiva que nadie revisó todavía. */
+async function pendingPreventive(ids: string[]): Promise<Set<string>> {
+  if (!ids.length) return new Set();
+  const rows = await db.select({ targetId: modAction.targetId, action: modAction.action }).from(modAction)
+    .where(and(inArray(modAction.targetId, ids), inArray(modAction.action, [SUSPENDED, PREVENTIVE, CONFIRMED, KEPT_ON_APPEAL])))
+    .orderBy(desc(modAction.createdAt));
+  const last = new Map<string, string>();
+  for (const r of rows) if (r.targetId && !last.has(r.targetId)) last.set(r.targetId, r.action);
+  return new Set(ids.filter((id) => last.get(id) === PREVENTIVE));
+}
+
 /** Suspender una cuenta: se cierran sus sesiones y deja de aparecer. Cierra sus reportes abiertos. */
-adminRoutes.post("/admin/users/:id/suspend", requireAccess("sanctions"), async (c) => {
+adminRoutes.post("/admin/users/:id/suspend", requireAccess("sanctions", "reports"), async (c) => {
   const admin = c.get("user");
   const target = c.req.param("id");
   if (target === admin.id) throw new HTTPException(400, { message: "No podés suspenderte a vos" });
+  const mine = await accessFor(admin);
+  const preventive = !mine.includes("sanctions");
+  if (preventive) {
+    const [minor] = await db.select({ id: report.id }).from(report)
+      .where(and(eq(report.targetUserId, target), eq(report.status, "open"), eq(report.reason, "menor de edad"))).limit(1);
+    if (!minor) throw new HTTPException(403, { message: "Con el permiso Reportes solo podés suspender ante un reporte abierto por menor de edad" });
+  }
   // Que una cuenta de moderación (o una robada) no pueda dejar afuera del panel a quien administra.
   const [t] = await db.select({ id: user.id, email: user.email, emailVerified: user.emailVerified }).from(user).where(eq(user.id, target));
   if (!t) throw new HTTPException(404, { message: "Esa cuenta no existe" });
   if (isOwner(t)) throw new HTTPException(403, { message: "No se puede suspender a la administración general" });
-  if ((await accessFor(t)).length > 0 && !(await accessFor(admin)).includes("owner")) {
+  if ((await accessFor(t)).length > 0 && !mine.includes("owner")) {
     throw new HTTPException(403, { message: "Solo la administración general puede suspender a alguien del equipo" });
   }
   const { reason } = z.object({ reason: z.string().trim().min(3, "Escribí un motivo").max(300) }).parse(await c.req.json());
@@ -224,7 +250,14 @@ adminRoutes.post("/admin/users/:id/suspend", requireAccess("sanctions"), async (
   const open = await db.select({ id: report.id }).from(report)
     .where(and(eq(report.targetUserId, target), eq(report.status, "open")));
   await closeReports(open.map((r) => r.id), admin.id, "actioned", `Cuenta suspendida: ${reason}`);
-  await logAction(admin.id, "Suspendió una cuenta", target, reason);
+  await logAction(admin.id, preventive ? PREVENTIVE : SUSPENDED, target, reason);
+  if (preventive) {
+    await notifyStaff(
+      "sanctions",
+      { title: "Suspensión para revisar", body: "Hay una suspensión preventiva esperando que alguien la revise.", url: "/admin", tag: "suspension-preventiva" },
+      { ownersAlways: true },
+    );
+  }
   // Aviso por mail (sin el motivo: se lee en la app, donde también se pide la revisión)
   const [u] = await db.select({ email: user.email }).from(user).where(eq(user.id, target));
   if (u) void sendMail(suspendedMail(u.email), "account");
@@ -243,14 +276,33 @@ adminRoutes.post("/admin/users/:id/unsuspend", requireAccess("sanctions"), async
   return c.json({ ok: true });
 });
 
+/** Mantener una suspensión preventiva. La tiene que revisar alguien distinto de quien la hizo. */
+adminRoutes.post("/admin/users/:id/confirm-suspension", requireAccess("sanctions"), async (c) => {
+  const me = c.get("user");
+  const target = c.req.param("id");
+  const [p] = await db.select({ by: profile.suspendedBy, at: profile.suspendedAt }).from(profile).where(eq(profile.userId, target));
+  if (!p?.at || !(await pendingPreventive([target])).has(target)) throw new HTTPException(409, { message: "No hay una suspensión preventiva para revisar" });
+  if (p.by === me.id) throw new HTTPException(403, { message: "Esta suspensión la hiciste vos: la tiene que revisar otra persona del equipo" });
+  await logAction(me.id, CONFIRMED, target);
+  return c.json({ ok: true });
+});
+
 adminRoutes.get("/admin/suspended", requireAccess("sanctions", "appeals"), async (c) => {
+  const me = c.get("user");
   const rows = await db
-    .select({ id: profile.userId, reason: profile.suspendReason, at: profile.suspendedAt })
+    .select({ id: profile.userId, reason: profile.suspendReason, at: profile.suspendedAt, by: profile.suspendedBy })
     .from(profile)
     .where(isNotNull(profile.suspendedAt))
     .orderBy(desc(profile.suspendedAt));
   const people = await authorsFor(rows.map((r) => r.id));
-  return c.json(rows.map((r) => ({ ...people.get(r.id)!, reason: r.reason, suspendedAt: r.at!.toISOString() })));
+  const pending = await pendingPreventive(rows.map((r) => r.id));
+  return c.json(rows.map((r) => ({
+    ...people.get(r.id)!,
+    reason: r.reason,
+    suspendedAt: r.at!.toISOString(),
+    preventive: pending.has(r.id),
+    suspendedByMe: r.by === me.id,
+  })));
 });
 
 // ---------- Pedidos de revisión de suspensiones ----------

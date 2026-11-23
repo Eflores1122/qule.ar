@@ -5,6 +5,7 @@
 //   dar y sacar permisos.
 // - Permisos chicos, que la administración general da desde el panel, de a uno:
 //   · reports: revisar reportes, descartarlos y borrar el mensaje reportado.
+//     Ante un reporte abierto por menor de edad, también suspender de forma preventiva (la revisa alguien con sanctions).
 //   · sanctions: suspender y reactivar cuentas.
 //   · appeals: revisar pedidos de revisión de suspensiones (mantener o levantar la medida).
 // Nadie con permisos chicos ve mails, IPs ni datos de salud, ni puede tocar grupos o permisos.
