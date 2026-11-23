@@ -10,8 +10,6 @@ type InboxResource = {
 
 type SummaryRequest = {
   controller: AbortController;
-  received: Map<string, Dm>;
-  deleted: Set<string>;
   refreshAgain: boolean;
   backfill: boolean;
 };
@@ -61,10 +59,9 @@ export function useLiveInbox(
     const socket = getSocket();
     const pending = requests.current;
 
-    async function refreshConversation(id: string, deletedId?: string, backfill = false) {
+    async function refreshConversation(id: string, backfill = false) {
       const active = pending.get(id);
       if (active) {
-        if (deletedId) active.deleted.add(deletedId);
         active.refreshAgain = true;
         active.backfill ||= backfill;
         return;
@@ -73,37 +70,17 @@ export function useLiveInbox(
         initialChanges.current.add(id);
         return;
       }
-      if (invalidatePendingLoad()) {
-        load("refresh");
-        return;
-      }
+      if (invalidatePendingLoad()) return;
 
       const request: SummaryRequest = {
-        controller: new AbortController(), received: new Map(),
-        deleted: new Set(deletedId ? [deletedId] : []), refreshAgain: false, backfill,
+        controller: new AbortController(), refreshAgain: false, backfill,
       };
       pending.set(id, request);
       const { signal } = request.controller;
       try {
-        let summary = await api<ConversationSummary | null>(`/conversations/${id}/summary`, { signal, cache: "no-store" });
+        const summary = await api<ConversationSummary | null>(`/conversations/${id}/summary`, { signal, cache: "no-store" });
         const list = currentData.current;
-        if (signal.aborted || !list || invalidatePendingLoad()) return;
-        if (summary) {
-          // El resumen ya cuenta los mensajes hasta su vista previa. Conservá los que llegaron después.
-          const latestInSnapshot = summary.last;
-          for (const message of [...request.received.values()].sort(compareDmOrder)) {
-            if (request.deleted.has(message.id)) continue;
-            const order = compareDmOrder(message, latestInSnapshot);
-            // Un mensaje anterior puede haber confirmado su escritura después de la consulta.
-            if (order < 0) request.refreshAgain = true;
-            if (order > 0) summary = addMessage(summary, message, userId);
-          }
-          if (request.deleted.has(summary.last.id)) return;
-        } else if (request.received.size > 0) {
-          request.refreshAgain = true;
-          return;
-        }
-
+        if (signal.aborted || request.refreshAgain || !list || invalidatePendingLoad()) return;
         update(replaceConversation(list, id, summary));
         if (!summary && request.backfill) load("refresh");
       } catch (error) {
@@ -112,6 +89,8 @@ export function useLiveInbox(
           cancelRequests();
           update(null);
           onUnauthorized();
+        } else if (request.refreshAgain) {
+          return;
         } else if (error instanceof ApiError && error.status === 404) {
           const list = currentData.current;
           if (list && !invalidatePendingLoad()) update(replaceConversation(list, id, null));
@@ -122,7 +101,7 @@ export function useLiveInbox(
       } finally {
         if (pending.get(id) === request) {
           pending.delete(id);
-          if (request.refreshAgain) void refreshConversation(id, undefined, request.backfill);
+          if (request.refreshAgain) void refreshConversation(id, request.backfill);
         }
       }
     }
@@ -131,16 +110,14 @@ export function useLiveInbox(
       const id = message.conversationId;
       const list = currentData.current;
       const chat = list?.find((item) => item.id === id);
-      const active = pending.get(id);
-      if (active?.deleted.has(message.id) || chat?.last.id === message.id) return;
-      if (active) active.received.set(message.id, message);
-
+      if (chat?.last.id === message.id) return;
       if (!list || !chat || compareDmOrder(message, chat.last) <= 0) {
-        // Si falta la vista previa, el pedido activo puede incorporarla junto con el mensaje.
-        if (!active || chat) void refreshConversation(id);
+        void refreshConversation(id);
         return;
       }
 
+      const active = pending.get(id);
+      if (active) active.refreshAgain = true;
       invalidatePendingLoad();
       update(replaceConversation(list, id, addMessage(chat, message, userId)));
     }
@@ -149,7 +126,7 @@ export function useLiveInbox(
       const list = currentData.current;
       const hidesPreview = list?.some((chat) => chat.id === conversationId && chat.last.id === id);
       if (list && hidesPreview) update(replaceConversation(list, conversationId, null));
-      void refreshConversation(conversationId, id, Boolean(hidesPreview && list?.length === INBOX_LIMIT));
+      void refreshConversation(conversationId, Boolean(hidesPreview && list?.length === INBOX_LIMIT));
     }
 
     // El socket y la respuesta HTTP pueden confirmar la misma escritura en cualquier orden.

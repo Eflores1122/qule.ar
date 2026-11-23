@@ -14,6 +14,7 @@ export type DmReadReceipt = {
   audience: "sender";
   conversationId: string;
   messageIds: string[];
+  through?: { createdAt: string; id: string };
   readAt: string;
 } | {
   audience: "reader";

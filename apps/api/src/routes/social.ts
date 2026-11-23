@@ -342,22 +342,23 @@ socialRoutes.post("/conversations/:id/read", async (c) => {
         .where(and(eq(oldest.id, beforeId), eq(oldest.conversationId, conv.id)))
     : undefined;
   const now = new Date();
-  const updated = await db
-    .update(directMessage)
-    .set({ readAt: now })
-    .where(and(
-      eq(directMessage.conversationId, conv.id),
-      eq(directMessage.senderId, otherId),
-      isNull(directMessage.readAt),
-      legacyRequest ? undefined : or(
-        inArray(directMessage.id, messageIds),
-        boundary && sql`(${directMessage.createdAt}, ${directMessage.id}) < (${boundary})`,
-      ),
-    ))
-    .returning({ id: directMessage.id });
-  const receiptId = updated.length ? newId() : null;
-  if (receiptId) {
-    const receipt: DmReadReceipt = { audience: "sender", conversationId: conv.id, readAt: now.toISOString(), messageIds: updated.map(({ id }) => id) };
+  const unreadFromOther = and(eq(directMessage.conversationId, conv.id), eq(directMessage.senderId, otherId), isNull(directMessage.readAt));
+  const receipt = await db.transaction(async (tx) => {
+    const explicit = messageIds.length ? await tx.update(directMessage).set({ readAt: now })
+      .where(and(unreadFromOther, inArray(directMessage.id, messageIds))).returning({ id: directMessage.id }) : [];
+    let through: { createdAt: string; id: string } | undefined;
+    if (legacyRequest || boundary) {
+      const older = tx.$with("older").as(tx.update(directMessage).set({ readAt: now })
+        .where(and(unreadFromOther, boundary && sql`(${directMessage.createdAt}, ${directMessage.id}) < (${boundary})`))
+        .returning({ createdAt: directMessage.createdAt, id: directMessage.id }));
+      const [last] = await tx.with(older).select().from(older).orderBy(desc(older.createdAt), desc(older.id)).limit(1);
+      if (last) through = { createdAt: last.createdAt.toISOString(), id: last.id };
+    }
+    if (!explicit.length && !through) return null;
+    return { audience: "sender", conversationId: conv.id, readAt: now.toISOString(), messageIds: explicit.map(({ id }) => id), through } satisfies DmReadReceipt;
+  });
+  const receiptId = receipt ? newId() : null;
+  if (receipt && receiptId) {
     emitToUser(otherId, DM_EVENTS.read, receipt);
     emitToUser(me.id, DM_EVENTS.read, {
       audience: "reader", conversationId: conv.id, receiptId,
@@ -379,20 +380,28 @@ socialRoutes.post("/blocks", async (c) => {
   const me = c.get("user");
   const { userId } = z.object({ userId: z.string() }).parse(await c.req.json());
   if (userId === me.id) throw new HTTPException(400, { message: "No podés bloquearte a vos" });
-  await db.insert(block).values({ blockerId: me.id, blockedId: userId }).onConflictDoNothing();
-  // Al bloquear se corta el acceso a los álbumes en las dos direcciones
-  await db.delete(schema.albumGrant).where(or(
-    and(eq(schema.albumGrant.ownerId, me.id), eq(schema.albumGrant.granteeId, userId)),
-    and(eq(schema.albumGrant.ownerId, userId), eq(schema.albumGrant.granteeId, me.id)),
-  ));
-  for (const id of [me.id, userId]) emitToUser(id, DM_EVENTS.access, null);
+  const added = await db.transaction(async (tx) => {
+    const [row] = await tx.insert(block).values({ blockerId: me.id, blockedId: userId })
+      .onConflictDoNothing().returning({ id: block.blockedId });
+    if (!row) return false;
+    // Al bloquear se corta el acceso a los álbumes en las dos direcciones.
+    await tx.delete(schema.albumGrant).where(or(
+      and(eq(schema.albumGrant.ownerId, me.id), eq(schema.albumGrant.granteeId, userId)),
+      and(eq(schema.albumGrant.ownerId, userId), eq(schema.albumGrant.granteeId, me.id)),
+    ));
+    return true;
+  });
+  if (added) {
+    for (const id of [me.id, userId]) emitToUser(id, DM_EVENTS.access, null);
+  }
   return c.json({ ok: true });
 });
 
 socialRoutes.delete("/blocks/:userId", async (c) => {
   const me = c.get("user");
   const userId = c.req.param("userId");
-  await db.delete(block).where(and(eq(block.blockerId, me.id), eq(block.blockedId, userId)));
+  const [removed] = await db.delete(block).where(and(eq(block.blockerId, me.id), eq(block.blockedId, userId))).returning({ id: block.blockedId });
+  if (!removed) return c.json({ ok: true });
   for (const id of [me.id, userId]) emitToUser(id, DM_EVENTS.access, null);
   return c.json({ ok: true });
 });

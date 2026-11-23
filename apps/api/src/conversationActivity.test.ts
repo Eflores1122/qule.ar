@@ -3,7 +3,7 @@ import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
-import { eq } from "drizzle-orm";
+import { eq, isNull } from "drizzle-orm";
 
 test("la fecha del resumen conserva la actividad y nunca queda detrás de la vista previa", async (t) => {
   const dir = await mkdtemp(path.join(tmpdir(), "qule-summary-"));
@@ -41,4 +41,23 @@ test("la fecha del resumen conserva la actividad y nunca queda detrás de la vis
   const laterActivity = new Date("2026-01-01T10:02:00Z");
   await db.update(schema.conversation).set({ lastMessageAt: laterActivity }).where(eq(schema.conversation.id, "chat"));
   await assertSummary(laterActivity);
+
+  await t.test("una lectura por límite incluye el historial largo y deja pendiente el siguiente mensaje", async () => {
+    const messages = Array.from({ length: 130 }, (_, index) => ({
+      id: `anterior-${String(index).padStart(3, "0")}`, conversationId: "chat", senderId: "sol", createdAt: previewDate,
+    }));
+    await db.insert(schema.directMessage).values(messages);
+    async function read(body?: string) {
+      const res = await socialRoutes.request("/conversations/chat/read", { method: "POST", headers: { cookie }, body });
+      assert.equal(res.status, 200);
+      return (await res.json()).changed;
+    }
+    const batch = JSON.stringify({ beforeId: messages[129].id, messageIds: [messages[129].id] });
+    assert.equal(await read(batch), true);
+    const unread = await db.select({ id: schema.directMessage.id }).from(schema.directMessage).where(isNull(schema.directMessage.readAt));
+    assert.deepEqual(unread, [{ id: "mensaje" }]);
+    assert.equal(await read(batch), false);
+    assert.equal(await read(), true);
+    assert.equal(await read(), false);
+  });
 });

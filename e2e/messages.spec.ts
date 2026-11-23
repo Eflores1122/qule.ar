@@ -33,17 +33,19 @@ test("entrega un mensaje a otra sesión y lo conserva al reabrir el chat", async
     const conversationPath = new URL(page.url()).pathname.replace("/mensajes/", "/api/conversations/");
     const firstSummaryCaptured = gate();
     const allowFirstSummary = gate();
+    const nextSummary = gate();
+    const allowNextSummary = gate();
     let summaryRequests = 0;
     await recipientPage.route("**/summary", async (route) => {
       summaryRequests++;
       if (summaryRequests !== 1) {
+        nextSummary.release();
+        await allowNextSummary.wait;
         await route.continue();
         return;
       }
       const snapshot = await route.fetch();
       const summary = await snapshot.json();
-      // Simula un segundo mensaje que se guardó más tarde con una fecha anterior.
-      summary.last.createdAt = "2099-01-01T00:00:00.000Z";
       firstSummaryCaptured.release();
       await allowFirstSummary.wait;
       await route.fulfill({ response: snapshot, json: summary });
@@ -60,6 +62,12 @@ test("entrega un mensaje a otra sesión y lo conserva al reabrir el chat", async
       await secondMessageReceived.wait;
     } finally {
       allowFirstSummary.release();
+    }
+    await nextSummary.wait;
+    try {
+      await expect(conversation).toHaveCount(0);
+    } finally {
+      allowNextSummary.release();
     }
     await expect(conversation.getByText("Segundo mensaje durante el resumen", { exact: true })).toBeVisible();
     await expect(conversation.locator(".badge--inline")).toHaveText("2");
@@ -302,4 +310,60 @@ test("publica la primera bandeja y reconcilia los mensajes recibidos durante la 
   }
   await expect(page.getByText("Vos: Durante la carga 2", { exact: true })).toBeVisible();
   expect(loads).toBe(1);
+});
+
+test("conserva una lectura que llega antes del mensaje y solo avisa cambios reales de bloqueo", async ({ page, browser, baseURL }) => {
+  const sender = await createAccount(baseURL!, "Luz Confirmación");
+  const recipient = await createAccount(baseURL!, "Mar Confirmación");
+  const recipientContext = await browser.newContext({ baseURL });
+  const delayed = gate();
+  const read = gate();
+  let deliverMessage: (() => void) | undefined;
+  let accessEvents = 0;
+  let receipt: { messageIds: string[]; through?: { id: string; createdAt: string } } | undefined;
+  await page.routeWebSocket("**/socket.io/**", (socket) => {
+    const server = socket.connectToServer();
+    server.onMessage((frame) => {
+      if (typeof frame === "string" && frame.includes('"dm:message"') && frame.includes("Mensaje demorado")) {
+        deliverMessage = () => socket.send(frame);
+        delayed.release();
+        return;
+      }
+      socket.send(frame);
+      if (typeof frame === "string" && frame.startsWith('42["dm:read",')) {
+        [, receipt] = JSON.parse(frame.slice(2));
+        read.release();
+      }
+      if (typeof frame === "string" && frame.includes('"dm:access"')) accessEvents++;
+    });
+  });
+  try {
+    await signIn(page, sender);
+    await openProfile(page, recipient);
+    await page.getByRole("button", { name: "Mandar mensaje" }).click();
+    await page.getByRole("textbox", { name: "Mensaje", exact: true }).waitFor();
+    const path = new URL(page.url()).pathname.replace("/mensajes/", "/api/conversations/");
+    const headers = { Origin: baseURL! };
+    await signIn(await recipientContext.newPage(), recipient);
+    const { other } = await (await page.request.get(path)).json();
+    for (let i = 0; i < 2; i++) await expect(await page.request.post("/api/blocks", { headers, data: { userId: other.id } })).toBeOK();
+    for (let i = 0; i < 2; i++) await expect(await page.request.delete(`/api/blocks/${other.id}`, { headers })).toBeOK();
+
+    const earlier = await page.request.post(`${path}/messages`, { data: { body: "Mensaje anterior" }, headers });
+    await expect(earlier).toBeOK();
+    const previous = await earlier.json();
+    const sent = await page.request.post(`${path}/messages`, { data: { body: "Mensaje demorado" }, headers });
+    await expect(sent).toBeOK();
+    await delayed.wait;
+    expect(accessEvents).toBe(2);
+    const { id } = await sent.json();
+    await expect(await recipientContext.request.post(`${path}/read`, { headers, data: { beforeId: id, messageIds: [id] } })).toBeOK();
+    await read.wait;
+    expect(receipt).toMatchObject({ messageIds: [id], through: { id: previous.id, createdAt: previous.createdAt } });
+    deliverMessage!();
+    await expect(page.getByText("Mensaje demorado", { exact: true })).toBeVisible();
+    await expect(page.getByText("Visto", { exact: true })).toBeVisible();
+  } finally {
+    await recipientContext.close();
+  }
 });

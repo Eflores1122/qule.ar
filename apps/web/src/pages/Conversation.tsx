@@ -19,6 +19,7 @@ export function Conversation() {
   const goBack = useSectionBack("/mensajes");
   const [other, setOther] = useState<Author | null>(null);
   const [messages, setMessages] = useState<Dm[]>([]);
+  const [seen, setSeen] = useState<{ conversationId: string; ids: Set<string>; through?: Pick<Dm, "createdAt" | "id"> }>();
   const [text, setText] = useDraft(`dm:${me?.user.id ?? ""}:${id}`);
   const [phrasesOpen, setPhrasesOpen] = useState(false);
   const [error, setError] = useState("");
@@ -67,8 +68,12 @@ export function Conversation() {
     };
     const onRead = (p: DmReadReceipt) => {
       if (p.audience === "reader" || p.conversationId !== id || !p.messageIds) return;
-      const readIds = new Set(p.messageIds);
-      applyMessageUpdate((list) => list.map((m) => (readIds.has(m.id) && !m.readAt ? { ...m, readAt: p.readAt } : m)));
+      setSeen((previous) => {
+        const current = previous?.conversationId === id ? previous : undefined;
+        const through = p.through && (!current?.through || compareDmOrder(p.through, current.through) > 0)
+          ? p.through : current?.through;
+        return { conversationId: id, ids: new Set([...(current?.ids ?? []), ...p.messageIds]), through };
+      });
     };
     const onDeleted = (p: { conversationId: string; id: string }) => {
       if (p.conversationId === id) applyMessageUpdate((list) => list.filter((m) => m.id !== p.id));
@@ -196,6 +201,9 @@ export function Conversation() {
 
   const lastMine = [...messages].reverse().find((m) => m.senderId === myId);
 
+  const lastSeen = lastMine && (lastMine.readAt || (seen?.conversationId === id &&
+    (seen.ids.has(lastMine.id) || (seen.through && compareDmOrder(lastMine, seen.through) <= 0))));
+
   return (
     <div className="chat">
       <header className="topbar topbar--thread">
@@ -262,7 +270,7 @@ export function Conversation() {
             </div>
           );
         })}
-        {lastMine?.readAt && messages[messages.length - 1]?.id === lastMine.id && <p className="seen">Visto</p>}
+        {lastSeen && messages[messages.length - 1]?.id === lastMine.id && <p className="seen">Visto</p>}
         {typing && <div className="bubble typing" aria-label="Está escribiendo"><i /><i /><i /></div>}
       </div>
 
