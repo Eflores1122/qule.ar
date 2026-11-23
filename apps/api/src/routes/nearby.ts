@@ -3,6 +3,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db, schema } from "../db/index.js";
+import { HAS_PLACE } from "../db/schema.js";
 import { distanceLabel, snapToCell, visibleKm } from "../geo.js";
 import { ageFrom, firstPublicPhotoKeys, thumbUrl, requireProfile, requireUser, type AppEnv } from "../lib.js";
 import { autoHiddenUsers } from "../moderation.js";
@@ -76,6 +77,8 @@ const filtersSchema = z.object({
   heightMin: int, heightMax: int,
   weightMin: int, weightMax: int,
   bodyType: list, position: list, tribes: list, lookingFor: list, relationship: list,
+  // "si", "no" o los dos; quien no lo dijo solo aparece sin este filtro
+  hasPlace: list.transform((xs) => xs.filter((x): x is (typeof HAS_PLACE)[number] => (HAS_PLACE as readonly string[]).includes(x))),
   online: z.enum(["1"]).optional(),
   withPhoto: z.enum(["1"]).optional(),
   favorites: z.enum(["1"]).optional(),
@@ -130,6 +133,7 @@ export async function nearbyPage(me: Me, f: NearbyFilters) {
   if (f.bodyType.length) conds.push(sql`p.body_type = any(${textArray(f.bodyType)})`);
   if (f.position.length) conds.push(sql`p.position = any(${textArray(f.position)})`);
   if (f.relationship.length) conds.push(sql`p.relationship = any(${textArray(f.relationship)})`);
+  if (f.hasPlace.length) conds.push(sql`p.has_place = any(${textArray(f.hasPlace)})`);
   if (f.tribes.length) conds.push(sql`jsonb_exists_any(p.tribes, ${textArray(f.tribes)})`);
   if (f.lookingFor.length) conds.push(sql`jsonb_exists_any(p.looking_for, ${textArray(f.lookingFor)})`);
   if (f.favorites) conds.push(sql`exists (select 1 from favorite fv where fv.user_id = ${u.id} and fv.favorite_id = p.user_id)`);

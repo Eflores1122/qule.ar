@@ -54,6 +54,9 @@ export const verification = pgTable("verification", {
 
 // ---------- Perfil ----------
 
+/** Valores posibles de profile.hasPlace. Sin dato (null) es "sin decir". */
+export const HAS_PLACE = ["si", "no"] as const;
+
 export const profile = pgTable("profile", {
   userId: text("user_id").primaryKey().references(() => user.id, { onDelete: "cascade" }),
   displayName: text("display_name").notNull(),
@@ -67,6 +70,8 @@ export const profile = pgTable("profile", {
   lookingFor: jsonb("looking_for").$type<string[]>().notNull().default([]),
   relationship: text("relationship"),
   pronouns: text("pronouns"),
+  // Si tiene lugar para recibir: "si", "no" o null (sin decir). Opcional, lo elige cada persona; nunca se deduce de otra cosa.
+  hasPlace: text("has_place"),
   // Datos de salud (sensibles, Ley 25.326 art. 2 y 7): se guardan cifrados con DATA_KEY. Ver src/crypt.ts
   hivStatus: encryptedText("hiv_status"),
   lastTested: encryptedText("last_tested"),

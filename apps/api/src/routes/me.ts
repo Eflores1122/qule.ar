@@ -16,6 +16,7 @@ import { checkMinorSignals, deleteImageUnlessEvidence, isEvidence } from "../mod
 import { limit } from "../ratelimit.js";
 import { TERMS_VERSION } from "../legal.js";
 import { NOTIFY_KINDS } from "../push.js";
+import { HAS_PLACE } from "../db/schema.js";
 import { forgetFile, isKnownPublic, rememberPublic, requireUserForFiles } from "../fileAccess.js";
 
 const { profile, photo, user, group, groupMember, directMessage, conversation } = schema;
@@ -34,6 +35,8 @@ const profileInput = z.object({
   lookingFor: z.array(shortText).max(10).default([]),
   relationship: shortText.nullish(),
   pronouns: shortText.nullish(),
+  // Tengo lugar / No tengo lugar; null lo borra (sin decir)
+  hasPlace: z.enum(HAS_PLACE, { message: "Elegí si tenés lugar o no" }).nullish(),
   hivStatus: shortText.nullish(),
   lastTested: z.iso.date().nullish(),
   // Solo cuenta en el alta del perfil

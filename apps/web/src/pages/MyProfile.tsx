@@ -9,6 +9,7 @@ import { Avatar } from "../components/Avatar";
 import { BackIcon, ChevronRightIcon, LockIcon, PlusIcon } from "../components/Icons";
 import { PhotoCrop } from "../components/PhotoCrop";
 import { preparePhotoForCrop } from "../features/photos/preparePhoto";
+import { HasPlaceSelect } from "../features/place/hasPlace";
 import { BODY_TYPES, HIV_STATUS, LOOKING_FOR, POSITIONS, PRONOUNS, RELATIONSHIP, TRIBES } from "../options";
 
 type Form = Omit<Profile, "birthdate" | "age">;
@@ -61,7 +62,7 @@ function profileForm(p: Profile): Form {
   return {
     displayName: p.displayName, about: p.about, heightCm: p.heightCm, weightKg: p.weightKg,
     bodyType: p.bodyType, position: p.position, tribes: p.tribes, lookingFor: p.lookingFor,
-    relationship: p.relationship, pronouns: p.pronouns, hivStatus: p.hivStatus, lastTested: p.lastTested,
+    relationship: p.relationship, pronouns: p.pronouns, hasPlace: p.hasPlace, hivStatus: p.hivStatus, lastTested: p.lastTested,
   };
 }
 
@@ -431,6 +432,7 @@ function ProfileEditor({ profile, photos, reload }: { profile: Profile; photos: 
           <Select label="Rol" value={form.position} options={POSITIONS} onChange={(v) => set("position", v)} />
           <Select label="Relación" value={form.relationship} options={RELATIONSHIP} onChange={(v) => set("relationship", v)} />
           <Select label="Pronombres" value={form.pronouns} options={PRONOUNS} onChange={(v) => set("pronouns", v)} />
+          <HasPlaceSelect value={form.hasPlace} onChange={(v) => set("hasPlace", v)} />
         </div>
         <MultiChips label="Tribus" value={form.tribes} options={TRIBES} onChange={(v) => set("tribes", v)} />
         <MultiChips label="Busco" value={form.lookingFor} options={LOOKING_FOR} onChange={(v) => set("lookingFor", v)} />
