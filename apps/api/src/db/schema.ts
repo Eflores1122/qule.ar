@@ -241,7 +241,8 @@ export const groupJoinRequest = pgTable("group_join_request", {
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
-  index("gjr_group_status_idx").on(t.groupId, t.status),
+  // Lista paginada de solicitudes: pendientes de un grupo, de la más nueva a la más vieja
+  index("gjr_group_status_created_idx").on(t.groupId, t.status, t.createdAt, t.id),
   index("gjr_user_idx").on(t.userId, t.groupId),
   index("gjr_resolved_by_idx").on(t.resolvedBy),
 ]);
