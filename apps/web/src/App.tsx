@@ -156,7 +156,7 @@ function ShellContent() {
   }, [unread, pending]);
 
   // En una conversación abierta, la barra de abajo se esconde para dejar lugar al teclado
-  const inThread = /^\/mensajes\/.+/.test(loc.pathname);
+  const inThread = /^\/mensajes\/.+/.test(loc.pathname) || /^\/grupos\/[^/]+\/?$/.test(loc.pathname);
   const inMyProfile = /^\/yo(?:\/|$)/.test(loc.pathname);
   const nearbyEntry = loc.pathname.startsWith("/perfil/") ? loc.state?.nearbyEntry : undefined;
 
