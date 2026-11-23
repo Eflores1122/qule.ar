@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router";
-import { api, type Author, type StaffAccess } from "../api";
+import { Link, Navigate, useNavigate } from "react-router";
+import { api, ApiError, type Author, type StaffAccess } from "../api";
 import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { BackIcon } from "../components/Icons";
@@ -105,7 +105,12 @@ export function Admin() {
   const [suspending, setSuspending] = useState<Report | null>(null);
   const [removing, setRemoving] = useState<Report | null>(null);
   const [error, setError] = useState("");
+  // Hasta que termina la primera carga no se muestra el panel; si el servidor dice que no hay permiso, se sale.
+  const [loaded, setLoaded] = useState(false);
+  const [denied, setDenied] = useState(false);
 
+  // Un 403 al cargar es que esta cuenta ya no puede ver el panel (o nunca pudo): se va a la portada.
+  // Un 403 de una acción (por ejemplo, tocar los permisos de la administración general) es solo un error.
   const load = useCallback(async () => {
     try {
       setStats(await api<Stats>("/admin/stats"));
@@ -116,7 +121,10 @@ export function Admin() {
       else if (tab === "groups") setRemoved(await api<RemovedGroup[]>("/admin/groups/removed"));
       else setReports(await api<Report[]>(`/admin/reports?status=${tab}`));
     } catch (e) {
-      setError((e as Error).message);
+      if (e instanceof ApiError && e.status === 403) setDenied(true);
+      else setError((e as Error).message);
+    } finally {
+      setLoaded(true);
     }
   }, [tab, appealsClosed]);
 
@@ -134,22 +142,42 @@ export function Admin() {
     }
   }
 
+  if (denied) return <Navigate to="/" replace />;
+
+  const topbar = (
+    <header className="topbar topbar--thread">
+      <button className="iconbtn" onClick={() => nav("/yo")} aria-label="Volver"><BackIcon /></button>
+      <h1 className="topbar__title topbar__title--sm">Moderación</h1>
+    </header>
+  );
+
+  if (!loaded || !stats) {
+    return (
+      <div className="page">
+        {topbar}
+        {!loaded ? (
+          <div className="empty"><p className="muted" role="status">Cargando…</p></div>
+        ) : (
+          <div className="empty">
+            <p className="notice notice--error" role="alert">No pudimos cargar el panel.</p>
+            <button type="button" className="btn" onClick={() => { setError(""); load(); }}>Reintentar</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="page">
-      <header className="topbar topbar--thread">
-        <button className="iconbtn" onClick={() => nav("/yo")} aria-label="Volver"><BackIcon /></button>
-        <h1 className="topbar__title topbar__title--sm">Moderación</h1>
-      </header>
+      {topbar}
 
-      {stats && (
-        <dl className="kpis">
-          <div><dt>Perfiles</dt><dd>{stats.users}</dd></div>
-          <div><dt>Grupos</dt><dd>{stats.groups}</dd></div>
-          <div className={stats.openReports ? "kpi--alert" : ""}><dt>Reportes abiertos</dt><dd>{stats.openReports}</dd></div>
-          <div><dt>Suspendidas</dt><dd>{stats.suspended}</dd></div>
-          {has("appeals") && <div className={stats.openAppeals ? "kpi--alert" : ""}><dt>Revisiones pedidas</dt><dd>{stats.openAppeals}</dd></div>}
-        </dl>
-      )}
+      <dl className="kpis">
+        <div><dt>Perfiles</dt><dd>{stats.users}</dd></div>
+        <div><dt>Grupos</dt><dd>{stats.groups}</dd></div>
+        <div className={stats.openReports ? "kpi--alert" : ""}><dt>Reportes abiertos</dt><dd>{stats.openReports}</dd></div>
+        <div><dt>Suspendidas</dt><dd>{stats.suspended}</dd></div>
+        {has("appeals") && <div className={stats.openAppeals ? "kpi--alert" : ""}><dt>Revisiones pedidas</dt><dd>{stats.openAppeals}</dd></div>}
+      </dl>
 
       <div className="tabs tabs--scroll" role="tablist">
         {tabs.map((t) => (
