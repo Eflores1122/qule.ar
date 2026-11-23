@@ -6,7 +6,9 @@ import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { BackIcon, ImageIcon, LockIcon, SendIcon, TimerIcon } from "../components/Icons";
 import { useSectionBack } from "../useSectionBack";
+import { useMessageMenuPosition } from "../useMessageMenuPosition";
 import { SavedPhrasesButton, SavedPhrasesMenu } from "../features/phrases/SavedPhrases";
+import { useDraft } from "../features/chat/useDraft";
 
 export function Conversation() {
   const { id = "" } = useParams();
@@ -15,7 +17,7 @@ export function Conversation() {
   const goBack = useSectionBack("/mensajes");
   const [other, setOther] = useState<Author | null>(null);
   const [messages, setMessages] = useState<Dm[]>([]);
-  const [text, setText] = useState("");
+  const [text, setText] = useDraft(`dm:${me?.user.id ?? ""}:${id}`);
   const [phrasesOpen, setPhrasesOpen] = useState(false);
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
@@ -24,8 +26,10 @@ export function Conversation() {
   const [msgMenu, setMsgMenu] = useState<string | null>(null);
   const [viewer, setViewer] = useState<{ src: string; seconds: number } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
+  const positionMessageMenu = useMessageMenuPosition(listRef);
   const stickToBottom = useRef(true);
   const fileRef = useRef<HTMLInputElement>(null);
+  const inputRef = useRef<HTMLTextAreaElement>(null);
   const expiringNext = useRef(false);
   const typingTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const myId = me?.user.id;
@@ -129,6 +133,8 @@ export function Conversation() {
     e?.preventDefault();
     const body = text.trim();
     if (!body) return;
+    // Mandar con el botón le saca el foco al campo y cierra el teclado. Se lo devolvemos.
+    inputRef.current?.focus();
     setError("");
     setText("");
     try {
@@ -234,7 +240,7 @@ export function Conversation() {
                     ⋯
                   </button>
                   {msgMenu === m.id && (
-                    <div className={`menu menu--bubble ${mine ? "" : "menu--bubble-theirs"}`} role="menu" onClick={(e) => e.stopPropagation()}>
+                    <div className={`menu menu--bubble ${mine ? "" : "menu--bubble-theirs"}`} role="menu" ref={positionMessageMenu} onClick={(e) => e.stopPropagation()}>
                       <ReactionPicker current={myReaction(m.reactions ?? [], myId)} onPick={(k) => react(m, k)} />
                       {mine && <button role="menuitem" className="danger" onClick={() => unsend(m)}>Desenviar (se borra para los dos)</button>}
                     </div>
@@ -279,6 +285,7 @@ export function Conversation() {
             }}
           />
           <textarea
+            ref={inputRef}
             className="composer__input"
             aria-label="Mensaje"
             rows={1}
@@ -293,7 +300,7 @@ export function Conversation() {
               }
             }}
           />
-          <button className="sendbtn" aria-label="Mandar" disabled={!text.trim()}><SendIcon /></button>
+          <button className="sendbtn" aria-label="Mandar" disabled={!text.trim()} onMouseDown={(e) => e.preventDefault()}><SendIcon /></button>
         </div>
       </form>
 
