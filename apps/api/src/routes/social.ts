@@ -280,7 +280,7 @@ socialRoutes.post("/conversations/:id/messages", async (c) => {
     await limit(me.id, "dm");
     const r = z.object({
       body: z.string().trim().min(1).max(2000),
-      replyToId: z.string().trim().min(1).optional(),
+      replyToId: z.string().trim().min(1).max(64).optional(),
     }).safeParse(await c.req.json());
     if (!r.success) throw new HTTPException(400, { message: "Mensaje vacío o demasiado largo" });
     body = r.data.body;

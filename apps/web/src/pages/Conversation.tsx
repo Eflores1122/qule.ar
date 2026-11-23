@@ -46,6 +46,8 @@ export function Conversation() {
 
   useEffect(() => {
     let alive = true;
+    setReplyTo(null);
+    setMessages([]);
     const markRead = () =>
       api(`/conversations/${id}/read`, { method: "POST" })
         .then(() => window.dispatchEvent(new Event("mortero:read")))
@@ -245,12 +247,21 @@ export function Conversation() {
           const mine = m.senderId === myId;
           return (
             <div id={`dm-${m.id}`} key={m.id} className={`bubble ${mine ? "bubble--mine" : ""} ${m.kind === "album" ? "bubble--album" : ""}`}>
-              {m.replyTo && (
-                <button type="button" className="quote" onClick={() => jumpTo(m.replyTo!.id)}>
-                  <span className="quote__name">{m.replyTo.authorName ?? "Mensaje borrado"}</span>
-                  {m.replyTo.authorName && <span className="quote__body">{m.replyTo.body ?? "Mensaje borrado"}</span>}
+              {m.replyTo && (m.replyTo.authorName ? (
+                <button
+                  type="button"
+                  className="quote"
+                  aria-label={`Ir al mensaje citado de ${m.replyTo.authorName}`}
+                  onClick={() => jumpTo(m.replyTo!.id)}
+                >
+                  <span className="quote__name">{m.replyTo.authorName}</span>
+                  <span className="quote__body">{m.replyTo.body ?? "Mensaje borrado"}</span>
                 </button>
-              )}
+              ) : (
+                <div className="quote">
+                  <span className="quote__name">Mensaje borrado</span>
+                </div>
+              ))}
               {m.kind === "album" ? (
                 mine ? (
                   <p><LockIcon /> Le compartiste tu álbum privado{m.body ? ` por ${m.body}` : ""}</p>
@@ -322,7 +333,15 @@ export function Conversation() {
               <span className="quote__name">Respondiendo a {replyTo.senderId === myId ? "tu mensaje" : other?.name ?? "ese mensaje"}</span>
               <span className="quote__body">{replyPreview(replyTo)}</span>
             </div>
-            <button type="button" className="iconbtn" aria-label="Cancelar respuesta" onClick={() => setReplyTo(null)}>✕</button>
+            <button
+              type="button"
+              className="iconbtn"
+              aria-label="Cancelar respuesta"
+              onClick={() => {
+                setReplyTo(null);
+                inputRef.current?.focus();
+              }}
+            >✕</button>
           </div>
         )}
         <div className="composer__row">
@@ -351,6 +370,10 @@ export function Conversation() {
             value={text}
             onChange={(e) => onType(e.target.value)}
             onKeyDown={(e) => {
+              if (e.key === "Escape" && replyTo) {
+                e.preventDefault();
+                setReplyTo(null);
+              }
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 send();

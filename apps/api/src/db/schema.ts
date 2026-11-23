@@ -297,7 +297,8 @@ export const directMessage = pgTable("direct_message", {
   senderId: text("sender_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   kind: text("kind").notNull().default("text"), // text | photo | album
   body: text("body"),
-  // Mensaje citado al responder (de la misma conversación)
+  // Mensaje citado al responder (de la misma conversación). Sin FK a propósito:
+  // si se borra el original, la cita queda huérfana y se muestra "Mensaje borrado".
   replyToId: text("reply_to_id"),
   photoKey: text("photo_key"),
   // Foto temporal: se ve una sola vez y después se borra del servidor

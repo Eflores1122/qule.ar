@@ -61,6 +61,7 @@ Las controla `npm run lint` (stylelint + `scripts/check-brand.mjs`) y corre en c
 | `--accent` | `#ff6a3d` | Brasa: botones principales, el logo en texto, lo activo. **Se usa poco**: si todo es naranja, nada se destaca. |
 | `--accent-2` | `#ff8a63` | Hover del botón principal, links, texto sobre brasa suave |
 | `--accent-ink` | `#1a0d08` | Texto sobre brasa |
+| `--quote-line` | `#ffffff` | Borde de citas sobre burbujas propias, para que se distinga del fondo brasa |
 | `--queue` | `#f5b84a` | Mensajes en cola del antispam, avisos, favoritos |
 | `--danger` | `#ff4d6d` | Borrar, bloquear, errores |
 | `--ok` | `#4fd18b` | En línea |

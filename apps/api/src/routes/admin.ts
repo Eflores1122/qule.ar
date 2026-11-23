@@ -7,14 +7,14 @@ import { db, schema } from "../db/index.js";
 import { env } from "../env.js";
 import { authorsFor, newId, requireProfile, requireUser, type AppEnv } from "../lib.js";
 import { pushEnabled, pushTo, vapidPublicKey } from "../push.js";
-import { disconnectUser, emitToGroup } from "../realtime.js";
+import { disconnectUser, emitToGroup, emitToUser } from "../realtime.js";
 import { deleteImage } from "../storage.js";
 import { AUTO_DETAILS_PREFIX, autoHiddenGroups, autoHiddenUsers, deleteImageUnlessEvidence, isUrgent, releaseEvidence, REMOVED_GROUP_DAYS } from "../moderation.js";
 import { removeGroup } from "./groups.js";
 import { appealReviewedMail, sendMail, suspendedMail } from "../mail.js";
 import { accessFor, grant, isOwner, logAction, requireAccess, STAFF_PERMISSIONS, staffIdsWith } from "../staff.js";
 
-const { report, profile, session, groupMessage, directMessage, pushSubscription, user, group, appeal, staffPermission, modAction } = schema;
+const { report, profile, session, groupMessage, directMessage, conversation, pushSubscription, user, group, appeal, staffPermission, modAction } = schema;
 
 export const adminRoutes = new Hono<AppEnv>();
 
@@ -195,8 +195,19 @@ adminRoutes.post("/admin/reports/:id/delete-message", requireAccess("reports"), 
     if (m) await emitToGroup(m.groupId, m.userId, "group:deleted", { id: m.id, groupId: m.groupId });
   } else {
     const [m] = await db.delete(directMessage).where(eq(directMessage.id, r.messageId)).returning();
-    // La foto queda como prueba del reporte (que termina en una medida); si no, se borra
-    if (m?.photoKey) await deleteImageUnlessEvidence(m.photoKey);
+    if (m) {
+      const [conv] = await db
+        .select({ userA: conversation.userA, userB: conversation.userB })
+        .from(conversation)
+        .where(eq(conversation.id, m.conversationId));
+      if (conv) {
+        const payload = { conversationId: m.conversationId, id: m.id };
+        emitToUser(conv.userA, "dm:deleted", payload);
+        emitToUser(conv.userB, "dm:deleted", payload);
+      }
+      // La foto queda como prueba del reporte (que termina en una medida); si no, se borra
+      if (m.photoKey) await deleteImageUnlessEvidence(m.photoKey);
+    }
   }
   await closeReports([r.id], c.get("user").id, "actioned", "Mensaje borrado");
   await logAction(c.get("user").id, "Borró un mensaje reportado", r.id);

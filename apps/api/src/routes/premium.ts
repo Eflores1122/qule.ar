@@ -155,7 +155,7 @@ premiumRoutes.put("/album/grants/:userId", async (c) => {
     await db.update(conversation).set({ lastMessageAt: now }).where(eq(conversation.id, conv.id));
     const msg = {
       id: row.id, conversationId: conv.id, senderId: u.id, kind: "album", body, photo: null,
-      expiring: false, opened: false, readAt: null, createdAt: now.toISOString(),
+      expiring: false, opened: false, readAt: null, createdAt: now.toISOString(), replyTo: null,
     };
     emitToUser(u.id, "dm:message", msg);
     emitToUser(target, "dm:message", msg);
