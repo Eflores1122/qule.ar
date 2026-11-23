@@ -265,6 +265,9 @@ html:has(.nearby-page), .nearby-page { overscroll-behavior-y: none; }
 /* ---------- Mi perfil ---------- */
 .section { padding: 18px 16px; border-bottom: 1px solid var(--line); }
 .section__title { font-size: var(--text-lg); font-weight: 700; margin-bottom: 12px; display: flex; gap: 8px; align-items: baseline; }
+.profile-editor__form :is(input, select).input { height: 48px; }
+/* iOS WebKit puede sumar el padding al ancho porcentual de los campos de fecha. */
+.profile-editor__form input[type="date"].input { width: auto; min-width: 0; appearance: none; padding-block: 0; }
 .profile-editor__actions, .settings__account-actions { padding-block-start: 12px; }
 .settings__clear-location { margin-block-start: 6px; }
 .welcome { margin: 12px 16px 0; }

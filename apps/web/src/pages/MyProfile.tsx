@@ -408,7 +408,7 @@ function ProfileEditor({ profile, photos, reload }: { profile: Profile; photos: 
         )}
       </section>
 
-      <form className="section form" onSubmit={save}>
+      <form className="section form profile-editor__form" onSubmit={save}>
         <h2 className="section__title">Sobre vos <span className="muted">{profile.age} años</span></h2>
         <label className="field">
           <span>Nombre</span>
