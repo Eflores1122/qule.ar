@@ -7,6 +7,7 @@ import { Avatar } from "../components/Avatar";
 import { BackIcon, ImageIcon, LockIcon, SendIcon, TimerIcon } from "../components/Icons";
 import { useSectionBack } from "../useSectionBack";
 import { SavedPhrasesButton, SavedPhrasesMenu } from "../features/phrases/SavedPhrases";
+import { useDraft } from "../features/chat/useDraft";
 
 export function Conversation() {
   const { id = "" } = useParams();
@@ -15,7 +16,7 @@ export function Conversation() {
   const goBack = useSectionBack("/mensajes");
   const [other, setOther] = useState<Author | null>(null);
   const [messages, setMessages] = useState<Dm[]>([]);
-  const [text, setText] = useState("");
+  const [text, setText] = useDraft(`dm:${me?.user.id ?? ""}:${id}`);
   const [phrasesOpen, setPhrasesOpen] = useState(false);
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);

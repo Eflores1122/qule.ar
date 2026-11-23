@@ -10,6 +10,7 @@ import { JoinButton } from "../components/JoinButton";
 import { ReportDialog } from "../components/ReportDialog";
 import { slowModeText } from "../features/groups/groupRules";
 import { SavedPhrasesButton, SavedPhrasesMenu } from "../features/phrases/SavedPhrases";
+import { useDraft } from "../features/chat/useDraft";
 
 const fmtTime = (iso: string) =>
   new Date(iso).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
@@ -28,10 +29,10 @@ export function GroupChat() {
   const [messages, setMessages] = useState<GroupMessage[]>([]);
   const [queued, setQueued] = useState<GroupMessage[]>([]);
   const [hasMore, setHasMore] = useState(false);
-  const [text, setText] = useState("");
+  const [editing, setEditing] = useState<string | null>(null);
+  const [text, setText] = useDraft(`group:${me?.user.id ?? ""}:${id}`, editing === null);
   const [phrasesOpen, setPhrasesOpen] = useState(false);
   const [notice, setNotice] = useState<{ kind: "info" | "error"; text: string } | null>(null);
-  const [editing, setEditing] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const [replyTo, setReplyTo] = useState<GroupMessage | null>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
