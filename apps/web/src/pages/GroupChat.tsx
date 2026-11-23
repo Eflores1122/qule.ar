@@ -294,6 +294,7 @@ export function GroupChat() {
   return (
     <div className="chat">
       <header className="topbar">
+        <Link to="/grupos" className="iconbtn" aria-label="Volver a Grupos"><BackIcon /></Link>
         <GroupAvatar name={info.name} photo={info.photo} general={info.isGeneral} size="sm" />
         <div className="topbar__grow">
           <h1 className="topbar__title topbar__title--sm"><Link to={`/grupos/${id}/info`}>{info.isGeneral ? "# " : ""}{info.name}</Link></h1>
