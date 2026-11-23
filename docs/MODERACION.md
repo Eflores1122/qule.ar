@@ -12,7 +12,7 @@ En Argentina, una plataforma no responde por lo que publican otras personas **mi
 
 - **Tiene que haber al menos dos personas moderando** (administración general en `ADMIN_USER_IDS`, ver `docs/DEPLOY.md`, o equipo con el permiso Reportes), con las notificaciones activadas en la app. Si nadie modera, los reportes se acumulan sin que nadie los vea.
 - Ante un reporte urgente, la app les manda una notificación a quienes tienen el permiso Reportes ("Reporte urgente"). Ante un pedido de revisión, a quienes tienen Revisiones.
-- Cada persona del equipo puede apagar esos avisos en **Yo → Configuración → Notificaciones → Moderación**. Lo pendiente se sigue viendo en el panel. Que al menos una persona los deje prendidos.
+- Cada persona del equipo puede apagar esos avisos en **Yo → Configuración → Notificaciones → Moderación**. Lo pendiente se sigue viendo en el panel. Que al menos una persona los deje prendidos. Los reportes urgentes por **menor de edad** le llegan siempre a la administración general, aunque lo tenga apagado.
 - El panel está en **Yo → Moderación** y muestra primero lo urgente.
 
 ## Prioridades

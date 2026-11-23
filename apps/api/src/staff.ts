@@ -37,14 +37,20 @@ export async function accessFor(u: U): Promise<Access[]> {
 
 export const can = async (u: U, a: Access) => (await accessFor(u)).includes(a);
 
-/** Quiénes tienen un permiso (incluye la administración general). Para avisar de reportes urgentes. */
-export async function staffIdsWith(p: StaffPermission): Promise<string[]> {
+/** Las cuentas con administración general (las de la configuración del servidor, con el mail verificado). */
+export async function ownerIds(): Promise<string[]> {
   const ids = new Set(env.ADMIN_USER_IDS);
   if (env.ADMIN_EMAILS.length) {
     const rows = await db.select({ id: user.id, verified: user.emailVerified }).from(user)
       .where(inArray(sql`lower(${user.email})`, env.ADMIN_EMAILS));
     for (const r of rows) if (r.verified) ids.add(r.id);
   }
+  return [...ids];
+}
+
+/** Quiénes tienen un permiso (incluye la administración general). Para avisar de reportes urgentes. */
+export async function staffIdsWith(p: StaffPermission): Promise<string[]> {
+  const ids = new Set(await ownerIds());
   const granted = await db.select({ id: staffPermission.userId }).from(staffPermission).where(eq(staffPermission.permission, p));
   for (const g of granted) ids.add(g.id);
   return [...ids];
@@ -72,7 +78,15 @@ export async function grant(userId: string, perms: StaffPermission[], by: string
 /**
  * Aviso discreto (push) a quienes tienen un permiso. No dice quién ni por qué.
  * Cada persona del equipo lo puede apagar (aviso "moderacion"); lo pendiente se sigue viendo en el panel.
+ * ownersAlways: a la administración general le llega igual aunque lo haya apagado (menores de edad).
  */
-export async function notifyStaff(p: StaffPermission, msg: { title: string; body: string; url: string; tag: string }) {
-  for (const id of await staffIdsWith(p)) pushTo(id, { ...msg, kind: "moderacion" }).catch(() => {});
+export async function notifyStaff(
+  p: StaffPermission,
+  msg: { title: string; body: string; url: string; tag: string },
+  { ownersAlways = false }: { ownersAlways?: boolean } = {},
+) {
+  const owners = ownersAlways ? new Set(await ownerIds()) : new Set<string>();
+  for (const id of await staffIdsWith(p)) {
+    pushTo(id, owners.has(id) ? msg : { ...msg, kind: "moderacion" }).catch(() => {});
+  }
 }
