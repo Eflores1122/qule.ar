@@ -10,6 +10,15 @@ import { useMessageMenuPosition } from "../useMessageMenuPosition";
 import { SavedPhrasesButton, SavedPhrasesMenu } from "../features/phrases/SavedPhrases";
 import { useDraft } from "../features/chat/useDraft";
 
+/** Texto corto para la cita en el composer y en la burbuja. */
+function replyPreview(m: Dm) {
+  const body = m.body?.trim() || null;
+  if (m.kind === "album") return body ? `Álbum privado · ${body}` : "Álbum privado";
+  if (m.expiring) return body ? `Foto temporal · ${body}` : "Foto temporal";
+  if (m.kind === "photo" || m.photo) return body ?? "Foto";
+  return body ?? "Mensaje borrado";
+}
+
 export function Conversation() {
   const { id = "" } = useParams();
   const { me } = useMe();
@@ -24,6 +33,7 @@ export function Conversation() {
   const [typing, setTyping] = useState(false);
   const [photoMenu, setPhotoMenu] = useState(false);
   const [msgMenu, setMsgMenu] = useState<string | null>(null);
+  const [replyTo, setReplyTo] = useState<Dm | null>(null);
   const [viewer, setViewer] = useState<{ src: string; seconds: number } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const positionMessageMenu = useMessageMenuPosition(listRef);
@@ -60,7 +70,11 @@ export function Conversation() {
       setMessages((list) => list.map((m) => (m.senderId === myId && !m.readAt ? { ...m, readAt: p.readAt } : m)));
     };
     const onDeleted = (p: { conversationId: string; id: string }) => {
-      if (p.conversationId === id) setMessages((list) => list.filter((m) => m.id !== p.id));
+      if (p.conversationId !== id) return;
+      setReplyTo((r) => (r?.id === p.id ? null : r));
+      setMessages((list) => list
+        .filter((m) => m.id !== p.id)
+        .map((m) => (m.replyTo?.id === p.id ? { ...m, replyTo: { ...m.replyTo, authorName: null, body: null } } : m)));
     };
     const onOpened = (p: { conversationId: string; id: string }) => {
       if (p.conversationId === id) setMessages((list) => list.map((m) => (m.id === p.id ? { ...m, opened: true } : m)));
@@ -129,19 +143,38 @@ export function Conversation() {
     if (v.trim()) getSocket().emit("dm:typing", { conversationId: id });
   }
 
+  function startReply(m: Dm) {
+    setMsgMenu(null);
+    setPhotoMenu(false);
+    setPhrasesOpen(false);
+    setReplyTo(m);
+    inputRef.current?.focus();
+  }
+
+  function jumpTo(messageId: string) {
+    const el = document.getElementById(`dm-${messageId}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("bubble--flash");
+    setTimeout(() => el.classList.remove("bubble--flash"), 1400);
+  }
+
   async function send(e?: React.FormEvent) {
     e?.preventDefault();
     const body = text.trim();
     if (!body) return;
+    const wasReplying = replyTo;
     // Mandar con el botón le saca el foco al campo y cierra el teclado. Se lo devolvemos.
     inputRef.current?.focus();
     setError("");
     setText("");
+    setReplyTo(null);
     try {
-      const m = await api<Dm>(`/conversations/${id}/messages`, { method: "POST", json: { body } });
+      const m = await api<Dm>(`/conversations/${id}/messages`, { method: "POST", json: { body, replyToId: wasReplying?.id } });
       setMessages((list) => (list.some((x) => x.id === m.id) ? list : [...list, m]));
     } catch (err) {
       setText((t) => t || body);
+      if (wasReplying) setReplyTo(wasReplying);
       setError((err as Error).message);
     }
   }
@@ -153,12 +186,17 @@ export function Conversation() {
   }
 
   async function sendPhoto(file: File) {
+    const wasReplying = replyTo;
     setSending(true);
     setError("");
+    setReplyTo(null);
+    const extra: Record<string, string> = expiringNext.current ? { expiring: "1" } : {};
+    if (wasReplying) extra.replyToId = wasReplying.id;
     try {
-      const m = await upload<Dm>(`/conversations/${id}/messages`, file, expiringNext.current ? { expiring: "1" } : {});
+      const m = await upload<Dm>(`/conversations/${id}/messages`, file, extra);
       setMessages((list) => (list.some((x) => x.id === m.id) ? list : [...list, m]));
     } catch (err) {
+      if (wasReplying) setReplyTo(wasReplying);
       setError((err as Error).message);
     } finally {
       setSending(false);
@@ -179,7 +217,10 @@ export function Conversation() {
   async function unsend(m: Dm) {
     setMsgMenu(null);
     await api(`/conversations/${id}/messages/${m.id}`, { method: "DELETE" }).catch(() => {});
-    setMessages((list) => list.filter((x) => x.id !== m.id));
+    setReplyTo((r) => (r?.id === m.id ? null : r));
+    setMessages((list) => list
+      .filter((x) => x.id !== m.id)
+      .map((x) => (x.replyTo?.id === m.id ? { ...x, replyTo: { ...x.replyTo, authorName: null, body: null } } : x)));
   }
 
   const lastMine = [...messages].reverse().find((m) => m.senderId === myId);
@@ -203,7 +244,13 @@ export function Conversation() {
         {messages.map((m) => {
           const mine = m.senderId === myId;
           return (
-            <div key={m.id} className={`bubble ${mine ? "bubble--mine" : ""} ${m.kind === "album" ? "bubble--album" : ""}`}>
+            <div id={`dm-${m.id}`} key={m.id} className={`bubble ${mine ? "bubble--mine" : ""} ${m.kind === "album" ? "bubble--album" : ""}`}>
+              {m.replyTo && (
+                <button type="button" className="quote" onClick={() => jumpTo(m.replyTo!.id)}>
+                  <span className="quote__name">{m.replyTo.authorName ?? "Mensaje borrado"}</span>
+                  {m.replyTo.authorName && <span className="quote__body">{m.replyTo.body ?? "Mensaje borrado"}</span>}
+                </button>
+              )}
               {m.kind === "album" ? (
                 mine ? (
                   <p><LockIcon /> Le compartiste tu álbum privado{m.body ? ` por ${m.body}` : ""}</p>
@@ -242,6 +289,7 @@ export function Conversation() {
                   {msgMenu === m.id && (
                     <div className={`menu menu--bubble ${mine ? "" : "menu--bubble-theirs"}`} role="menu" ref={positionMessageMenu} onClick={(e) => e.stopPropagation()}>
                       <ReactionPicker current={myReaction(m.reactions ?? [], myId)} onPick={(k) => react(m, k)} />
+                      <button role="menuitem" onClick={() => startReply(m)}>Responder</button>
                       {mine && <button role="menuitem" className="danger" onClick={() => unsend(m)}>Desenviar (se borra para los dos)</button>}
                     </div>
                   )}
@@ -267,6 +315,15 @@ export function Conversation() {
         )}
         {phrasesOpen && (
           <SavedPhrasesMenu text={text} onClose={() => setPhrasesOpen(false)} onPick={(p) => { onType(p); setPhrasesOpen(false); }} />
+        )}
+        {replyTo && (
+          <div className="composer__reply">
+            <div className="quote quote--static">
+              <span className="quote__name">Respondiendo a {replyTo.senderId === myId ? "tu mensaje" : other?.name ?? "ese mensaje"}</span>
+              <span className="quote__body">{replyPreview(replyTo)}</span>
+            </div>
+            <button type="button" className="iconbtn" aria-label="Cancelar respuesta" onClick={() => setReplyTo(null)}>✕</button>
+          </div>
         )}
         <div className="composer__row">
           <button type="button" className="iconbtn" aria-label="Mandar foto" aria-expanded={photoMenu} disabled={sending} onClick={() => { setPhotoMenu((v) => !v); setPhrasesOpen(false); }}>

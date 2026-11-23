@@ -297,6 +297,8 @@ export const directMessage = pgTable("direct_message", {
   senderId: text("sender_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   kind: text("kind").notNull().default("text"), // text | photo | album
   body: text("body"),
+  // Mensaje citado al responder (de la misma conversación)
+  replyToId: text("reply_to_id"),
   photoKey: text("photo_key"),
   // Foto temporal: se ve una sola vez y después se borra del servidor
   expiring: boolean("expiring").notNull().default(false),

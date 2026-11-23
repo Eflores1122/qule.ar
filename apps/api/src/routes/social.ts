@@ -95,7 +95,22 @@ async function myConversation(convId: string, userId: string) {
   return { conv, otherId: conv.userA === userId ? conv.userB : conv.userA };
 }
 
-function serializeDm(m: typeof directMessage.$inferSelect, reactions: ReactionSummary[] = []) {
+type DmReply = { id: string; authorName: string | null; body: string | null };
+
+/** Texto corto para mostrar dentro de una cita. */
+function replyPreview(m: typeof directMessage.$inferSelect): string | null {
+  const body = m.body?.trim().slice(0, 160) || null;
+  if (m.kind === "album") return body ? `Álbum privado · ${body}` : "Álbum privado";
+  if (m.expiring) return body ? `Foto temporal · ${body}` : "Foto temporal";
+  if (m.kind === "photo" || m.photoKey) return body ?? "Foto";
+  return body;
+}
+
+function serializeDm(
+  m: typeof directMessage.$inferSelect,
+  reactions: ReactionSummary[] = [],
+  replyTo: DmReply | null = null,
+) {
   return {
     id: m.id,
     conversationId: m.conversationId,
@@ -108,8 +123,44 @@ function serializeDm(m: typeof directMessage.$inferSelect, reactions: ReactionSu
     opened: Boolean(m.openedAt),
     readAt: m.readAt?.toISOString() ?? null,
     createdAt: m.createdAt.toISOString(),
+    replyTo,
     reactions,
   };
+}
+
+/** Serializa una tanda de mensajes resolviendo las citas en lote. */
+async function serializeDms(
+  rows: (typeof directMessage.$inferSelect)[],
+  reactions: Map<string, ReactionSummary[]> = new Map(),
+) {
+  const replyIds = [...new Set(rows.map((m) => m.replyToId).filter((x): x is string => Boolean(x)))];
+  const quoted = replyIds.length
+    ? await db.select().from(directMessage).where(inArray(directMessage.id, replyIds))
+    : [];
+  const quotedById = new Map(quoted.map((m) => [m.id, m]));
+  const authors = quoted.length ? await authorsFor(quoted.map((m) => m.senderId)) : null;
+  return rows.map((m) => {
+    let replyTo: DmReply | null = null;
+    if (m.replyToId) {
+      const q = quotedById.get(m.replyToId);
+      replyTo = q && q.conversationId === m.conversationId
+        ? { id: q.id, authorName: authors?.get(q.senderId)?.name ?? "Cuenta borrada", body: replyPreview(q) }
+        : { id: m.replyToId, authorName: null, body: null };
+    }
+    return serializeDm(m, reactions.get(m.id), replyTo);
+  });
+}
+
+/** Valida que el mensaje citado exista en la misma conversación. */
+async function replyToIdFor(replyToId: string | undefined, conversationId: string) {
+  if (!replyToId) return null;
+  const [orig] = await db
+    .select({ id: directMessage.id })
+    .from(directMessage)
+    .where(and(eq(directMessage.id, replyToId), eq(directMessage.conversationId, conversationId)))
+    .limit(1);
+  if (!orig) throw new HTTPException(400, { message: "Ese mensaje ya no está" });
+  return orig.id;
 }
 
 
@@ -199,7 +250,8 @@ socialRoutes.get("/conversations/:id/messages", async (c) => {
     .orderBy(desc(directMessage.createdAt))
     .limit(50);
   const reactions = await reactionsFor(rows.map((m) => m.id));
-  return c.json({ messages: rows.reverse().map((m) => serializeDm(m, reactions.get(m.id))), hasMore: rows.length === 50 });
+  const messages = await serializeDms(rows.reverse(), reactions);
+  return c.json({ messages, hasMore: rows.length === 50 });
 });
 
 socialRoutes.post("/conversations/:id/messages", async (c) => {
@@ -210,6 +262,7 @@ socialRoutes.post("/conversations/:id/messages", async (c) => {
   let body: string | null = null;
   let photoKey: string | null = null;
   let expiring = false;
+  let replyToId: string | null = null;
   if ((c.req.header("content-type") ?? "").includes("multipart/form-data")) {
     await limit(me.id, "dmPhoto");
     const form = await c.req.parseBody();
@@ -217,6 +270,7 @@ socialRoutes.post("/conversations/:id/messages", async (c) => {
     const file = form.file;
     if (!(file instanceof File)) throw new HTTPException(400, { message: "Falta la foto" });
     if (file.size > MAX_UPLOAD_BYTES) throw new HTTPException(413, { message: "La foto pesa demasiado (máx. 12 MB)" });
+    replyToId = await replyToIdFor(typeof form.replyToId === "string" ? form.replyToId.trim() : undefined, conv.id);
     try {
       photoKey = await saveImage(await file.arrayBuffer());
     } catch {
@@ -224,18 +278,22 @@ socialRoutes.post("/conversations/:id/messages", async (c) => {
     }
   } else {
     await limit(me.id, "dm");
-    const r = z.object({ body: z.string().trim().min(1).max(2000) }).safeParse(await c.req.json());
+    const r = z.object({
+      body: z.string().trim().min(1).max(2000),
+      replyToId: z.string().trim().min(1).optional(),
+    }).safeParse(await c.req.json());
     if (!r.success) throw new HTTPException(400, { message: "Mensaje vacío o demasiado largo" });
     body = r.data.body;
+    replyToId = await replyToIdFor(r.data.replyToId, conv.id);
   }
 
   const now = new Date();
   const [row] = await db
     .insert(directMessage)
-    .values({ id: newId(), conversationId: conv.id, senderId: me.id, kind: photoKey ? "photo" : "text", body, photoKey, expiring, createdAt: now })
+    .values({ id: newId(), conversationId: conv.id, senderId: me.id, kind: photoKey ? "photo" : "text", body, photoKey, expiring, replyToId, createdAt: now })
     .returning();
   await db.update(conversation).set({ lastMessageAt: now }).where(eq(conversation.id, conv.id));
-  const msg = serializeDm(row);
+  const [msg] = await serializeDms([row]);
   emitToUser(me.id, "dm:message", msg);
   emitToUser(otherId, "dm:message", msg);
   // Notificación discreta (sin nombre ni contenido). Se manda siempre: si la app está abierta y a la vista,
