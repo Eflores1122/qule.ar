@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router";
-import { api, type Author, type StaffAccess } from "../api";
+import { Link, Navigate, useNavigate } from "react-router";
+import { api, ApiError, type Author, type StaffAccess } from "../api";
 import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { BackIcon } from "../components/Icons";
@@ -41,7 +41,13 @@ type Report = {
   targetReportCount: number;
 };
 
-type Suspended = Author & { reason: string | null; suspendedAt: string };
+type Suspended = Author & {
+  reason: string | null;
+  suspendedAt: string;
+  /** Suspensión preventiva (por menor de edad, con el permiso Reportes) que falta revisar. */
+  preventive: boolean;
+  suspendedByMe: boolean;
+};
 type RemovedGroup = { id: string; name: string; description: string | null; removedAt: string; reason: string | null; purgeAt: string };
 type Stats = { users: number; groups: number; openReports: number; suspended: number; openAppeals: number };
 type Tab = "open" | "closed" | "suspended" | "appeals" | "groups" | "team" | "log";
@@ -99,7 +105,12 @@ export function Admin() {
   const [suspending, setSuspending] = useState<Report | null>(null);
   const [removing, setRemoving] = useState<Report | null>(null);
   const [error, setError] = useState("");
+  // Hasta que termina la primera carga no se muestra el panel; si el servidor dice que no hay permiso, se sale.
+  const [loaded, setLoaded] = useState(false);
+  const [denied, setDenied] = useState(false);
 
+  // Un 403 al cargar es que esta cuenta ya no puede ver el panel (o nunca pudo): se va a la portada.
+  // Un 403 de una acción (por ejemplo, tocar los permisos de la administración general) es solo un error.
   const load = useCallback(async () => {
     try {
       setStats(await api<Stats>("/admin/stats"));
@@ -110,7 +121,10 @@ export function Admin() {
       else if (tab === "groups") setRemoved(await api<RemovedGroup[]>("/admin/groups/removed"));
       else setReports(await api<Report[]>(`/admin/reports?status=${tab}`));
     } catch (e) {
-      setError((e as Error).message);
+      if (e instanceof ApiError && e.status === 403) setDenied(true);
+      else setError((e as Error).message);
+    } finally {
+      setLoaded(true);
     }
   }, [tab, appealsClosed]);
 
@@ -128,22 +142,42 @@ export function Admin() {
     }
   }
 
+  if (denied) return <Navigate to="/" replace />;
+
+  const topbar = (
+    <header className="topbar topbar--thread">
+      <button className="iconbtn" onClick={() => nav("/yo")} aria-label="Volver"><BackIcon /></button>
+      <h1 className="topbar__title topbar__title--sm">Moderación</h1>
+    </header>
+  );
+
+  if (!loaded || !stats) {
+    return (
+      <div className="page">
+        {topbar}
+        {!loaded ? (
+          <div className="empty"><p className="muted" role="status">Cargando…</p></div>
+        ) : (
+          <div className="empty">
+            <p className="notice notice--error" role="alert">No pudimos cargar el panel.</p>
+            <button type="button" className="btn" onClick={() => { setError(""); load(); }}>Reintentar</button>
+          </div>
+        )}
+      </div>
+    );
+  }
+
   return (
     <div className="page">
-      <header className="topbar topbar--thread">
-        <button className="iconbtn" onClick={() => nav("/yo")} aria-label="Volver"><BackIcon /></button>
-        <h1 className="topbar__title topbar__title--sm">Moderación</h1>
-      </header>
+      {topbar}
 
-      {stats && (
-        <dl className="kpis">
-          <div><dt>Perfiles</dt><dd>{stats.users}</dd></div>
-          <div><dt>Grupos</dt><dd>{stats.groups}</dd></div>
-          <div className={stats.openReports ? "kpi--alert" : ""}><dt>Reportes abiertos</dt><dd>{stats.openReports}</dd></div>
-          <div><dt>Suspendidas</dt><dd>{stats.suspended}</dd></div>
-          {has("appeals") && <div className={stats.openAppeals ? "kpi--alert" : ""}><dt>Revisiones pedidas</dt><dd>{stats.openAppeals}</dd></div>}
-        </dl>
-      )}
+      <dl className="kpis">
+        <div><dt>Perfiles</dt><dd>{stats.users}</dd></div>
+        <div><dt>Grupos</dt><dd>{stats.groups}</dd></div>
+        <div className={stats.openReports ? "kpi--alert" : ""}><dt>Reportes abiertos</dt><dd>{stats.openReports}</dd></div>
+        <div><dt>Suspendidas</dt><dd>{stats.suspended}</dd></div>
+        {has("appeals") && <div className={stats.openAppeals ? "kpi--alert" : ""}><dt>Revisiones pedidas</dt><dd>{stats.openAppeals}</dd></div>}
+      </dl>
 
       <div className="tabs tabs--scroll" role="tablist">
         {tabs.map((t) => (
@@ -226,7 +260,7 @@ export function Admin() {
                     {has("owner") && r.group?.id && !r.group.removedAt && (
                       <button className="btn btn--small btn--danger" onClick={() => setRemoving(r)}>Dar de baja el grupo</button>
                     )}
-                    {has("sanctions") && !r.group && r.target?.id && !r.targetSuspendedAt && (
+                    {(has("sanctions") || (has("reports") && r.reason === "menor de edad")) && !r.group && r.target?.id && !r.targetSuspendedAt && (
                       <button className="btn btn--small btn--danger" onClick={() => setSuspending(r)}>Suspender</button>
                     )}
                   </div>
@@ -251,8 +285,17 @@ export function Admin() {
                   <span><b>{s.name}</b><span className="muted small rcard__count">desde {fmt(s.suspendedAt)}</span></span>
                 </div>
                 {s.reason && <p className="rcard__details">{s.reason}</p>}
+                {s.preventive && (
+                  <p className="small">
+                    <b>Preventiva, falta revisarla.</b> La hizo alguien con el permiso Reportes por un caso de menor de edad.
+                    {s.suspendedByMe ? " La hiciste vos, así que la revisa otra persona del equipo." : " Mantenela o reactivá la cuenta."}
+                  </p>
+                )}
                 {has("sanctions") && (
                   <div className="rcard__actions">
+                    {s.preventive && !s.suspendedByMe && (
+                      <button className="btn btn--small btn--danger" onClick={() => act(() => api(`/admin/users/${s.id}/confirm-suspension`, { method: "POST" }))}>Mantener</button>
+                    )}
                     <button className="btn btn--small" onClick={() => act(() => api(`/admin/users/${s.id}/unsuspend`, { method: "POST" }))}>Reactivar cuenta</button>
                   </div>
                 )}
@@ -383,6 +426,7 @@ export function Admin() {
       {suspending && (
         <SuspendDialog
           report={suspending}
+          preventive={!has("sanctions")}
           onClose={() => setSuspending(null)}
           onDone={() => { setSuspending(null); load(); }}
         />
@@ -398,7 +442,7 @@ export function Admin() {
   );
 }
 
-function SuspendDialog({ report, onClose, onDone }: { report: Report; onClose: () => void; onDone: () => void }) {
+function SuspendDialog({ report, preventive, onClose, onDone }: { report: Report; preventive: boolean; onClose: () => void; onDone: () => void }) {
   const [reason, setReason] = useState(`Reportes por ${report.reason}`);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
@@ -419,6 +463,9 @@ function SuspendDialog({ report, onClose, onDone }: { report: Report; onClose: (
         <DialogFocus onClose={onClose} />
         <h2 id="suspend-title">Suspender a {report.target?.name}</h2>
         <p className="muted small">Se cierran sus sesiones, deja de aparecer en la app y se cierran sus reportes abiertos. Se puede reactivar después.</p>
+        {preventive && (
+          <p className="small">Es una <b>suspensión preventiva</b>: hacela si hay indicios de que es menor de edad. Después alguien con el permiso Suspensiones la revisa y decide si se mantiene.</p>
+        )}
         <label className="field">
           <span>Motivo (la persona lo va a ver)</span>
           <textarea className="input" rows={3} maxLength={300} value={reason} onChange={(e) => setReason(e.target.value)} />
