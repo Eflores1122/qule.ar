@@ -134,6 +134,13 @@
       "when": 1795371414176,
       "tag": "0018_moderacion_permisos_apelaciones",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1795439980256,
+      "tag": "0019_solicitudes_paginadas",
+      "breakpoints": true
     }
   ]
 }

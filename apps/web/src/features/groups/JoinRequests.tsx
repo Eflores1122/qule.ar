@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
-import { api, getSocket, type JoinRequest, type JoinRequestPage } from "../api";
-import { Avatar } from "./Avatar";
+import { api, getSocket, type JoinRequest, type JoinRequestPage } from "../../api";
+import { Avatar } from "../../components/Avatar";
 
 type Filters = { foto: "" | "con" | "sin"; nueva: boolean; edadMin: string; edadMax: string };
 const NO_FILTERS: Filters = { foto: "", nueva: false, edadMin: "", edadMax: "" };

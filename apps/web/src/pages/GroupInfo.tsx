@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
-import { api, getSocket, ROLE_LABEL, type GroupInfo as Info, type Member, type SentInvite, type SpamRules } from "../api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, useLocation, useNavigate, useParams } from "react-router";
+import { api, getSocket, ROLE_LABEL, type GroupInfo as Info, type JoinRequest, type Member, type MemberPage, type SentInvite, type SpamRules } from "../api";
 import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { BackIcon, PlusIcon } from "../components/Icons";
 import { InvitePeopleSheet } from "../components/Invite";
-import { JoinRequests } from "../components/JoinRequests";
+import { JoinRequests } from "../features/groups/JoinRequests";
 import { ReportDialog } from "../components/ReportDialog";
 import { slowModeText } from "../features/groups/groupRules";
 import { useTabData } from "../features/navigation/tabData";
@@ -17,8 +17,13 @@ export function GroupInfo() {
   const { me } = useMe();
   const { refreshGroups } = useTabData();
   const nav = useNavigate();
+  const location = useLocation();
   const [info, setInfo] = useState<Info | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
+  // Las recargas por socket o invitaciones llaman a load() sin cantidad: el ref conserva lo que se ve.
+  const visibleMembers = useRef(0);
+  const [memberNext, setMemberNext] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [invites, setInvites] = useState<SentInvite[]>([]);
   const [inviting, setInviting] = useState(false);
   const [error, setError] = useState("");
@@ -29,12 +34,23 @@ export function GroupInfo() {
   const isMod = info?.role === "owner" || info?.role === "moderator";
   const isOwner = info?.role === "owner";
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (keepMembers = visibleMembers.current) => {
     try {
       const g = await api<Info>(`/groups/${id}`);
       setInfo(g);
       if (!g.role) return nav(`/grupos/${id}`, { replace: true });
-      setMembers(await api<Member[]>(`/groups/${id}/members`));
+      // De a 25; si hace falta (por ejemplo al expulsar a alguien), se vuelven a pedir las páginas ya abiertas.
+      const first = await api<MemberPage>(`/groups/${id}/members`);
+      let list = first.members;
+      let next = first.nextOffset;
+      while (next != null && list.length < keepMembers) {
+        const more = await api<MemberPage>(`/groups/${id}/members?offset=${next}`);
+        list = [...list, ...more.members];
+        next = more.nextOffset;
+      }
+      visibleMembers.current = list.length;
+      setMembers(list);
+      setMemberNext(next);
       if ((g.role === "owner" || g.role === "moderator") && !g.isGeneral) {
         setInvites(await api<SentInvite[]>(`/groups/${id}/invites`));
       } else {
@@ -73,12 +89,33 @@ export function GroupInfo() {
     }
   }
 
+  async function loadMoreMembers() {
+    if (memberNext == null || loadingMore) return;
+    setError("");
+    setLoadingMore(true);
+    try {
+      const page = await api<MemberPage>(`/groups/${id}/members?offset=${memberNext}`);
+      setMembers((prev) => {
+        const nextList = [...prev, ...page.members];
+        visibleMembers.current = nextList.length;
+        return nextList;
+      });
+      setMemberNext(page.nextOffset);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
   if (!info) return <div className="page" />;
 
   return (
     <div className="page">
       <header className="topbar topbar--thread">
-        <button className="iconbtn" onClick={() => nav(`/grupos/${id}`)} aria-label="Volver al chat"><BackIcon /></button>
+        {/* Volver al lugar desde donde se abrió: si no, el gesto de atrás vuelve a entrar a la info.
+            Si se entró directo (una notificación, o recargando), no hay a dónde volver: va al chat del grupo. */}
+        <button className="iconbtn" onClick={() => (location.key === "default" ? nav(`/grupos/${id}`, { replace: true }) : nav(-1))} aria-label="Volver"><BackIcon /></button>
         <h1 className="topbar__title topbar__title--sm">{info.isGeneral ? "# " : ""}{info.name}</h1>
       </header>
 
@@ -158,7 +195,7 @@ export function GroupInfo() {
 
       {!info.isGeneral && (
         <section className="section">
-          <h2 className="section__title">Miembros <span className="muted">{members.length}</span></h2>
+          <h2 className="section__title">Miembros <span className="muted">{info.memberCount}</span></h2>
           <ul className="members">
             {members.map((m) => {
               const isMe = m.id === me?.user.id;
@@ -195,6 +232,13 @@ export function GroupInfo() {
               );
             })}
           </ul>
+          {memberNext != null && (
+            <div className="center">
+              <button className="btn btn--small" disabled={loadingMore} onClick={loadMoreMembers}>
+                {loadingMore ? "Cargando…" : "Ver más"}
+              </button>
+            </div>
+          )}
         </section>
       )}
 
