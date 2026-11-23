@@ -10,8 +10,9 @@ En Argentina, una plataforma no responde por lo que publican otras personas **mi
 
 ## Antes de empezar
 
-- **Tiene que haber al menos dos personas moderando**, configuradas en `ADMIN_USER_IDS` (ver `docs/DEPLOY.md`), con las notificaciones activadas en la app. Si nadie modera, los reportes se acumulan sin que nadie los vea.
-- Ante un reporte urgente, la app les manda una notificación a todas ("Hay un reporte urgente para revisar").
+- **Tiene que haber al menos dos personas moderando** (administración general en `ADMIN_USER_IDS`, ver `docs/DEPLOY.md`, o equipo con el permiso Reportes), con las notificaciones activadas en la app. Si nadie modera, los reportes se acumulan sin que nadie los vea.
+- Ante un reporte urgente, la app les manda una notificación a quienes tienen el permiso Reportes ("Reporte urgente"). Ante un pedido de revisión, a quienes tienen Revisiones.
+- Cada persona del equipo puede apagar esos avisos en **Yo → Configuración → Notificaciones → Moderación**. Lo pendiente se sigue viendo en el panel. Que al menos una persona los deje prendidos. Los reportes urgentes por **menor de edad** le llegan siempre a la administración general, aunque lo tenga apagado.
 - El panel está en **Yo → Moderación** y muestra primero lo urgente.
 
 ## Prioridades
@@ -98,7 +99,7 @@ Al reportar, la app guarda una copia de lo reportado: el texto del mensaje y sus
 
 ## Permisos del equipo
 
-Quien administra en general (las cuentas de `ADMIN_USER_IDS` o `ADMIN_EMAILS` en el servidor) puede todo. Al resto del equipo se le dan permisos chicos desde el panel, en la pestaña **Equipo**, de a uno:
+Quien administra en general (las cuentas de `ADMIN_USER_IDS` o `ADMIN_EMAILS` en el servidor) puede todo. Al resto del equipo se le dan permisos chicos de a uno, desde el panel en la pestaña **Equipo** o desde el perfil de la persona con el botón **Moderación** (solo lo ve la administración general):
 
 | Permiso | Qué permite |
 |---|---|

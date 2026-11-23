@@ -375,6 +375,16 @@ adminRoutes.get("/admin/team", requireAccess("owner"), async (c) => {
   return c.json([...byUser].map(([id, x]) => ({ ...(people.get(id) ?? { id, name: "Cuenta sin perfil", age: 0, photo: null }), ...x })));
 });
 
+/** Los permisos de una persona, para darlos o sacarlos desde su perfil. */
+adminRoutes.get("/admin/team/:userId", requireAccess("owner"), async (c) => {
+  const [u] = await db.select({ id: user.id, email: user.email, emailVerified: user.emailVerified }).from(user)
+    .where(eq(user.id, c.req.param("userId")));
+  if (!u) throw new HTTPException(404, { message: "No encontramos esa cuenta" });
+  if (isOwner(u)) return c.json({ owner: true, permissions: [...STAFF_PERMISSIONS] });
+  const rows = await db.select({ p: staffPermission.permission }).from(staffPermission).where(eq(staffPermission.userId, u.id));
+  return c.json({ owner: false, permissions: rows.map((r) => r.p) });
+});
+
 /** Dar o cambiar permisos. La cuenta se busca por su ID o por su mail. Una lista vacía saca todos. */
 adminRoutes.post("/admin/team", requireAccess("owner"), async (c) => {
   const me = c.get("user");
@@ -382,10 +392,11 @@ adminRoutes.post("/admin/team", requireAccess("owner"), async (c) => {
     account: z.string().trim().min(3).max(200),
     permissions: z.array(z.enum(STAFF_PERMISSIONS)).max(STAFF_PERMISSIONS.length),
   }).parse(await c.req.json());
-  const [u] = await db.select({ id: user.id }).from(user)
+  const [u] = await db.select({ id: user.id, email: user.email, emailVerified: user.emailVerified }).from(user)
     .where(account.includes("@") ? sql`lower(${user.email}) = ${account.toLowerCase()}` : eq(user.id, account));
   if (!u) throw new HTTPException(404, { message: "No encontramos esa cuenta" });
   if (u.id === me.id) throw new HTTPException(400, { message: "Ya tenés todos los permisos" });
+  if (isOwner(u)) throw new HTTPException(400, { message: "Esa cuenta ya tiene administración general" });
   const perms = [...new Set(permissions)];
   await grant(u.id, perms, me.id);
   const names: Record<string, string> = { reports: "Reportes", sanctions: "Suspensiones", appeals: "Revisiones" };

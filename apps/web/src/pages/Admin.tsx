@@ -5,6 +5,7 @@ import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { BackIcon } from "../components/Icons";
 import { DialogFocus } from "../components/DialogFocus";
+import { PERMISSION_LABELS } from "../staff";
 
 type ReportedGroup = {
   // id null: el grupo ya se purgó (pasaron los 90 días); queda el nombre que tenía al reportarlo
@@ -75,12 +76,6 @@ const TABS: { id: Tab; label: string; need: StaffAccess[] }[] = [
   { id: "log", label: "Registro", need: ["owner"] },
 ];
 
-/** Los permisos chicos, para el equipo. */
-const PERMISSION_LABELS: { id: Exclude<StaffAccess, "owner">; label: string; hint: string }[] = [
-  { id: "reports", label: "Reportes", hint: "Revisar reportes, descartarlos y borrar el mensaje reportado" },
-  { id: "sanctions", label: "Suspensiones", hint: "Suspender y reactivar cuentas" },
-  { id: "appeals", label: "Revisiones", hint: "Responder pedidos de revisión de suspensiones" },
-];
 
 const fmt = (iso: string) =>
   new Date(iso).toLocaleString("es-AR", { day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
@@ -545,7 +540,7 @@ function Team({ team, onChange }: { team: TeamMember[]; onChange: () => void }) 
     <div className="stack admin__team">
       <p className="muted small">
         Vos tenés todos los permisos. Acá le das a otras personas solo lo que necesitan. Nadie del equipo ve mails ni datos de salud, ni puede dar de
-        baja grupos o cambiar permisos.
+        baja grupos o cambiar permisos. También podés darlos desde el perfil de cada persona.
       </p>
       {team.length === 0 ? (
         <p className="muted">Todavía no sumaste a nadie.</p>

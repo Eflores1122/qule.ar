@@ -28,9 +28,16 @@ export const isUrgent = (reason: string) => URGENT_REASONS.includes(reason);
 /** Cuántas personas distintas tienen que reportar algo urgente para ocultar el perfil de la grilla. */
 export const AUTO_HIDE_REPORTERS = 3;
 
-/** Aviso a moderación de un reporte urgente. Discreto, como todas las notificaciones: no dice quién ni por qué. */
-export async function notifyModeratorsUrgent() {
-  await notifyStaff("reports", { title: "Reporte urgente", body: "Abrí Moderación para revisarlo.", url: "/admin", tag: "reporte-urgente" });
+/**
+ * Aviso a moderación de un reporte urgente. Discreto, como todas las notificaciones: no dice quién ni por qué.
+ * Si es por menor de edad, a la administración general le llega siempre, aunque haya apagado los avisos de moderación.
+ */
+export async function notifyModeratorsUrgent(reason: string) {
+  await notifyStaff(
+    "reports",
+    { title: "Reporte urgente", body: "Abrí Moderación para revisarlo.", url: "/admin", tag: "reporte-urgente" },
+    { ownersAlways: reason === "menor de edad" },
+  );
 }
 
 /**
@@ -194,7 +201,7 @@ export async function checkMinorSignals(
     targetName: target.name,
     messageBody: text,
   });
-  await notifyModeratorsUrgent();
+  await notifyModeratorsUrgent("menor de edad");
 }
 
 // ---------- Nombres y descripciones de grupos que no se permiten ----------
@@ -264,7 +271,7 @@ export async function reportMinorGroupAttempt(user: { id: string; name: string }
     targetName: user.name,
     messageBody: text,
   });
-  await notifyModeratorsUrgent();
+  await notifyModeratorsUrgent("menor de edad");
 }
 
 /**
@@ -291,6 +298,6 @@ export async function scanExistingGroups() {
       targetName: g.name,
       messageBody: text,
     });
-    if (bad.kind === "menores") await notifyModeratorsUrgent();
+    if (bad.kind === "menores") await notifyModeratorsUrgent("menor de edad");
   }
 }
