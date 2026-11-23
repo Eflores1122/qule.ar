@@ -11,6 +11,8 @@ import { albumCount, AlbumGrid, AlbumViewer, untilLabel } from "../components/Al
 import { ProfileCover, ProfileStats } from "../components/ProfileContent";
 import { ReactionIcon, ReactionPicker } from "../components/Reactions";
 import { reactionLabel } from "../reactions";
+import { ProfileSwitcher } from "../features/profileSwipe/ProfileSwitcher";
+import { useProfileSwipe } from "../features/profileSwipe/useProfileSwipe";
 
 const SHARE_OPTIONS: { hours: number | null; label: string }[] = [
   { hours: 1, label: "1 hora" },
@@ -21,6 +23,11 @@ const SHARE_OPTIONS: { hours: number | null; label: string }[] = [
 
 export function ProfilePage() {
   const { id = "" } = useParams();
+  // Cada perfil arranca de cero (sin diálogos abiertos ni scroll), también al deslizar al siguiente.
+  return <ProfileView key={id} id={id} />;
+}
+
+function ProfileView({ id }: { id: string }) {
   const nav = useNavigate();
   const [p, setP] = useState<PublicProfile | null>(null);
   const [missing, setMissing] = useState(false);
@@ -37,6 +44,9 @@ export function ProfilePage() {
   const [sharing, setSharing] = useState(false);
   const [toquePicker, setToquePicker] = useState(false);
   const [toqueMsg, setToqueMsg] = useState("");
+  const swipe = useProfileSwipe(id, viewing == null && !reporting && !staffing);
+  const swipeProps = { ref: swipe.page, ...swipe.handlers };
+  const swipeClass = swipe.active ? " profile--swipe" : "";
 
   useEffect(() => {
     setP(null);
@@ -99,16 +109,27 @@ export function ProfilePage() {
 
   if (missing) {
     return (
-      <div className="page">
-        <header className="topbar"><button className="iconbtn" onClick={() => nav(-1)} aria-label="Volver"><BackIcon /></button></header>
+      <div className={`page${swipeClass}`} {...swipeProps}>
+        <header className="topbar">
+          <button className="iconbtn" onClick={() => nav(-1)} aria-label="Volver"><BackIcon /></button>
+          {swipe.active && <ProfileSwitcher swipe={swipe} className="topbar__actions" />}
+        </header>
         <div className="empty"><p className="empty__title">Este perfil no está disponible</p></div>
       </div>
     );
   }
-  if (!p) return <div className="page" />;
+  if (!p) {
+    // Mientras carga, si venís de la grilla ya se ve su foto chica.
+    const thumb = swipe.current?.photo;
+    return (
+      <div className={`page profile${swipeClass}`} {...swipeProps}>
+        {thumb && <div className="profile__photo"><img src={thumb} alt="" /></div>}
+      </div>
+    );
+  }
 
   return (
-    <div className="page profile">
+    <div className={`page profile${swipeClass}`} {...swipeProps}>
       <ProfileCover
         key={p.id}
         photos={p.photos}
@@ -116,6 +137,7 @@ export function ProfilePage() {
         age={p.age}
         status={p}
         back={<button className="iconbtn iconbtn--float" onClick={() => nav(-1)} aria-label="Volver"><BackIcon /></button>}
+        aside={swipe.active && <ProfileSwitcher swipe={swipe} className="profile-switch--cover" />}
       />
 
       <div className="profile__body">

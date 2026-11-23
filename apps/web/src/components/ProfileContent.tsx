@@ -7,9 +7,11 @@ type CoverProps = {
   age: number;
   status?: Pick<PublicProfile, "online" | "recent" | "distance">;
   back?: ReactNode;
+  /** Algo más sobre la foto, abajo a la derecha (por ejemplo, pasar al perfil siguiente). */
+  aside?: ReactNode;
 };
 
-export function ProfileCover({ photos, displayName, age, status, back }: CoverProps) {
+export function ProfileCover({ photos, displayName, age, status, back, aside }: CoverProps) {
   const [selected, setSelected] = useState(0);
   const index = Math.min(selected, photos.length - 1);
   return (
@@ -33,7 +35,8 @@ export function ProfileCover({ photos, displayName, age, status, back }: CoverPr
           <button className="profile__tap profile__tap--next" aria-label="Foto siguiente" onClick={() => setSelected((index + 1) % photos.length)} />
         </>
       )}
-      <div className="profile__name">
+      {aside}
+      <div className={aside ? "profile__name profile__name--with-aside" : "profile__name"}>
         <div className="profile__nameline">
           <h1>{displayName}</h1>
           <span>{age}</span>

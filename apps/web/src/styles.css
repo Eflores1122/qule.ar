@@ -249,6 +249,14 @@ html:has(.nearby-page), .nearby-page { overscroll-behavior-y: none; }
 .profile__tap:focus-visible { outline-offset: -3px; }
 .profile__tap--prev { left: 0; }
 .profile__tap--next { right: 0; }
+/* Pasar al perfil anterior o siguiente de la grilla de Gente */
+.profile--swipe { touch-action: pan-y pinch-zoom; }
+.shell__main:has(> .profile--swipe) { overflow-x: clip; }
+.profile__name--with-aside { right: 112px; }
+.profile-switch { display: flex; align-items: center; gap: 8px; }
+.profile-switch--cover { position: absolute; right: 12px; bottom: 16px; z-index: var(--z-sticky); }
+.profile-switch--cover .profile-switch__btn { background: var(--scrim-light); color: var(--text); backdrop-filter: blur(8px); }
+.profile-switch__btn:disabled { opacity: 0.35; cursor: default; }
 .profile__body { padding: 16px; display: flex; flex-direction: column; gap: 18px; }
 .profile__about { white-space: pre-wrap; font-size: var(--text-lg); }
 .profile__section h3 { font-size: var(--text-sm); color: var(--muted); font-weight: 500; margin-bottom: 8px; }
