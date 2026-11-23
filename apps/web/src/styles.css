@@ -411,6 +411,9 @@ a.gcard:hover { background: var(--surface); }
 .share-album { display: flex; flex-direction: column; gap: 8px; }
 .share-album p { display: flex; align-items: center; gap: 6px; }
 .share-album__options { background: var(--surface); border: 1px solid var(--line); border-radius: var(--radius-xl); padding: 12px; display: flex; flex-direction: column; gap: 8px; }
+.album-access__heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 4px 12px; }
+.album-access__heading .subhead { margin: 0; }
+.album-access__heading .btn { min-height: 44px; }
 .grants__who { display: flex; flex-direction: column; line-height: 1.25; }
 .grants__who a { color: var(--text); font-weight: 600; }
 .lightbox { position: fixed; inset: 0; z-index: var(--z-lightbox); background: var(--media-bg); display: flex; flex-direction: column; user-select: none; -webkit-user-select: none; -webkit-touch-callout: none; }
