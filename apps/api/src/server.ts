@@ -23,6 +23,7 @@ import { premiumRoutes } from "./routes/premium.js";
 import { adminRoutes } from "./routes/admin.js";
 import { toqueRoutes } from "./routes/toques.js";
 import { securityHeaders } from "./security.js";
+import { limitApiBody } from "./requestBody.js";
 import { sweepExpiredPhotos } from "./expiring.js";
 import { purgeRemovedGroups, scanExistingGroups } from "./moderation.js";
 import { signalReady } from "./shared.js";
@@ -82,6 +83,7 @@ if (canonical.protocol === "https:") {
   });
 }
 
+app.use("/api/*", limitApiBody);
 app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
 app.route("/api", meRoutes);
 app.route("/api", groupRoutes);
