@@ -458,6 +458,7 @@ a.gcard:hover { background: var(--surface); }
 .bubble:hover .bubble__more, .bubble__more:focus-visible { opacity: 1; }
 @media (hover: none) { .bubble__more { opacity: 0.6; } }
 .menu--bubble { top: 28px; right: 0; color: var(--text); }
+.menu--above { top: auto; bottom: 100%; }
 .typing-label { display: block; font-size: var(--text-xs); color: var(--ok); }
 .typing { display: flex; gap: 4px; padding: 12px 14px; }
 .typing i { width: 7px; height: 7px; border-radius: var(--radius-pill); background: var(--muted); animation: blink 1.2s infinite; }

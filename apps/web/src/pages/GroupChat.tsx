@@ -11,6 +11,7 @@ import { ReportDialog } from "../components/ReportDialog";
 import { slowModeText } from "../features/groups/groupRules";
 import { SavedPhrasesButton, SavedPhrasesMenu } from "../features/phrases/SavedPhrases";
 import { useDraft } from "../features/chat/useDraft";
+import { useMessageMenuPosition } from "../useMessageMenuPosition";
 
 const fmtTime = (iso: string) =>
   new Date(iso).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" });
@@ -67,6 +68,7 @@ export function GroupChat() {
   const [reportingGroupId, setReportingGroupId] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const listRef = useRef<HTMLDivElement>(null);
+  const positionMessageMenu = useMessageMenuPosition(listRef);
   const stickToBottom = useRef(true);
 
   const isMember = Boolean(info?.role);
@@ -348,7 +350,7 @@ export function GroupChat() {
                 <DotsIcon />
               </button>
               {menuFor === m.id && (
-                <div className="menu" role="menu">
+                <div className="menu" role="menu" ref={positionMessageMenu}>
                   {m.status === "published" && <ReactionPicker current={myReaction(m.reactions ?? [], me?.user.id)} onPick={(k) => react(m, k)} />}
                   {m.status === "published" && <button role="menuitem" onClick={() => startReply(m)}>Responder</button>}
                   {mine ? (
