@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { test } from "node:test";
-import { forgetFile, isKnownPublic, rememberPublic, sessionCookie } from "./fileAccess.js";
+import { forgetFile, isKnownPublic, rememberPublic, sessionCookie } from "./fileCache.js";
 
 test("encuentra la cookie de sesión, con o sin prefijo seguro", () => {
   assert.equal(sessionCookie("a=1; better-auth.session_token=abc.def; b=2"), "abc.def");

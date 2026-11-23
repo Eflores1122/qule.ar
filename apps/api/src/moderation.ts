@@ -3,7 +3,7 @@ import { db, schema } from "./db/index.js";
 import { env } from "./env.js";
 import { pushTo } from "./push.js";
 import { deleteImage } from "./storage.js";
-import { forgetFile } from "./fileAccess.js";
+import { forgetFile } from "./fileCache.js";
 
 const { report, user } = schema;
 

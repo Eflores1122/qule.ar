@@ -14,7 +14,7 @@ import { emitToGroup, emitToUser, isOnline, serializeGroupMessages, syncGroupRoo
 import { broadcast, onBroadcast } from "../shared.js";
 import { pushTo } from "../push.js";
 import { notifyGroupMessage } from "../groupNotify.js";
-import { forgetFile } from "../fileAccess.js";
+import { forgetFile } from "../fileCache.js";
 
 const { group, groupMember, groupMessage, groupJoinRequest, groupInvite } = schema;
 
