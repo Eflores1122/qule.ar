@@ -52,6 +52,8 @@ type AdminAppeal = {
   suspendReason: string | null;
   suspendedAt: string;
   suspendedByMe: boolean;
+  /** Hay otra persona con el permiso Revisiones: si la suspendiste vos, la revisa ella. */
+  othersCanReview: boolean;
   body: string;
   extra: string | null;
   status: "open" | "upheld" | "lifted";
@@ -325,13 +327,19 @@ export function Admin() {
                   </blockquote>
                   {a.status === "open" ? (
                     <>
-                      {a.suspendedByMe && (
-                        <p className="small appeal__warn">Esta suspensión la hiciste vos. Si se puede, que la revise otra persona del equipo. Si la resolvés igual, queda registrado.</p>
+                      {a.suspendedByMe && a.othersCanReview ? (
+                        <p className="small appeal__warn">Esta suspensión la hiciste vos, así que la revisa otra persona del equipo.</p>
+                      ) : (
+                        <>
+                          {a.suspendedByMe && (
+                            <p className="small appeal__warn">Esta suspensión la hiciste vos y no hay nadie más con el permiso Revisiones. Si la resolvés, queda registrado.</p>
+                          )}
+                          <div className="rcard__actions">
+                            <button className="btn btn--small" onClick={() => setResolving({ appeal: a, decision: "uphold" })}>Mantener la suspensión</button>
+                            <button className="btn btn--small btn--primary" onClick={() => setResolving({ appeal: a, decision: "lift" })}>Levantar la suspensión</button>
+                          </div>
+                        </>
                       )}
-                      <div className="rcard__actions">
-                        <button className="btn btn--small" onClick={() => setResolving({ appeal: a, decision: "uphold" })}>Mantener la suspensión</button>
-                        <button className="btn btn--small btn--primary" onClick={() => setResolving({ appeal: a, decision: "lift" })}>Levantar la suspensión</button>
-                      </div>
                     </>
                   ) : (
                     <p className="small rcard__resolution">

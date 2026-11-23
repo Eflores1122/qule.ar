@@ -50,6 +50,15 @@ test("tope general: pasado el límite del día no sale ningún mail, y al día s
   assert.equal(await allowMail("otra@ejemplo.com", "reset", new Date(at(30).getTime() + 86_400_000)), true);
 });
 
+test("tope general con muchos pedidos a la vez: nunca sale más del límite", async () => {
+  await db.delete(schema.mailLog);
+  const results = await Promise.all(Array.from({ length: 25 }, (_, i) => allowMail(`c${i}@ejemplo.com`, "account", at(i % 50))));
+  assert.equal(results.filter(Boolean).length, 10);
+  // Lo que no salió no queda anotado
+  const rows = await db.select().from(schema.mailLog);
+  assert.equal(rows.length, results.filter(Boolean).length);
+});
+
 test("no se guarda la dirección, solo un hash", async () => {
   const rows = await db.select().from(schema.mailLog);
   assert.ok(rows.length > 0);

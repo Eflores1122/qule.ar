@@ -107,7 +107,7 @@ Quien administra en general (las cuentas de `ADMIN_USER_IDS` o `ADMIN_EMAILS` en
 | Suspensiones | Suspender y reactivar cuentas |
 | Revisiones | Responder los pedidos de revisión de suspensiones (mantener o levantar) |
 
-Solo la administración general puede dar de baja o reactivar grupos, ver quién mandó cada reporte, dar y sacar permisos y ver el **Registro**. Nadie del equipo ve mails, IPs ni datos de salud. Los permisos se chequean en el servidor, no solo escondiendo botones.
+Solo la administración general puede dar de baja o reactivar grupos, ver quién mandó cada reporte, dar y sacar permisos, suspender a alguien del equipo y ver el **Registro**. A la administración general no la puede suspender nadie desde la app. Nadie del equipo ve mails, IPs ni datos de salud. Los permisos se chequean en el servidor, no solo escondiendo botones.
 
 Cada acción (descartar, borrar un mensaje, suspender, reactivar, responder una revisión, dar de baja un grupo, cambiar permisos) queda en el **Registro**: quién, cuándo, sobre qué y por qué.
 
@@ -115,7 +115,7 @@ Cada acción (descartar, borrar un mensaje, suspender, reactivar, responder una 
 
 Quien está suspendido ve el motivo al entrar y puede **pedir una revisión** desde la app, en privado. Un pedido por suspensión, y puede sumar algo más una sola vez mientras no haya respuesta. Le llega un mail avisando la suspensión (sin el motivo) y otro cuando hay respuesta.
 
-- Lo revisa alguien con el permiso **Revisiones**, mejor si no es quien suspendió (el panel lo avisa; si no hay nadie más, se puede igual y queda registrado).
+- Lo revisa alguien con el permiso **Revisiones**. Quien suspendió no puede resolverlo si hay otra persona con ese permiso; si no hay nadie más, puede, y queda registrado.
 - El panel muestra el motivo, lo que escribió la persona y los reportes que terminaron en la medida, **sin decir quién reportó**.
 - La respuesta es obligatoria y la persona la lee en la app. Si se levanta, la cuenta vuelve a funcionar enseguida.
 

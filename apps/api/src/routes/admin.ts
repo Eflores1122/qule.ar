@@ -12,7 +12,7 @@ import { deleteImage } from "../storage.js";
 import { AUTO_DETAILS_PREFIX, autoHiddenGroups, autoHiddenUsers, deleteImageUnlessEvidence, isUrgent, releaseEvidence, REMOVED_GROUP_DAYS } from "../moderation.js";
 import { removeGroup } from "./groups.js";
 import { appealReviewedMail, sendMail, suspendedMail } from "../mail.js";
-import { accessFor, grant, isOwner, logAction, requireAccess, STAFF_PERMISSIONS } from "../staff.js";
+import { accessFor, grant, isOwner, logAction, requireAccess, STAFF_PERMISSIONS, staffIdsWith } from "../staff.js";
 
 const { report, profile, session, groupMessage, directMessage, pushSubscription, user, group, appeal, staffPermission, modAction } = schema;
 
@@ -208,6 +208,13 @@ adminRoutes.post("/admin/users/:id/suspend", requireAccess("sanctions"), async (
   const admin = c.get("user");
   const target = c.req.param("id");
   if (target === admin.id) throw new HTTPException(400, { message: "No podés suspenderte a vos" });
+  // Que una cuenta de moderación (o una robada) no pueda dejar afuera del panel a quien administra.
+  const [t] = await db.select({ id: user.id, email: user.email, emailVerified: user.emailVerified }).from(user).where(eq(user.id, target));
+  if (!t) throw new HTTPException(404, { message: "Esa cuenta no existe" });
+  if (isOwner(t)) throw new HTTPException(403, { message: "No se puede suspender a la administración general" });
+  if ((await accessFor(t)).length > 0 && !(await accessFor(admin)).includes("owner")) {
+    throw new HTTPException(403, { message: "Solo la administración general puede suspender a alguien del equipo" });
+  }
   const { reason } = z.object({ reason: z.string().trim().min(3, "Escribí un motivo").max(300) }).parse(await c.req.json());
   const [p] = await db.update(profile).set({ suspendedAt: new Date(), suspendReason: reason, suspendedBy: admin.id })
     .where(eq(profile.userId, target)).returning();
@@ -257,6 +264,7 @@ adminRoutes.get("/admin/appeals", requireAccess("appeals"), async (c) => {
     .orderBy(closed ? desc(appeal.reviewedAt) : appeal.createdAt)
     .limit(100);
   const people = await authorsFor(rows.map((a) => a.userId));
+  const othersCanReview = (await staffIdsWith("appeals")).some((id) => id !== me.id);
   const out = [];
   for (const a of rows) {
     // Los reportes que se cerraron con esta suspensión. Sin quién reportó.
@@ -270,8 +278,9 @@ adminRoutes.get("/admin/appeals", requireAccess("appeals"), async (c) => {
       person: people.get(a.userId) ?? { id: a.userId, name: "Cuenta sin perfil", age: 0, photo: null },
       suspendReason: a.suspendReason,
       suspendedAt: a.suspendedAt.toISOString(),
-      // Mejor que lo revise otra persona: el panel lo avisa
+      // Si la suspendiste vos y hay otra persona con el permiso Revisiones, la tiene que revisar ella
       suspendedByMe: a.suspendedBy === me.id,
+      othersCanReview,
       body: a.body,
       extra: a.extra,
       status: a.status,
@@ -294,6 +303,9 @@ adminRoutes.post("/admin/appeals/:id/resolve", requireAccess("appeals"), async (
   const [a] = await db.select().from(appeal).where(eq(appeal.id, c.req.param("id")));
   if (!a) throw new HTTPException(404, { message: "Ese pedido no existe" });
   if (a.status !== "open") throw new HTTPException(409, { message: "Ese pedido ya se resolvió" });
+  if (a.suspendedBy === me.id && (await staffIdsWith("appeals")).some((id) => id !== me.id)) {
+    throw new HTTPException(403, { message: "Esta suspensión la hiciste vos: la tiene que revisar otra persona del equipo" });
+  }
   await db.update(appeal)
     .set({ status: decision === "lift" ? "lifted" : "upheld", response, reviewedBy: me.id, reviewedAt: new Date() })
     .where(eq(appeal.id, a.id));
