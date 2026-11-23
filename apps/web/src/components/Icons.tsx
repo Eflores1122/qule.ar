@@ -85,3 +85,7 @@ export const CloseIcon = () => (
 export const PhraseIcon = () => (
   <svg {...base}><path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v8a2.5 2.5 0 0 1-2.5 2.5H9l-5 4z" /><path d="M8 8.5h8M8 12.5h5" /></svg>
 );
+/** Avisos (notificaciones): una campana. */
+export const BellIcon = () => (
+  <svg {...base} width={18} height={18}><path d="M6 9a6 6 0 0 1 12 0c0 5 2 6.5 2 6.5H4S6 14 6 9Z" /><path d="M10 19.5a2.2 2.2 0 0 0 4 0" /></svg>
+);

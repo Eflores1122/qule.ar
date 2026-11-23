@@ -86,7 +86,8 @@ adminRoutes.get("/admin/reports", requireAccess("reports", "sanctions"), async (
     .from(report)
     .where(status === "open" ? eq(report.status, "open") : inArray(report.status, ["dismissed", "actioned"]))
     .orderBy(desc(report.createdAt))
-    .limit(100);
+    // Los abiertos van todos (el panel los agrupa y filtra); de los resueltos, los últimos 300
+    .limit(status === "open" ? 1000 : 300);
   // Quien reportó o fue reportado puede haber borrado su cuenta: el reporte queda, sin la cuenta
   const ids = (xs: (string | null)[]) => xs.filter((x): x is string => x != null);
   const people = await authorsFor(ids(rows.flatMap((r) => [r.reporterId, r.targetUserId])));
@@ -110,16 +111,33 @@ adminRoutes.get("/admin/reports", requireAccess("reports", "sanctions"), async (
     : [];
   const groupsById = new Map(groupRows.map((g) => [g.id, g]));
   const groupMembers = new Map(groupCounts.map((x) => [x.id, x.n]));
+  // Sobre qué es cada reporte: un grupo, una persona o (si la cuenta se borró) solo ese reporte.
+  // El panel junta los reportes con el mismo tema, así varios reportes de lo mismo se ven en una sola tarjeta.
+  const subjectOf = (r: typeof rows[number]) => r.groupId ? `g:${r.groupId}` : r.targetUserId ? `u:${r.targetUserId}` : `r:${r.id}`;
+  // Cuántas personas distintas reportaron cada tema (sin decir quiénes: eso solo lo ve la administración general)
+  const reportersBySubject = new Map<string, Set<string>>();
+  for (const r of rows) {
+    const key = subjectOf(r);
+    const set = reportersBySubject.get(key) ?? new Set<string>();
+    set.add(r.reporterId ?? `auto:${r.id}`);
+    reportersBySubject.set(key, set);
+  }
+  // Los mensajes reportados, de una sola vez (no uno por reporte)
+  const msgIds = (kind: string) => [...new Set(rows.flatMap((r) => (r.messageId && r.messageKind === kind ? [r.messageId] : [])))];
+  const gmIds = msgIds("group");
+  const dmIds = msgIds("dm");
+  const groupMsgs = new Map((gmIds.length ? await db.select().from(groupMessage).where(inArray(groupMessage.id, gmIds)) : []).map((m) => [m.id, m]));
+  const directMsgs = new Map((dmIds.length ? await db.select().from(directMessage).where(inArray(directMessage.id, dmIds)) : []).map((m) => [m.id, m]));
   const out = [];
   for (const r of rows) {
     // El mensaje reportado: si ya se borró, se muestra la copia que guardó el reporte
     let message: { body: string | null; photo: boolean; deleted: boolean } | null = null;
     if (r.messageId && r.messageKind === "group") {
-      const [m] = await db.select().from(groupMessage).where(eq(groupMessage.id, r.messageId));
+      const m = groupMsgs.get(r.messageId);
       const deleted = !m || m.status === "deleted";
-      message = { body: deleted ? r.messageBody : m.body, photo: false, deleted };
+      message = { body: deleted || !m ? r.messageBody : m.body, photo: false, deleted };
     } else if (r.messageId && r.messageKind === "dm") {
-      const [m] = await db.select().from(directMessage).where(eq(directMessage.id, r.messageId));
+      const m = directMsgs.get(r.messageId);
       message = m
         ? { body: m.body, photo: Boolean(m.photoKey) || r.evidenceKeys.length > 0, deleted: false }
         : { body: r.messageBody, photo: r.evidenceKeys.length > 0, deleted: true };
@@ -127,6 +145,8 @@ adminRoutes.get("/admin/reports", requireAccess("reports", "sanctions"), async (
     const tid = r.targetUserId ?? "";
     out.push({
       id: r.id,
+      subject: subjectOf(r),
+      subjectReporters: reportersBySubject.get(subjectOf(r))?.size ?? 1,
       reason: r.reason,
       details: r.details,
       status: r.status,
@@ -164,8 +184,7 @@ adminRoutes.get("/admin/reports", requireAccess("reports", "sanctions"), async (
       targetAutoHidden: hidden.has(tid),
     });
   }
-  // Lo urgente primero (menores, contenido íntimo sin consentimiento, amenazas); dentro de cada grupo, lo más nuevo
-  out.sort((a, b) => Number(b.urgent) - Number(a.urgent));
+  // Lo más nuevo primero; el panel agrupa, ordena y filtra (y avisa arriba si hay urgentes)
   return c.json(out);
 });
 
@@ -178,6 +197,15 @@ async function closeReports(ids: string[], adminId: string, status: "dismissed" 
   // Descartado: la copia del mensaje y los archivos guardados como prueba se liberan
   if (status === "dismissed") await releaseEvidence(ids);
 }
+
+/** Descartar varios reportes de una vez (todos los de una misma persona o grupo). */
+adminRoutes.post("/admin/reports/dismiss", requireAccess("reports"), async (c) => {
+  const { ids } = z.object({ ids: z.array(z.string().min(1).max(64)).min(1).max(500) }).parse(await c.req.json());
+  const open = await db.select({ id: report.id }).from(report).where(and(inArray(report.id, ids), eq(report.status, "open")));
+  await closeReports(open.map((r) => r.id), c.get("user").id, "dismissed", "Descartado");
+  for (const r of open) await logAction(c.get("user").id, "Descartó un reporte", r.id);
+  return c.json({ ok: true, dismissed: open.length });
+});
 
 adminRoutes.post("/admin/reports/:id/dismiss", requireAccess("reports"), async (c) => {
   const id = c.req.param("id");
@@ -198,7 +226,10 @@ adminRoutes.post("/admin/reports/:id/delete-message", requireAccess("reports"), 
     // La foto queda como prueba del reporte (que termina en una medida); si no, se borra
     if (m?.photoKey) await deleteImageUnlessEvidence(m.photoKey);
   }
-  await closeReports([r.id], c.get("user").id, "actioned", "Mensaje borrado");
+  // Se cierran todos los reportes abiertos de ese mismo mensaje (varias personas pueden haberlo reportado)
+  const same = await db.select({ id: report.id }).from(report)
+    .where(and(eq(report.messageId, r.messageId), eq(report.status, "open")));
+  await closeReports([r.id, ...same.map((x) => x.id)], c.get("user").id, "actioned", "Mensaje borrado");
   await logAction(c.get("user").id, "Borró un mensaje reportado", r.id);
   return c.json({ ok: true });
 });
