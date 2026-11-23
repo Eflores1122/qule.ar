@@ -53,8 +53,14 @@ export type ReactionEvent = { scope: "dm" | "group"; messageId: string; conversa
 /** Una foto o video del perfil o del álbum. `thumb` es la miniatura (en los videos, un fotograma). */
 export type Media = { url: string; kind: "photo" | "video"; thumb: string | null; seconds: number | null };
 
-/** Alguien con acceso a mi álbum. expiresAt null = sin límite. */
-export type AlbumGrant = Author & { expiresAt: string | null };
+/** Alguien con acceso a uno de mis álbumes (una fila por persona y álbum). expiresAt null = sin límite. */
+export type AlbumGrant = Author & { expiresAt: string | null; albumId: string; albumName: string };
+
+/** Uno de mis álbumes privados. El primero es el álbum por defecto. */
+export type MyAlbum = { id: string; name: string };
+
+/** Un álbum privado de otra persona que me compartieron (o mío, en mi propio perfil). */
+export type SharedAlbum = { id: string; name: string; count: number; videos: number; items: Media[]; expiresAt: string | null };
 
 export type Profile = {
   displayName: string;
@@ -102,7 +108,8 @@ export type Me = {
     /** Versión de los términos que aceptó (null: cuenta anterior a los términos) */
     termsVersion: string | null;
   }) | null;
-  photos: (Media & { id: string; position: number; isPrivate: boolean })[];
+  photos: (Media & { id: string; position: number; isPrivate: boolean; albumId: string | null })[];
+  albums: MyAlbum[];
 };
 
 export type PublicProfile = Omit<Profile, "birthdate"> & {
@@ -113,10 +120,12 @@ export type PublicProfile = Omit<Profile, "birthdate"> & {
   recent: boolean;
   distance: string | null;
   favorite: boolean;
-  // items es null si no te lo compartieron; expiresAt es hasta cuándo lo podés ver (null = sin límite)
-  privateAlbum: { count: number; videos: number; items: Media[] | null; expiresAt: string | null } | null;
+  // count y videos suman todos sus álbumes; albums son solo los que te compartió (items junta su contenido, null si ninguno)
+  privateAlbum: { count: number; videos: number; items: Media[] | null; expiresAt: string | null; albums: SharedAlbum[] } | null;
   iSharedAlbum: boolean;
   sharedUntil: string | null;
+  // Qué álbumes míos le compartí y hasta cuándo (expiresAt null = sin límite)
+  myShares: { albumId: string; expiresAt: string | null }[];
   // El último toque que le mandé, si fue hace menos de 12 horas
   myToque: { kind: string; at: string } | null;
 };
