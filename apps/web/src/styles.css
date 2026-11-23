@@ -332,8 +332,9 @@ a.gcard:hover { background: var(--surface); }
 .gcard__details { display: block; }
 .gcard__details:hover b { text-decoration: underline; }
 .group-description { overflow-wrap: anywhere; white-space: pre-wrap; }
-.group-details-link { flex: none; }
-.group-details-link svg { width: 16px; height: 16px; }
+.group-actions { flex: none; position: relative; }
+.group-actions__menu { top: 100%; right: 0; }
+.group-actions__menu[hidden] { display: none; }
 .gcard__top { display: flex; align-items: center; gap: 8px; }
 .gcard__desc { color: var(--muted); font-size: var(--text-md); overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .gcard__meta { color: var(--muted); font-size: var(--text-xs); margin-top: 2px; }

@@ -5,9 +5,10 @@ import { myReaction, ReactionBar, ReactionPicker } from "../components/Reactions
 import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { GroupAvatar } from "../components/GroupAvatar";
-import { BackIcon, ClockIcon, DotsIcon, InfoIcon, SendIcon } from "../components/Icons";
+import { BackIcon, ClockIcon, DotsIcon, SendIcon } from "../components/Icons";
 import { JoinButton } from "../components/JoinButton";
 import { ReportDialog } from "../components/ReportDialog";
+import { GroupActions } from "../features/groups/GroupActions";
 import { slowModeText } from "../features/groups/groupRules";
 import { SavedPhrasesButton, SavedPhrasesMenu } from "../features/phrases/SavedPhrases";
 import { useDraft } from "../features/chat/useDraft";
@@ -299,10 +300,7 @@ export function GroupChat() {
           <h1 className="topbar__title topbar__title--sm"><Link to={`/grupos/${id}/info`}>{info.isGeneral ? "# " : ""}{info.name}</Link></h1>
           <p className="topbar__sub"><ClockIcon /> {rulesText}</p>
         </div>
-        <Link to={`/grupos/${id}/info`} className="btn btn--small group-details-link" aria-label={`Ver detalles${info.pendingCount ? `, ${info.pendingCount} solicitudes pendientes` : ""}`}>
-          <InfoIcon /> Ver detalles
-          {info.pendingCount > 0 && <b className="badge">{info.pendingCount}</b>}
-        </Link>
+        <GroupActions key={id} group={info} />
       </header>
 
       <div className="chat__list" role="log" aria-label="Mensajes del grupo" ref={listRef} onScroll={onScroll}>
