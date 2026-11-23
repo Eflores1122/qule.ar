@@ -7,6 +7,7 @@ import { CheckIcon, FilterIcon, PinIcon, RefreshIcon, StarIcon } from "../compon
 import { LOCATION_EVENT, shareLocation } from "../location";
 import { BODY_TYPES, LOOKING_FOR, POSITIONS, RELATIONSHIP, TRIBES } from "../options";
 import { DialogFocus } from "../components/DialogFocus";
+import { getGridList, saveGridList, toGridPerson } from "../features/profileSwipe/gridList";
 
 export type Filters = {
   ageMin?: number; ageMax?: number;
@@ -94,12 +95,22 @@ export function Nearby() {
   const [returnPosition] = useState(() => {
     const previousEntry = typeof state?.nearbyEntry === "string" ? state.nearbyEntry : entry;
     const saved = positions.get(entry) ?? positions.get(previousEntry);
-    return saved && saved.userId === userId && saved.query === toQuery(filters, 0) ? saved : undefined;
+    if (!saved || saved.userId !== userId || saved.query !== toQuery(filters, 0)) return undefined;
+    // Si desde el perfil pasaste a personas de páginas que la grilla no había cargado, se cargan también.
+    const list = getGridList(positions.has(entry) ? entry : previousEntry, userId);
+    const swiped = list && list.query === saved.query ? list.people.length : 0;
+    return { ...saved, count: Math.max(saved.count, swiped) };
   });
   const pendingRestore = useRef(returnPosition);
   const visible = useRef({ count: 0, ready: false });
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
+
+  // El perfil usa esta lista para pasar al anterior o al siguiente, con el mismo orden y los mismos filtros.
+  useLayoutEffect(() => {
+    if (status !== "ready" || !userId) return;
+    saveGridList(entry, { userId, query: toQuery(filtersRef.current, 0), people: people.map(toGridPerson), hasMore });
+  }, [entry, userId, people, hasMore, status]);
 
   useLayoutEffect(() => {
     visible.current = { count: people.length, ready: status === "ready" };
