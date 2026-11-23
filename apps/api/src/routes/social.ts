@@ -11,7 +11,7 @@ import {
 import { emitToUser, isOnline } from "../realtime.js";
 import { distanceLabel, visibleKm } from "../geo.js";
 import { deleteImage, MAX_UPLOAD_BYTES, saveImage } from "../storage.js";
-import { albumAccessUntil, recordView } from "./premium.js";
+import { albumAccess, recordView } from "./premium.js";
 import { myRecentToque } from "./toques.js";
 import { pushTo } from "../push.js";
 import { EXPIRING_GRACE_MS, EXPIRING_SECONDS } from "../expiring.js";
@@ -36,8 +36,16 @@ socialRoutes.get("/users/:id", async (c) => {
   const allPhotos = await db.select().from(photo).where(eq(photo.userId, id)).orderBy(asc(photo.position));
   const photos = allPhotos.filter((x) => !x.isPrivate);
   const privatePhotos = allPhotos.filter((x) => x.isPrivate);
-  // undefined = no tiene acceso; null = sin límite; Date = hasta esa fecha
-  const albumUntil = privatePhotos.length > 0 ? (id === me.id ? null : await albumAccessUntil(id, me.id)) : undefined;
+  // Qué álbumes puedo ver y hasta cuándo (null = sin límite). Cada álbum se comparte por separado.
+  const albums = privatePhotos.length > 0 ? await db.select().from(schema.album).where(eq(schema.album.userId, id)).orderBy(asc(schema.album.position), asc(schema.album.createdAt)) : [];
+  const access = id === me.id ? new Map(albums.map((a) => [a.id, null])) : privatePhotos.length > 0 ? await albumAccess(id, me.id) : new Map<string, Date | null>();
+  const visibleAlbums = albums.flatMap((a) => {
+    if (!access.has(a.id)) return [];
+    const items = privatePhotos.filter((x) => x.albumId === a.id);
+    if (!items.length) return [];
+    const until = access.get(a.id) ?? null;
+    return [{ id: a.id, name: a.name, count: items.length, videos: items.filter((x) => x.kind === "video").length, items: items.map(mediaOut), expiresAt: until ? until.toISOString() : null }];
+  });
   // Lista explícita de campos públicos: nunca la fecha de nacimiento ni la celda de ubicación
   const mine = c.get("profile")!;
   await recordView(me.id, mine.incognito, id);
@@ -46,8 +54,8 @@ socialRoutes.get("/users/:id", async (c) => {
   const on = !p.incognito && isOnline(id);
   const [fav] = await db.select().from(schema.favorite)
     .where(and(eq(schema.favorite.userId, me.id), eq(schema.favorite.favoriteId, id)));
-  // Si yo le compartí mi álbum y hasta cuándo
-  const myGrant = id === me.id ? undefined : await albumAccessUntil(me.id, id);
+  // Qué álbumes míos le compartí y hasta cuándo
+  const myGrants = id === me.id ? new Map<string, Date | null>() : await albumAccess(me.id, id);
   return c.json({
     id,
     displayName: p.displayName,
@@ -61,6 +69,7 @@ socialRoutes.get("/users/:id", async (c) => {
     lookingFor: p.lookingFor,
     relationship: p.relationship,
     pronouns: p.pronouns,
+    hasPlace: p.hasPlace,
     hivStatus: p.hivStatus,
     lastTested: p.lastTested,
     photos: photos.map((x) => imageUrl(x.key)),
@@ -68,19 +77,24 @@ socialRoutes.get("/users/:id", async (c) => {
     online: on,
     recent: !p.incognito && (on || Date.now() - p.lastSeenAt.getTime() < 15 * 60_000),
     favorite: Boolean(fav),
-    // Álbum privado: cuántas fotos y videos hay y, si te lo compartieron, el contenido y hasta cuándo lo ves
+    // Álbumes privados: cuántas fotos y videos hay en total y, de los que te compartieron, el contenido y hasta cuándo
+    // los ves. Los nombres de los álbumes que no te compartieron no se muestran.
+    // items junta lo de todos los álbumes que ves (null si no ves ninguno); expiresAt es el del primero.
     privateAlbum: privatePhotos.length
       ? {
           count: privatePhotos.length,
           videos: privatePhotos.filter((x) => x.kind === "video").length,
-          items: albumUntil !== undefined ? privatePhotos.map(mediaOut) : null,
-          expiresAt: albumUntil ? albumUntil.toISOString() : null,
+          items: visibleAlbums.length ? visibleAlbums.flatMap((a) => a.items) : null,
+          expiresAt: visibleAlbums[0]?.expiresAt ?? null,
+          albums: visibleAlbums,
         }
       : null,
-    iSharedAlbum: myGrant !== undefined,
+    iSharedAlbum: myGrants.size > 0,
+    // Qué álbumes míos le compartí y hasta cuándo (expiresAt null = sin límite)
+    myShares: [...myGrants].map(([albumId, until]) => ({ albumId, expiresAt: until ? until.toISOString() : null })),
     // El último toque que le mandé, si fue hace menos de 12 horas
     myToque: id === me.id ? null : await myRecentToque(me.id, id),
-    sharedUntil: myGrant ? myGrant.toISOString() : null,
+    sharedUntil: [...myGrants.values()].find((x) => x)?.toISOString() ?? null,
     distance: km != null ? distanceLabel(km) : null,
   });
 });

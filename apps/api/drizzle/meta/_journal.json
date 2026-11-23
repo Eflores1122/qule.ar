@@ -134,6 +134,27 @@
       "when": 1795371414176,
       "tag": "0018_moderacion_permisos_apelaciones",
       "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1795439980256,
+      "tag": "0019_solicitudes_paginadas",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1795443287598,
+      "tag": "0020_perfil_tengo_lugar",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1795443305149,
+      "tag": "0021_albumes_privados",
+      "breakpoints": true
     }
   ]
 }

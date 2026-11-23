@@ -19,7 +19,7 @@
   "dependencies": {
     "@mortero/brand": "*",
     "@mortero/shared": "*",
-    "better-auth": "^1.7.26",
+    "better-auth": "^1.7.27",
     "heic-to": "^1.6.7",
     "react": "^19.3.1",
     "react-dom": "^19.3.1",
