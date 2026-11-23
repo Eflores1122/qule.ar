@@ -206,10 +206,17 @@ html:has(.nearby-page), .nearby-page { overscroll-behavior-y: none; }
 .composer { border-top: 1px solid var(--line); padding: 8px 10px calc(8px + var(--safe-b)); background: var(--surface); flex: none; }
 .shell:not(.shell--thread) .composer { padding-bottom: 8px; }
 .composer__row { display: flex; gap: 8px; align-items: flex-end; }
-.composer__input { flex: 1; resize: none; max-height: 140px; min-height: 44px; padding: 11px 14px; border-radius: var(--radius-4xl); background: var(--surface-2); border: 1px solid var(--line); color: var(--text); font: inherit; font-size: var(--text-input); field-sizing: content; }
+/* Foto y frases: un poco más arriba para que no queden bajos respecto del campo. */
+.composer__row > .iconbtn { transform: translateY(-4px); }
+/* Frases: el botón queda igual que la foto; solo el dibujo sube 1px. */
+.composer__row > .iconbtn--phrases > svg { transform: translateY(-1px); }
+/* 24px de línea: el campo queda en 48 px justos (24 + 22 de padding + 2 de borde). */
+.composer__input { flex: 1; resize: none; max-height: 140px; min-height: 44px; padding: 11px 14px; border-radius: var(--radius-4xl); background: var(--surface-2); border: 1px solid var(--line); color: var(--text); font: inherit; font-size: var(--text-input); line-height: 24px; field-sizing: content; }
 .composer__input:focus { outline: none; border-color: var(--accent); }
 .composer__editing { font-size: var(--text-xs); color: var(--queue); display: flex; justify-content: space-between; align-items: center; padding: 0 6px 6px; }
 .sendbtn { width: 44px; height: 44px; border-radius: var(--radius-pill); border: 0; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; flex: none; }
+/* Enviar mide 44: 2px menos que el campo de 48, así que sube 2px para centrarse. */
+.composer__row > .sendbtn { transform: translateY(-2px); }
 .sendbtn:disabled { background: var(--surface-3); color: var(--muted); opacity: 1; }
 
 /* ---------- Mensajes privados ---------- */
