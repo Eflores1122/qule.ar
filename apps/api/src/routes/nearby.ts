@@ -65,22 +65,43 @@ nearbyRoutes.put("/me/privacy", async (c) => {
   return c.json({ ok: true });
 });
 
+// Los filtros quedan guardados en el celu (localStorage) y las casillas de números son libres: un valor raro
+// no tiene que dejar a nadie trabado con un error cada vez que abre Gente. Se acomodan en vez de rechazarse:
+// números al rango, mínimo y máximo dados vuelta si vienen al revés, y listas recortadas. Lo que no es un
+// número sí da 400. Todo va igual como parámetro al SQL.
+const MAX_OPTIONS = 20;
+const MAX_OPTION_LENGTH = 60;
 const list = z
   .string()
   .optional()
-  .transform((s) => (s ? s.split(",").map((x) => x.trim()).filter(Boolean).slice(0, 20) : []));
-const int = z.coerce.number().int().optional();
+  .transform((s) => (s ? s.slice(0, MAX_OPTIONS * (MAX_OPTION_LENGTH + 1)).split(",").map((x) => x.trim())
+    .filter((x) => x && x.length <= MAX_OPTION_LENGTH).slice(0, MAX_OPTIONS) : []));
+/** Entero dentro de [min, max]; vacío es "sin filtro". */
+const range = (min: number, max: number) => z.preprocess(
+  (v) => (v === "" || v == null ? undefined : v),
+  z.coerce.number().finite().transform((n) => Math.min(max, Math.max(min, Math.round(n)))).optional(),
+);
+// Los mismos topes que las casillas de la pantalla de filtros
+const age = range(18, 99);
+const height = range(120, 230);
+const weight = range(35, 250);
+/** Si el mínimo quedó más grande que el máximo, se dan vuelta. */
+function ordered<T extends Record<string, unknown>>(f: T, lo: keyof T, hi: keyof T) {
+  const a = f[lo] as number | undefined;
+  const b = f[hi] as number | undefined;
+  return a != null && b != null && a > b ? { ...f, [lo]: b, [hi]: a } : f;
+}
 
 const filtersSchema = z.object({
-  ageMin: int, ageMax: int,
-  heightMin: int, heightMax: int,
-  weightMin: int, weightMax: int,
+  ageMin: age, ageMax: age,
+  heightMin: height, heightMax: height,
+  weightMin: weight, weightMax: weight,
   bodyType: list, position: list, tribes: list, lookingFor: list, relationship: list,
   online: z.enum(["1"]).optional(),
   withPhoto: z.enum(["1"]).optional(),
   favorites: z.enum(["1"]).optional(),
   offset: z.coerce.number().int().min(0).max(2000).default(0),
-});
+}).transform((f) => ordered(ordered(ordered(f, "ageMin", "ageMax"), "heightMin", "heightMax"), "weightMin", "weightMax"));
 
 export type NearbyFilters = z.infer<typeof filtersSchema>;
 

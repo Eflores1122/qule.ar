@@ -161,6 +161,43 @@ const MES = {
   "distancia escondida": { userId: ME, cellLat: -34.6, cellLng: -58.4, showDistance: false },
 };
 
+test("acomoda los filtros raros en vez de rechazarlos y conserva el texto como valor literal", async () => {
+  // Quedan guardados en el celu: un valor raro no tiene que dar error cada vez que se abre Gente
+  const fixed = (q: Record<string, string>) => {
+    const f = parseNearbyFilters(q);
+    return { ageMin: f.ageMin, ageMax: f.ageMax, heightMin: f.heightMin, heightMax: f.heightMax, weightMin: f.weightMin, weightMax: f.weightMax };
+  };
+  const none = { ageMin: undefined, ageMax: undefined, heightMin: undefined, heightMax: undefined, weightMin: undefined, weightMax: undefined };
+  assert.deepEqual(fixed({ ageMin: "999999999" }), { ...none, ageMin: 99 });
+  assert.deepEqual(fixed({ ageMin: "16", ageMax: "300" }), { ...none, ageMin: 18, ageMax: 99 });
+  assert.deepEqual(fixed({ ageMin: "40", ageMax: "30" }), { ...none, ageMin: 30, ageMax: 40 });
+  assert.deepEqual(fixed({ heightMin: "210", heightMax: "150" }), { ...none, heightMin: 150, heightMax: 210 });
+  assert.deepEqual(fixed({ weightMin: "80.5", weightMax: "1000" }), { ...none, weightMin: 81, weightMax: 250 });
+  assert.deepEqual(fixed({ ageMin: "", heightMax: "" }), none);
+  // Listas: las primeras 20 opciones, sin las de más de 60 caracteres
+  assert.deepEqual(parseNearbyFilters({ tribes: `oso,${"a".repeat(61)},nutria` }).tribes, ["oso", "nutria"]);
+  assert.equal(parseNearbyFilters({ position: Array(25).fill("versatil").join(",") }).position.length, 20);
+  assert.equal(parseNearbyFilters({ lookingFor: "x,".repeat(100_000) }).lookingFor.length, 20);
+  // Lo que no es un número sí da error
+  const notNumbers: Record<string, string>[] = [{ ageMin: "abc" }, { heightMax: "Infinity" }, { offset: "-1" }];
+  for (const q of notNumbers) assert.throws(() => parseNearbyFilters(q));
+
+  const id = "filtros-literales";
+  await db.insert(schema.user).values({ id, name: "Ana", email: "literal@example.test" });
+  await db.insert(schema.profile).values({
+    userId: id, displayName: "Ana", birthdate: "1990-01-01",
+    bodyType: "D'Angelo", lookingFor: ["Música 100%"],
+  });
+  try {
+    const found = await nearbyPage(MES["sin ubicación"], parseNearbyFilters({ bodyType: "D'Angelo", lookingFor: "Música 100%" }));
+    assert.deepEqual(found.people.map((p) => p.id), [id]);
+    const partial = await nearbyPage(MES["sin ubicación"], parseNearbyFilters({ bodyType: "D'An", lookingFor: "Música %" }));
+    assert.equal(partial.total, 0);
+  } finally {
+    await db.delete(schema.user).where(inArray(schema.user.id, [id]));
+  }
+});
+
 for (const [label, me] of Object.entries(MES)) {
   test(`grilla de Cerca igual a la cuenta en memoria (${label})`, async () => {
     for (const q of CASES) {
