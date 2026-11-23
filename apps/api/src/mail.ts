@@ -32,26 +32,34 @@ let lastPurge = 0;
  * aunque se reinicie. Si se pasa el tope general del día, no sale ningún mail más hasta que baje: un ataque
  * nunca se convierte en una factura grande.
  */
+/** Número fijo para el candado de la base que ordena los mails (pg_advisory_xact_lock). */
+const MAIL_LOCK = 73_110_901;
+
 export async function allowMail(to: string, kind: MailKind, now = new Date()): Promise<boolean> {
   const since = new Date(now.getTime() - DAY_MS);
-  const [{ total }] = await db.select({ total: sql<number>`count(*)::int` }).from(mailLog).where(gt(mailLog.createdAt, since));
-  if (total >= env.MAIL_DAILY_CAP) {
-    console.warn(`Tope diario de mails alcanzado (${env.MAIL_DAILY_CAP}): no se manda`);
-    return false;
-  }
   const toHash = hashTo(to);
-  if (kind === "reset") {
-    const mine = await db.select({ at: mailLog.createdAt }).from(mailLog)
-      .where(and(eq(mailLog.toHash, toHash), eq(mailLog.kind, "reset"), gt(mailLog.createdAt, since)));
-    if (mine.length >= RESET_PER_ADDRESS_DAY) return false;
-    if (mine.some((m) => now.getTime() - m.at.getTime() < RESET_MIN_GAP_MS)) return false;
-  }
-  await db.insert(mailLog).values({ id: crypto.randomUUID(), toHash, kind, createdAt: now });
-  if (now.getTime() - lastPurge > 3_600_000) {
+  // Contar y anotar con un candado de la base: así, con varios procesos a la vez, el tope no se pasa.
+  const ok = await db.transaction(async (tx) => {
+    await tx.execute(sql`select pg_advisory_xact_lock(${MAIL_LOCK})`);
+    const [{ total }] = await tx.select({ total: sql<number>`count(*)::int` }).from(mailLog).where(gt(mailLog.createdAt, since));
+    if (total >= env.MAIL_DAILY_CAP) {
+      console.warn(`Tope diario de mails alcanzado (${env.MAIL_DAILY_CAP}): no se manda`);
+      return false;
+    }
+    if (kind === "reset") {
+      const mine = await tx.select({ at: mailLog.createdAt }).from(mailLog)
+        .where(and(eq(mailLog.toHash, toHash), eq(mailLog.kind, "reset"), gt(mailLog.createdAt, since)));
+      if (mine.length >= RESET_PER_ADDRESS_DAY) return false;
+      if (mine.some((m) => Math.abs(now.getTime() - m.at.getTime()) < RESET_MIN_GAP_MS)) return false;
+    }
+    await tx.insert(mailLog).values({ id: crypto.randomUUID(), toHash, kind, createdAt: now });
+    return true;
+  });
+  if (ok && now.getTime() - lastPurge > 3_600_000) {
     lastPurge = now.getTime();
     await db.delete(mailLog).where(lt(mailLog.createdAt, new Date(now.getTime() - 2 * DAY_MS)));
   }
-  return true;
+  return ok;
 }
 
 export async function sendMail(mail: Mail, kind: MailKind) {
@@ -112,10 +120,10 @@ export function suspendedMail(to: string): Mail {
   return {
     to,
     subject: `Tu cuenta de ${APP_NAME} está suspendida`,
-    text: `Tu cuenta de ${APP_NAME} fue suspendida. Entrá con tu cuenta para ver el motivo.\n\nSi creés que es un error, desde ahí mismo podés pedir que la revisemos: es privado y lo lee otra persona del equipo.\n\n${env.APP_URL}`,
+    text: `Tu cuenta de ${APP_NAME} fue suspendida. Entrá con tu cuenta para ver el motivo.\n\nSi creés que es un error, desde ahí mismo podés pedir que la revisemos. Es privado.\n\n${env.APP_URL}`,
     html: layout("Tu cuenta está suspendida", [
       "Entrá con tu cuenta para ver el motivo.",
-      "Si creés que es un error, desde ahí mismo podés pedir que la revisemos. Es privado y lo lee otra persona del equipo.",
+      "Si creés que es un error, desde ahí mismo podés pedir que la revisemos. Es privado.",
     ], { label: `Entrar a ${APP_NAME}`, url: env.APP_URL }),
   };
 }
