@@ -103,7 +103,7 @@ type Toast = { id: number; text: string; to?: string };
 
 function Shell() {
   const { me, reload } = useMe();
-  return <TabDataProvider key={me?.user.id} onUnauthorized={reload}><ShellContent /></TabDataProvider>;
+  return <TabDataProvider key={me?.user.id} userId={me?.user.id ?? ""} onUnauthorized={reload}><ShellContent /></TabDataProvider>;
 }
 
 function ShellContent() {

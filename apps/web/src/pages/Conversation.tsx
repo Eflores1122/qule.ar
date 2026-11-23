@@ -1,3 +1,4 @@
+import { compareDmOrder, DM_EVENTS, type DmReadReceipt } from "@mortero/shared/realtime";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { api, getSocket, upload, type Author, type Dm, type ReactionEvent } from "../api";
@@ -9,6 +10,7 @@ import { useSectionBack } from "../useSectionBack";
 import { useMessageMenuPosition } from "../useMessageMenuPosition";
 import { SavedPhrasesButton, SavedPhrasesMenu } from "../features/phrases/SavedPhrases";
 import { useDraft } from "../features/chat/useDraft";
+import { batchReadReceipts } from "../features/messages/readReceipts";
 
 export function Conversation() {
   const { id = "" } = useParams();
@@ -36,34 +38,43 @@ export function Conversation() {
 
   useEffect(() => {
     let alive = true;
-    const markRead = () =>
-      api(`/conversations/${id}/read`, { method: "POST" })
-        .then(() => window.dispatchEvent(new Event("mortero:read")))
-        .catch(() => {});
+    let beforeHistory: Array<(messages: Dm[]) => Dm[]> | null = [];
+    const receipts = batchReadReceipts(id);
+    const applyMessageUpdate = (update: (messages: Dm[]) => Dm[]) => {
+      beforeHistory?.push(update);
+      setMessages(update);
+    };
     api<{ other: Author }>(`/conversations/${id}`)
       .then((c) => alive && setOther(c.other))
       .catch(() => nav("/mensajes", { replace: true }));
-    api<{ messages: Dm[] }>(`/conversations/${id}/messages`).then((d) => {
+    api<{ messages: Dm[]; hasMore: boolean }>(`/conversations/${id}/messages`).then((d) => {
       if (!alive) return;
-      setMessages(d.messages);
-      markRead();
-    });
+      const history = beforeHistory?.reduce((list, update) => update(list), d.messages) ?? d.messages;
+      const loaded = [...history].sort(compareDmOrder);
+      beforeHistory = null;
+      setMessages(loaded);
+      // Al abrir el chat, marcá también los mensajes anteriores a la página de historial.
+      const oldestLoaded = d.messages[0];
+      if (oldestLoaded && d.hasMore) receipts.includeOlderMessages(oldestLoaded.id);
+      receipts.schedule(...loaded.filter((message) => message.senderId !== myId && !message.readAt).map(({ id }) => id));
+    }).catch(() => { beforeHistory = null; });
     const s = getSocket();
     const onMsg = (m: Dm) => {
       if (m.conversationId !== id) return;
       setTyping(false);
-      setMessages((list) => (list.some((x) => x.id === m.id) ? list : [...list, m]));
-      if (m.senderId !== myId) markRead();
+      applyMessageUpdate((list) => (list.some((x) => x.id === m.id) ? list : [...list, m]));
+      if (m.senderId !== myId && !m.readAt) receipts.schedule(m.id);
     };
-    const onRead = (p: { conversationId: string; readAt: string }) => {
-      if (p.conversationId !== id) return;
-      setMessages((list) => list.map((m) => (m.senderId === myId && !m.readAt ? { ...m, readAt: p.readAt } : m)));
+    const onRead = (p: DmReadReceipt) => {
+      if (p.audience === "reader" || p.conversationId !== id || !p.messageIds) return;
+      const readIds = new Set(p.messageIds);
+      applyMessageUpdate((list) => list.map((m) => (readIds.has(m.id) && !m.readAt ? { ...m, readAt: p.readAt } : m)));
     };
     const onDeleted = (p: { conversationId: string; id: string }) => {
-      if (p.conversationId === id) setMessages((list) => list.filter((m) => m.id !== p.id));
+      if (p.conversationId === id) applyMessageUpdate((list) => list.filter((m) => m.id !== p.id));
     };
     const onOpened = (p: { conversationId: string; id: string }) => {
-      if (p.conversationId === id) setMessages((list) => list.map((m) => (m.id === p.id ? { ...m, opened: true } : m)));
+      if (p.conversationId === id) applyMessageUpdate((list) => list.map((m) => (m.id === p.id ? { ...m, opened: true } : m)));
     };
     const onTyping = (p: { conversationId: string }) => {
       if (p.conversationId !== id) return;
@@ -73,22 +84,23 @@ export function Conversation() {
     };
     const onReaction = (p: ReactionEvent) => {
       if (p.scope !== "dm" || p.conversationId !== id) return;
-      setMessages((list) => list.map((m) => (m.id === p.messageId ? { ...m, reactions: p.reactions } : m)));
+      applyMessageUpdate((list) => list.map((m) => (m.id === p.messageId ? { ...m, reactions: p.reactions } : m)));
     };
     s.on("reaction", onReaction);
-    s.on("dm:message", onMsg);
-    s.on("dm:read", onRead);
-    s.on("dm:deleted", onDeleted);
-    s.on("dm:opened", onOpened);
-    s.on("dm:typing", onTyping);
+    s.on(DM_EVENTS.message, onMsg);
+    s.on(DM_EVENTS.read, onRead);
+    s.on(DM_EVENTS.deleted, onDeleted);
+    s.on(DM_EVENTS.opened, onOpened);
+    s.on(DM_EVENTS.typing, onTyping);
     return () => {
       alive = false;
+      receipts.close();
       s.off("reaction", onReaction);
-      s.off("dm:message", onMsg);
-      s.off("dm:read", onRead);
-      s.off("dm:deleted", onDeleted);
-      s.off("dm:opened", onOpened);
-      s.off("dm:typing", onTyping);
+      s.off(DM_EVENTS.message, onMsg);
+      s.off(DM_EVENTS.read, onRead);
+      s.off(DM_EVENTS.deleted, onDeleted);
+      s.off(DM_EVENTS.opened, onOpened);
+      s.off(DM_EVENTS.typing, onTyping);
       clearTimeout(typingTimer.current);
     };
   }, [id, myId, nav]);
@@ -126,7 +138,7 @@ export function Conversation() {
 
   function onType(v: string) {
     setText(v);
-    if (v.trim()) getSocket().emit("dm:typing", { conversationId: id });
+    if (v.trim()) getSocket().emit(DM_EVENTS.typing, { conversationId: id });
   }
 
   async function send(e?: React.FormEvent) {
