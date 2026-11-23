@@ -189,6 +189,8 @@ export function GroupChat() {
     e?.preventDefault();
     const body = text.trim();
     if (!body) return;
+    // Mandar con el botón le saca el foco al campo y cierra el teclado. Se lo devolvemos.
+    inputRef.current?.focus();
     setNotice(null);
     // Se vacía al toque; si falla, se devuelve el texto
     setText("");
@@ -425,7 +427,7 @@ export function GroupChat() {
               }
             }}
           />
-          <button className="sendbtn" aria-label="Mandar" disabled={!text.trim()}>
+          <button className="sendbtn" aria-label="Mandar" disabled={!text.trim()} onMouseDown={(e) => e.preventDefault()}>
             <SendIcon />
           </button>
         </div>
