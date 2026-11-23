@@ -1,5 +1,6 @@
+import { DM_EVENTS } from "@mortero/shared/realtime";
 // Lo que en otras apps es "premium", acá es gratis para todo el mundo.
-import { and, desc, eq, gt, isNull, lte, or } from "drizzle-orm";
+import { and, desc, eq, gt, isNull, lte, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
@@ -236,13 +237,15 @@ async function shareAlbum(ownerId: string, albumId: string, target: string, hour
     const [row] = await db.insert(directMessage)
       .values({ id: newId(), conversationId: conv.id, senderId: ownerId, kind: "album", body, createdAt: now })
       .returning();
-    await db.update(conversation).set({ lastMessageAt: now }).where(eq(conversation.id, conv.id));
+    await db.update(conversation)
+      .set({ lastMessageAt: sql`greatest(${conversation.lastMessageAt}, ${now.toISOString()})` })
+      .where(eq(conversation.id, conv.id));
     const msg = {
       id: row.id, conversationId: conv.id, senderId: ownerId, kind: "album", body, photo: null,
       expiring: false, opened: false, readAt: null, createdAt: now.toISOString(),
     };
-    emitToUser(ownerId, "dm:message", msg);
-    emitToUser(target, "dm:message", msg);
+    emitToUser(ownerId, DM_EVENTS.message, msg);
+    emitToUser(target, DM_EVENTS.message, msg);
     pushTo(target, { title: "Te llegó un mensaje", body: "Abrí el chat para leerlo.", url: `/mensajes/${conv.id}`, tag: `dm-${conv.id}`, kind: "mensajes" }).catch(() => {});
   }
   return expiresAt;

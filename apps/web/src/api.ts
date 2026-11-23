@@ -236,6 +236,6 @@ export type MyInvite = {
 
 export const ROLE_LABEL: Record<Role, string> = { owner: "Dueño", moderator: "Moderador", member: "Miembro" };
 
-export type ConversationSummary = { id: string; other: Author; last: Dm; unread: number };
+export type ConversationSummary = { id: string; lastMessageAt: string; other: Author; last: Dm; unread: number };
 
 export type Viewer = Author & { viewedAt: string };
