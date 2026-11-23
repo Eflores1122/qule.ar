@@ -49,6 +49,10 @@ Son la razón de ser de la app. Si un cambio va en contra de alguna, mejor charl
 - Todos los textos de la app van en español rioplatense, con voseo ("Tenés un mensaje nuevo").
 - Si encontrás un problema de seguridad o privacidad, **no abras un issue público**: escribile a la persona que mantiene el repo por mensaje privado en GitHub.
 
+## Pruebas de navegador
+
+Después de instalar las dependencias, corré `npx playwright install chromium` una vez y luego `npm run test:e2e`. La suite compila la web y levanta su propia instancia con cuentas ficticias y una base temporal. Si el puerto 49926 está ocupado, podés elegir otro con la variable `PLAYWRIGHT_PORT`.
+
 ## Convivencia
 
 Este es un proyecto hecho por y para una comunidad diversa. Leé el [código de convivencia](CODE_OF_CONDUCT.md) antes de participar.
