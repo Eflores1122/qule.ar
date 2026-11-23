@@ -3,6 +3,7 @@ import { db, schema } from "./db/index.js";
 import { pushTo } from "./push.js";
 import { notifyStaff } from "./staff.js";
 import { deleteImage } from "./storage.js";
+import { forgetFile } from "./fileCache.js";
 
 const { report } = schema;
 
@@ -73,6 +74,8 @@ export async function isEvidence(key: string): Promise<boolean> {
 
 /** Borra un archivo, salvo que sea prueba de un reporte (en ese caso queda guardado para moderación). */
 export async function deleteImageUnlessEvidence(key: string) {
+  // Si quedó como prueba, desde ahora solo la ve moderación
+  forgetFile(key);
   if (await isEvidence(key)) return;
   await deleteImage(key);
 }

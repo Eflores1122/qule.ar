@@ -14,6 +14,7 @@ import { emitToGroup, emitToUser, isOnline, serializeGroupMessages, syncGroupRoo
 import { broadcast, onBroadcast } from "../shared.js";
 import { pushTo } from "../push.js";
 import { notifyGroupMessage } from "../groupNotify.js";
+import { forgetFile } from "../fileCache.js";
 
 const { group, groupMember, groupMessage, groupJoinRequest, groupInvite } = schema;
 
@@ -188,7 +189,10 @@ async function kickAll(groupId: string) {
 /** Da de baja un grupo: desaparece para todo el mundo y queda guardado 90 días como prueba (ver moderation.ts). */
 export async function removeGroup(groupId: string, reason: string) {
   await kickAll(groupId);
-  await db.update(group).set({ removedAt: new Date(), removedReason: reason }).where(eq(group.id, groupId));
+  const [g] = await db.update(group).set({ removedAt: new Date(), removedReason: reason }).where(eq(group.id, groupId))
+    .returning({ photoKey: group.photoKey });
+  // Su foto pasa a verla solo moderación
+  forgetFile(g?.photoKey);
 }
 
 /** El dueño cierra el grupo: si es prueba de un reporte, se da de baja (no se pierde); si no, se borra. */
