@@ -10,12 +10,22 @@ for (const instalada of [false, true]) {
     await page.goto("/");
     await expect(page.getByRole("button", { name: "Entrar", exact: true })).toBeVisible();
 
-    const session = await page.context().newCDPSession(page);
-    await session.send("Input.synthesizePinchGesture", {
-      x: 185, y: 300, scaleFactor: 2, gestureSourceType: "touch",
-    });
-    const scale = await page.evaluate(() => window.visualViewport!.scale);
-    if (instalada) expect(scale).toBe(1);
-    else expect(scale).toBeGreaterThan(1);
+    const viewport = page.locator('meta[name="viewport"]');
+    const gestureBlocked = await page.evaluate(() =>
+      !document.dispatchEvent(new Event("gesturestart", { bubbles: true, cancelable: true }))
+    );
+    expect(gestureBlocked).toBe(instalada);
+
+    if (instalada) {
+      await expect(viewport).toHaveAttribute("content", /maximum-scale=1(?:,|$)/);
+      await expect(viewport).toHaveAttribute("content", /user-scalable=no(?:,|$)/);
+      const session = await page.context().newCDPSession(page);
+      await session.send("Input.synthesizePinchGesture", {
+        x: 185, y: 300, scaleFactor: 2, gestureSourceType: "touch",
+      });
+      expect(await page.evaluate(() => window.visualViewport!.scale)).toBe(1);
+    } else {
+      await expect(viewport).not.toHaveAttribute("content", /maximum-scale|user-scalable/);
+    }
   });
 }
