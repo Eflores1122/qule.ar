@@ -5,11 +5,6 @@ import { App } from "./App";
 import "virtual:brand.css";
 import "./styles.css";
 
-if (window.matchMedia("(display-mode: standalone)").matches || (navigator as { standalone?: boolean }).standalone) {
-  const viewport = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
-  if (viewport) viewport.content += ", maximum-scale=1, user-scalable=no";
-}
-
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter>

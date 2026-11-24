@@ -76,6 +76,16 @@ export function GroupChat() {
     if (list) list.scrollTop = list.scrollHeight;
   }
 
+  function resumeLiveHistory(history: GroupMessage[], moreBefore: boolean) {
+    const last = history.at(-1)!;
+    setMessages(live => [...history, ...live.filter(message =>
+      message.scheduledAt > last.scheduledAt ||
+      (message.scheduledAt === last.scheduledAt && message.id > last.id)
+    )]);
+    setHasMore(moreBefore);
+    setQuoteWindow(null);
+  }
+
   async function jumpTo(quote: NonNullable<GroupMessage["replyTo"]>) {
     cancelHistoryRequest();
     if (highlightMessage(quote.id)) return;
@@ -86,7 +96,10 @@ export function GroupChat() {
     setFindingQuote(true);
     await requestHistory<QuoteWindow>(new URLSearchParams({ around: quote.id }), page => {
       stickToBottom.current = false;
-      flushSync(() => setQuoteWindow(page));
+      flushSync(() => {
+        if (page.hasNewer) setQuoteWindow(page);
+        else resumeLiveHistory(page.messages, page.hasMore);
+      });
       highlightMessage(quote.id);
     });
   }
@@ -262,7 +275,9 @@ export function GroupChat() {
       const top = anchor?.getBoundingClientRect().top;
       stickToBottom.current = false;
       flushSync(() => {
-        if (quoteWindow) {
+        if (quoteWindow && !older && !page.hasMore) {
+          resumeLiveHistory([...quoteWindow.messages, ...page.messages], quoteWindow.hasMore);
+        } else if (quoteWindow) {
           setQuoteWindow(current => {
             if (!current) return null;
             return older
