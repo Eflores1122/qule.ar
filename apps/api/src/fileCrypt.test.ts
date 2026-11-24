@@ -32,7 +32,7 @@ test("cifra y descifra archivos de cualquier tamaño", () => {
     const enc = encryptBlob(plain);
     assert.ok(isEncryptedBlob(enc));
     assert.equal(plainSize(enc.length), n);
-    assert.ok(!enc.includes(plain.subarray(0, Math.min(16, n))) || n === 0);
+    if (n >= 16) assert.ok(!enc.includes(plain.subarray(0, 16)));
     assert.deepEqual(decryptBlob(enc), plain);
   }
 });

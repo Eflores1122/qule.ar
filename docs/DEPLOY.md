@@ -73,7 +73,7 @@ Se puede cortar y volver a correr: lo que ya está cifrado se saltea. Primero ci
 
 ### Confirmar el mail y chequeo anti-bots
 
-- Al crear una cuenta con mail se manda un link para confirmarlo (necesita `SMTP_URL`). Las cuentas creadas desde `EMAIL_VERIFY_SINCE` (por defecto, 25/11/2026) recién aparecen en Gente cuando lo confirman. Las de antes siguen apareciendo y ven un aviso.
+- Al crear una cuenta con mail se manda un link para confirmarlo (necesita `SMTP_URL`). Las cuentas creadas desde `EMAIL_VERIFY_SINCE` (por defecto en producción, 25/11/2026; fuera de producción no se exige) recién aparecen en Gente cuando lo confirman. Las de antes siguen apareciendo y ven un aviso.
 - `SIGNUP_POW_BITS` (por defecto 16 en producción) es la dificultad del chequeo anti-bots al crear una cuenta (`apps/api/src/botCheck.ts`). Cada bit de más duplica el tiempo en el celu. Con `0` se apaga.
 
 ## 3. Base de datos
