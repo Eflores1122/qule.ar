@@ -41,6 +41,12 @@ export const env = {
   S3_REGION: process.env.S3_REGION ?? "auto", // R2 usa "auto"
   S3_ACCESS_KEY_ID: process.env.S3_ACCESS_KEY_ID,
   S3_SECRET_ACCESS_KEY: process.env.S3_SECRET_ACCESS_KEY,
+  // Chequeo anti-bots al crear una cuenta con mail (ver botCheck.ts): bits en cero que tiene que encontrar el
+  // navegador. 16 son un par de segundos en un celu. 0 lo apaga (por defecto, fuera de producción).
+  SIGNUP_POW_BITS: Number(process.env.SIGNUP_POW_BITS ?? (process.env.NODE_ENV === "production" ? 16 : 0)),
+  // Las cuentas creadas desde esta fecha necesitan confirmar el mail para aparecer en Gente. Las de antes siguen
+  // apareciendo (no escondemos a nadie de golpe) y ven un aviso para confirmarlo. Ver routes/nearby.ts.
+  EMAIL_VERIFY_SINCE: new Date(process.env.EMAIL_VERIFY_SINCE ?? "2026-11-25T00:00:00-03:00"),
 };
 
 if (process.env.NODE_ENV === "production" && !process.env.BETTER_AUTH_SECRET) {

@@ -9,13 +9,17 @@ import { APP_NAME, APP_SLOGAN, fonts, mail as c, radii } from "./brand.js";
 // Sin SMTP_URL no se manda nada; en desarrollo el mail se muestra en la consola para poder probar.
 //
 // La app manda muy pocos mails, y solo cuando hacen falta: recuperar la contraseña y avisos sobre tu cuenta
-// (suspensión y respuesta a un pedido de revisión). Nada de bienvenida, publicidad ni novedades.
+// (suspensión y respuesta a un pedido de revisión) y confirmar el mail al crear la cuenta. Nada de bienvenida,
+// publicidad ni novedades.
 export const mailEnabled = Boolean(env.SMTP_URL);
 const transport = env.SMTP_URL ? nodemailer.createTransport(env.SMTP_URL) : null;
 const dev = process.env.NODE_ENV !== "production";
 
-/** reset: recuperar la contraseña (lo puede pedir cualquiera, tiene tope por dirección). account: avisos de moderación. */
-export type MailKind = "reset" | "account";
+/**
+ * reset: recuperar la contraseña. verify: confirmar el mail de una cuenta nueva. Los dos los puede pedir
+ * cualquiera, así que tienen tope por dirección. account: avisos de moderación.
+ */
+export type MailKind = "reset" | "verify" | "account";
 type Mail = { to: string; subject: string; text: string; html: string };
 
 /** Recuperar la contraseña, por dirección: 3 por día y uno por minuto. Alcanza para quien lo pide dos veces. */
@@ -46,9 +50,9 @@ export async function allowMail(to: string, kind: MailKind, now = new Date()): P
       console.warn(`Tope diario de mails alcanzado (${env.MAIL_DAILY_CAP}): no se manda`);
       return false;
     }
-    if (kind === "reset") {
+    if (kind === "reset" || kind === "verify") {
       const mine = await tx.select({ at: mailLog.createdAt }).from(mailLog)
-        .where(and(eq(mailLog.toHash, toHash), eq(mailLog.kind, "reset"), gt(mailLog.createdAt, since)));
+        .where(and(eq(mailLog.toHash, toHash), eq(mailLog.kind, kind), gt(mailLog.createdAt, since)));
       if (mine.length >= RESET_PER_ADDRESS_DAY) return false;
       if (mine.some((m) => Math.abs(now.getTime() - m.at.getTime()) < RESET_MIN_GAP_MS)) return false;
     }
@@ -159,6 +163,24 @@ export function resetMail(to: string, url: string): Mail {
       ],
       button: { label: "Elegir contraseña nueva", url },
       reason: "Te llega porque alguien pidió cambiar la contraseña de esta dirección.",
+    }),
+  };
+}
+
+export function verifyMail(to: string, url: string): Mail {
+  return {
+    to,
+    subject: "Confirmá tu mail",
+    text: `Creaste una cuenta en ${APP_NAME}. Entrá a este link para confirmar que este mail es tuyo (vence en 24 horas):\n\n${url}\n\nHasta que lo confirmes no aparecés en Gente. Si no fuiste vos, ignorá este mail.`,
+    html: layout({
+      title: "Confirmá tu mail",
+      preview: "Un toque y ya aparecés en Gente. El link vence en 24 horas.",
+      paragraphs: [
+        "Creaste una cuenta. Tocá el botón para confirmar que este mail es tuyo: así aparecés en Gente y podés recuperar la cuenta si te olvidás la contraseña.",
+        "El link vence en 24 horas. Si no fuiste vos, ignorá este mail.",
+      ],
+      button: { label: "Confirmar mi mail", url },
+      reason: "Te llega porque alguien creó una cuenta con esta dirección.",
     }),
   };
 }

@@ -8,6 +8,9 @@ import { ageFrom, mediaOut, newId, requireProfile, requireUser, type AppEnv } fr
 import { syncGroupRoom } from "../realtime.js";
 import { deleteImage, MAX_UPLOAD_BYTES, MAX_VIDEO_BYTES, readImage, saveImage, saveVideo, videoEnabled, videoFile, type VideoSource } from "../storage.js";
 import { googleEnabled } from "../auth.js";
+import { env } from "../env.js";
+import { issueChallenge } from "../botCheck.js";
+import { isListed } from "../verification.js";
 import { hasAlbumAccess } from "./premium.js";
 import { defaultAlbum, MAX_ALBUM_ITEMS, myAlbums, renumberPhotos } from "../albums.js";
 
@@ -52,6 +55,12 @@ export const meRoutes = new Hono<AppEnv>();
 // Config pública: qué métodos de login hay
 // passwordReset: sin mails configurados no ofrecemos recuperar la contraseña (en desarrollo sí: el mail sale por consola)
 meRoutes.get("/config", (c) => c.json({ google: googleEnabled, passwordReset: mailEnabled || process.env.NODE_ENV !== "production" }));
+
+// Desafío anti-bots para crear una cuenta con mail (ver botCheck.ts). bits 0: no hace falta.
+meRoutes.get("/signup-challenge", (c) => {
+  c.header("Cache-Control", "no-store");
+  return c.json(env.SIGNUP_POW_BITS > 0 ? issueChallenge() : { challenge: null, bits: 0 });
+});
 
 // Archivos: solo para gente con sesión, así no se pueden scrapear las fotos desde afuera
 meRoutes.get("/files/:key", requireUserForFiles, async (c) => {
@@ -136,7 +145,8 @@ meRoutes.get("/me", requireUser, async (c) => {
   const access = await accessFor(u);
   return c.json({
     // isAdmin: entra al panel de moderación. access: qué puede hacer ahí (ver staff.ts)
-    user: { id: u.id, email: u.email, name: u.name, isAdmin: access.length > 0, access },
+    // emailVerified: si confirmó el mail. listed: si aparece en Gente (ver nearby.ts, cuentas nuevas sin confirmar no)
+    user: { id: u.id, email: u.email, name: u.name, isAdmin: access.length > 0, access, emailVerified: u.emailVerified, listed: isListed(u) },
     profile: p
       ? (() => {
           const { cellLat, cellLng, ...rest } = p;

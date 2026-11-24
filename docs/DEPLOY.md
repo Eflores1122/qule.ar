@@ -58,6 +58,24 @@ Protegelo: `chmod 600 /opt/mortero/app.env`.
 
 Si necesitás volver a una versión anterior al cifrado, restaurá también la base del backup previo a la actualización. La imagen anterior espera una fecha sin cifrar en `last_tested`. Conservá la clave para las copias tomadas después de cifrar.
 
+### Fotos y videos cifrados
+
+Desde la versión con `apps/api/src/fileCrypt.ts`, las fotos, los videos y las miniaturas nuevas se guardan cifrados con una clave derivada de `DATA_KEY`, en el disco o en el bucket. Los archivos de antes se siguen leyendo sin cifrar hasta que corras, **después de desplegar y de hacer un backup**:
+
+```bash
+docker exec mortero-app node --import tsx src/files-encrypt.ts
+```
+
+Se puede cortar y volver a correr: lo que ya está cifrado se saltea. Primero cifra los álbumes privados y las fotos de los chats. Al terminar dice cuántos cifró. Las miniaturas viejas se borran y se vuelven a generar solas, ya cifradas.
+
+- **Sin `DATA_KEY` no se pueden ver las fotos**, tampoco las de los backups. Guardala fuera del servidor.
+- **Volver a una imagen anterior** con archivos ya cifrados deja las fotos sin poder verse. Para volver atrás, restaurá también las fotos del backup previo.
+
+### Confirmar el mail y chequeo anti-bots
+
+- Al crear una cuenta con mail se manda un link para confirmarlo (necesita `SMTP_URL`). Las cuentas creadas desde `EMAIL_VERIFY_SINCE` (por defecto, 25/11/2026) recién aparecen en Gente cuando lo confirman. Las de antes siguen apareciendo y ven un aviso.
+- `SIGNUP_POW_BITS` (por defecto 16 en producción) es la dificultad del chequeo anti-bots al crear una cuenta (`apps/api/src/botCheck.ts`). Cada bit de más duplica el tiempo en el celu. Con `0` se apaga.
+
 ## 3. Base de datos
 
 ```bash

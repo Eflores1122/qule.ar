@@ -4,7 +4,7 @@ qule.ar guarda datos muy sensibles: orientación, estado serológico, ubicación
 
 ## Cómo reportar una vulnerabilidad
 
-1. Entrá a la pestaña **Security** del repositorio y tocá **Report a vulnerability**. Lo que escribas ahí lo ve solo el equipo del proyecto.
+1. Entrá a la pestaña **Security** del repositorio y tocá **Report a vulnerability**. Lo que escribas ahí lo ve solo el equipo del proyecto. Si no tenés cuenta de GitHub, escribinos a **privacidad@qule.ar**.
 2. Contanos:
    - qué encontraste y dónde (la pantalla, la ruta del API o el archivo);
    - cómo reproducirlo, paso a paso;

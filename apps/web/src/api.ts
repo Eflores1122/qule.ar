@@ -99,7 +99,8 @@ export type Appeal = {
 
 export type Me = {
   /** isAdmin: entra al panel de moderación. access: qué puede hacer ahí ("owner" es la administración general). */
-  user: { id: string; email: string; name: string; isAdmin: boolean; access: StaffAccess[] };
+  /** emailVerified: si confirmó el mail. listed: si aparece en Gente (las cuentas nuevas, recién al confirmarlo). */
+  user: { id: string; email: string; name: string; isAdmin: boolean; access: StaffAccess[]; emailVerified: boolean; listed: boolean };
   profile: (Profile & {
     hasLocation: boolean;
     showDistance: boolean;

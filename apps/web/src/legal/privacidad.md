@@ -1,6 +1,6 @@
 # Política de privacidad
 
-**Versión beta · 21 de noviembre de 2026**
+**Versión beta · 24 de noviembre de 2026**
 
 En qule.ar tratamos datos muy personales: quién sos, qué buscás y, si lo contás, cosas sobre tu salud. Por eso esta política intenta decir **exactamente** qué guardamos, dónde y quién lo puede ver, sin letra chica. Sigue la **Ley 25.326 de Protección de Datos Personales**.
 
@@ -10,7 +10,9 @@ En qule.ar tratamos datos muy personales: quién sos, qué buscás y, si lo cont
 
 Las personas voluntarias que mantienen qule.ar. El código es abierto: cualquiera puede ver en [GitHub](https://github.com/RGabrielR/qule.ar) qué hace la app con tus datos.
 
-**Contacto:** por ahora, en las [Discusiones del proyecto](https://github.com/RGabrielR/qule.ar/discussions). Para pedidos sobre tus datos, **no publiques nada personal ahí**: dejá un mensaje pidiendo que te contactemos y seguimos por privado. Pronto vamos a sumar un mail.
+**Contacto privado:** para pedidos sobre tus datos (ver qué tenemos, corregirlo, borrarlo) o cualquier consulta de privacidad, escribinos a **[privacidad@qule.ar](mailto:privacidad@qule.ar)**. Lo leen solo quienes mantienen qule.ar. Escribinos desde el mail de tu cuenta, así sabemos que la cuenta es tuya.
+
+Para todo lo demás están las [Discusiones del proyecto](https://github.com/RGabrielR/qule.ar/discussions), que son públicas: **no publiques nada personal ahí**.
 
 ## 2. Qué datos guardamos
 
@@ -50,7 +52,7 @@ Usar qule.ar puede decir algo sobre tu orientación sexual o tu identidad de gé
 
 ## 4. Para qué usamos tus datos
 
-Solo para que la app funcione: mostrar tu perfil, la gente cerca y los grupos, mandar tus mensajes, avisarte con notificaciones, mandarte mails de la cuenta (solo para cambiar la contraseña y avisos sobre tu cuenta, como una suspensión: nunca publicidad), revisar reportes y cuidar la seguridad.
+Solo para que la app funcione: mostrar tu perfil, la gente cerca y los grupos, mandar tus mensajes, avisarte con notificaciones, mandarte mails de la cuenta (solo para confirmar tu mail al crearla, cambiar la contraseña y avisos sobre tu cuenta, como una suspensión: nunca publicidad), revisar reportes y cuidar la seguridad.
 
 **Cuidado de menores:** qule.ar es solo para mayores de 18. Para detectar a tiempo si entra alguien menor, la app revisa automáticamente los nombres y las descripciones de los perfiles y los grupos, y busca señales como "+14" o "15 años". Si encuentra una, no borra ni oculta nada: manda el caso a moderación para que lo revise una persona.
 
@@ -58,13 +60,13 @@ Solo para que la app funcione: mostrar tu perfil, la gente cerca y los grupos, m
 
 ## 5. Dónde están y quién más los ve
 
-**Dónde se guardan:** en un servidor alquilado (VPS) de Contabo, en Europa. Ahí están la base de datos, las fotos, los videos y los backups. La conexión con el servidor va cifrada, pero **los datos guardados en el servidor no están cifrados**: el disco no lo está. La excepción es el estado serológico y la fecha del último test, que se guardan cifrados (mirá el punto 3).
+**Dónde se guardan:** en un servidor alquilado (VPS) de Contabo, en Europa. Ahí están la base de datos, las fotos, los videos y los backups. La conexión con el servidor va cifrada. **Las fotos y los videos** (los de tu perfil, los de tus álbumes privados y los que mandás por mensaje privado) **se guardan cifrados**, igual que el estado serológico y la fecha del último test (mirá el punto 3). El resto de la base de datos no está cifrado.
 
 **Quién los ve:**
 
 - **Otras personas de la app:** ven tu perfil, tus fotos públicas y tu distancia aproximada, si no la ocultaste. Tus álbumes privados los ve solo quien vos elijas.
 - **Moderación:** para revisar un reporte, quien modera puede ver el mensaje o el perfil reportado, y la copia que se guarda al reportarlo (mirá el punto 6).
-- **Quienes mantienen el servidor:** técnicamente pueden acceder a la base de datos y a los archivos. Hoy los mensajes **no están cifrados de punta a punta**, y lo guardado en el servidor tampoco está cifrado. Solo acceden cuando hace falta para arreglar un problema o por una orden judicial.
+- **Quienes mantienen el servidor:** técnicamente pueden acceder a la base de datos y a los archivos. Hoy los mensajes **no están cifrados de punta a punta**. Las fotos, los videos y los datos de salud se guardan cifrados, pero la clave está en el mismo servidor. Solo acceden cuando hace falta para arreglar un problema o por una orden judicial.
 - **Proveedores que usamos para que la app funcione:**
   - **Cloudflare** (Estados Unidos): por ahí pasa el tráfico entre tu celu y el servidor, para que la conexión sea segura y para proteger la app de ataques. Técnicamente, el contenido pasa por sus equipos.
   - **Notificaciones:** las entrega el servicio de tu navegador o teléfono (Google, Apple o Mozilla). Solo reciben un texto genérico como "Tenés un mensaje nuevo", sin nombres ni contenido.
@@ -91,12 +93,14 @@ Solo para que la app funcione: mostrar tu perfil, la gente cerca y los grupos, m
 - La conexión siempre va cifrada (HTTPS).
 - Las contraseñas se guardan cifradas.
 - El estado serológico y la fecha del último test se guardan cifrados.
+- Las fotos y los videos se guardan cifrados: quien copie la carpeta de fotos o un backup sin la clave no los puede ver.
+- Las cuentas nuevas tienen que confirmar el mail antes de aparecer en Gente, y al crearlas hay un chequeo contra bots que no usa servicios de terceros.
 - La base de datos no es accesible desde internet: solo la ve la app.
 - Al servidor solo se entra con clave SSH, con bloqueo de intentos fallidos y actualizaciones de seguridad automáticas.
 - A las fotos y los videos les borramos los metadatos y la ubicación.
 - Las notificaciones no dicen quién te escribió ni qué.
 
-Lo que todavía no hacemos: cifrar el resto de los datos guardados en el servidor ni los mensajes de punta a punta, y guardar los backups fuera del servidor (los vamos a copiar afuera, cifrados). Ningún sistema es 100 % seguro, y menos uno en beta. Si pasa algo que afecte tus datos, te vamos a avisar.
+Lo que todavía no hacemos: cifrar el resto de los datos guardados en el servidor ni los mensajes de punta a punta, y guardar los backups fuera del servidor (los vamos a copiar afuera, cifrados). La clave que cifra las fotos y los videos está en el mismo servidor: protege las copias y los backups, pero no a alguien que tome el control del servidor entero. Ningún sistema es 100 % seguro, y menos uno en beta. Si pasa algo que afecte tus datos, te vamos a avisar.
 
 ## 8. Tus derechos
 
@@ -107,7 +111,7 @@ Según la Ley 25.326, podés:
 - **Suprimirlos:** borrar tu cuenta y todo lo asociado (art. 16). Lo podés hacer vos desde **Yo**.
 - **Retirar tu consentimiento** cuando quieras, por ejemplo borrando el estado serológico de tu perfil.
 
-Para pedir cualquiera de estas cosas, escribinos (mirá el punto 1). Te respondemos dentro de los plazos de la ley: **10 días corridos** para el acceso y **5 días hábiles** para rectificar o suprimir.
+Para pedir cualquiera de estas cosas, escribinos a **[privacidad@qule.ar](mailto:privacidad@qule.ar)** desde el mail de tu cuenta (mirá el punto 1). No hace falta que lo pidas en GitHub. Te respondemos dentro de los plazos de la ley: **10 días corridos** para el acceso y **5 días hábiles** para rectificar o suprimir.
 
 > El titular de los datos personales tiene la facultad de ejercer el derecho de acceso a los mismos en forma gratuita a intervalos no inferiores a seis meses, salvo que se acredite un interés legítimo al efecto conforme lo establecido en el artículo 14, inciso 3 de la Ley Nº 25.326. La AGENCIA DE ACCESO A LA INFORMACIÓN PÚBLICA, en su carácter de Órgano de Control de la Ley Nº 25.326, tiene la atribución de atender las denuncias y reclamos que interpongan quienes resulten afectados en sus derechos por incumplimiento de las normas vigentes en materia de protección de datos personales.
 

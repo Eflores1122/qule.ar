@@ -9,6 +9,7 @@ import { ageFrom, firstPublicPhotoKeys, thumbUrl, requireProfile, requireUser, t
 import { autoHiddenUsers } from "../moderation.js";
 import { isOnline } from "../realtime.js";
 import { hit } from "../shared.js";
+import { listedSql } from "../verification.js";
 
 const { profile } = schema;
 
@@ -141,6 +142,8 @@ export async function nearbyPage(me: Me, f: NearbyFilters) {
     sql`p.user_id <> ${u.id}`,
     sql`p.incognito = false`, // en incógnito no se aparece en la grilla
     sql`p.suspended_at is null`,
+    // Cuentas nuevas: recién aparecen cuando confirman el mail (ver verification.ts)
+    listedSql(sql`p.user_id`),
     sql`not exists (select 1 from block b where (b.blocker_id = ${u.id} and b.blocked_id = p.user_id) or (b.blocker_id = p.user_id and b.blocked_id = ${u.id}))`,
   ];
   // Las fechas van como texto AAAA-MM-DD, igual que se guardan
