@@ -532,7 +532,9 @@ export function GroupChat() {
           <SavedPhrasesMenu text={text} onClose={() => setPhrasesOpen(false)} onPick={(p) => { setText(p); setPhrasesOpen(false); inputRef.current?.focus(); }} />
         )}
         <div className="composer__row">
-          <SavedPhrasesButton open={phrasesOpen} onToggle={() => setPhrasesOpen((v) => !v)} />
+          <div className="composer__action">
+            <SavedPhrasesButton open={phrasesOpen} onToggle={() => setPhrasesOpen((v) => !v)} />
+          </div>
           <textarea
             ref={inputRef}
             className="composer__input"
@@ -549,9 +551,11 @@ export function GroupChat() {
               }
             }}
           />
-          <button className="sendbtn" aria-label="Mandar" disabled={!text.trim()} onMouseDown={(e) => e.preventDefault()}>
-            <SendIcon />
-          </button>
+          <div className="composer__action">
+            <button className="sendbtn" aria-label="Mandar" disabled={!text.trim()} onMouseDown={(e) => e.preventDefault()}>
+              <SendIcon />
+            </button>
+          </div>
         </div>
       </form>
 

@@ -215,8 +215,10 @@ html:has(.nearby-page), .nearby-page { overscroll-behavior-y: none; }
 
 .composer { border-top: 1px solid var(--line); padding: 8px 10px calc(8px + var(--safe-b)); background: var(--surface); flex: none; }
 .shell:not(.shell--thread) .composer { padding-bottom: 8px; }
-.composer__row { display: flex; gap: 8px; align-items: flex-end; }
-.composer__input { flex: 1; resize: none; max-height: 140px; min-height: 44px; padding: 11px 14px; border-radius: var(--radius-4xl); background: var(--surface-2); border: 1px solid var(--line); color: var(--text); font: inherit; font-size: var(--text-input); field-sizing: content; }
+.composer__row { --composer-action-height: 48px; display: flex; gap: 8px; align-items: flex-end; }
+.composer__action { display: grid; place-items: center; height: var(--composer-action-height); flex: none; }
+.composer__input { flex: 1; resize: none; max-height: 140px; min-height: var(--composer-action-height); padding: 11px 14px; border-radius: var(--radius-4xl); background: var(--surface-2); border: 1px solid var(--line); color: var(--text); font: inherit; font-size: var(--text-input); field-sizing: content; }
+.composer__input::placeholder { white-space: nowrap; text-overflow: ellipsis; }
 .composer__input:focus { outline: none; border-color: var(--accent); }
 .composer__editing { font-size: var(--text-xs); color: var(--queue); display: flex; justify-content: space-between; align-items: center; padding: 0 6px 6px; }
 .sendbtn { width: 44px; height: 44px; border-radius: var(--radius-pill); border: 0; background: var(--accent); color: var(--accent-ink); display: grid; place-items: center; flex: none; }

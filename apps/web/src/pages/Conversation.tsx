@@ -375,10 +375,14 @@ export function Conversation() {
           </div>
         )}
         <div className="composer__row">
-          <button type="button" className="iconbtn" aria-label="Mandar foto" aria-expanded={Boolean(photoMenu)} disabled={sending} onClick={() => { setPhotoMenu((v) => (v ? false : "options")); setPhrasesOpen(false); }}>
-            <ImageIcon />
-          </button>
-          <SavedPhrasesButton open={phrasesOpen} onToggle={() => { setPhrasesOpen((v) => !v); setPhotoMenu(false); }} />
+          <div className="composer__action">
+            <button type="button" className="iconbtn" aria-label="Mandar foto" aria-expanded={Boolean(photoMenu)} disabled={sending} onClick={() => { setPhotoMenu((v) => (v ? false : "options")); setPhrasesOpen(false); }}>
+              <ImageIcon />
+            </button>
+          </div>
+          <div className="composer__action">
+            <SavedPhrasesButton open={phrasesOpen} onToggle={() => { setPhrasesOpen((v) => !v); setPhotoMenu(false); }} />
+          </div>
           <input
             ref={fileRef}
             type="file"
@@ -410,7 +414,9 @@ export function Conversation() {
               }
             }}
           />
-          <button className="sendbtn" aria-label="Mandar" disabled={!text.trim()} onMouseDown={(e) => e.preventDefault()}><SendIcon /></button>
+          <div className="composer__action">
+            <button className="sendbtn" aria-label="Mandar" disabled={!text.trim()} onMouseDown={(e) => e.preventDefault()}><SendIcon /></button>
+          </div>
         </div>
       </form>
 
