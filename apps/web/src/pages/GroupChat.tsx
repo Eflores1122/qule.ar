@@ -1,11 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { flushSync } from "react-dom";
 import { Link, useNavigate, useParams } from "react-router";
 import { api, getSocket, type GroupInfo, type GroupMessage, type ReactionEvent } from "../api";
 import { myReaction, ReactionBar, ReactionPicker } from "../components/Reactions";
 import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { GroupAvatar } from "../components/GroupAvatar";
-import { BackIcon, ClockIcon, DotsIcon, InfoIcon, SendIcon } from "../components/Icons";
+import { BackIcon, ChevronDownIcon, ClockIcon, DotsIcon, InfoIcon, SendIcon } from "../components/Icons";
 import { JoinButton } from "../components/JoinButton";
 import { ReportDialog } from "../components/ReportDialog";
 import { slowModeText } from "../features/groups/groupRules";
@@ -22,6 +23,9 @@ function fmtCountdown(ms: number) {
   return `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 }
 
+type HistoryPage = { messages: GroupMessage[]; hasMore: boolean };
+type QuoteWindow = HistoryPage & { hasNewer: boolean };
+
 export function GroupChat() {
   const { id = "general" } = useParams();
   const { me } = useMe();
@@ -30,6 +34,8 @@ export function GroupChat() {
   const [info, setInfo] = useState<GroupInfo | null>(null);
   const [infoTick, setInfoTick] = useState(0);
   const [messages, setMessages] = useState<GroupMessage[]>([]);
+  const [quoteWindow, setQuoteWindow] = useState<QuoteWindow | null>(null);
+  const visibleMessages = quoteWindow?.messages ?? messages;
   const [queued, setQueued] = useState<GroupMessage[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [editing, setEditing] = useState<string | null>(null);
@@ -47,13 +53,64 @@ export function GroupChat() {
     inputRef.current?.focus();
   }
 
-  /** Al tocar una cita, va al mensaje original (si está cargado) y lo resalta un momento. */
-  function jumpTo(messageId: string) {
+  function highlightMessage(messageId: string) {
     const el = document.getElementById(`gm-${messageId}`);
-    if (!el) return;
+    if (!el) return false;
     el.scrollIntoView({ behavior: "smooth", block: "center" });
     el.classList.add("gmsg--flash");
     setTimeout(() => el.classList.remove("gmsg--flash"), 1400);
+    return true;
+  }
+
+  function cancelHistoryRequest() {
+    historyRequest.current?.abort();
+    historyRequest.current = null;
+    setFindingQuote(false);
+  }
+
+  function jumpToEnd() {
+    cancelHistoryRequest();
+    stickToBottom.current = true;
+    flushSync(() => setQuoteWindow(null));
+    const list = listRef.current;
+    if (list) list.scrollTop = list.scrollHeight;
+  }
+
+  async function jumpTo(quote: NonNullable<GroupMessage["replyTo"]>) {
+    cancelHistoryRequest();
+    if (highlightMessage(quote.id)) return;
+    if (quote.body === null) {
+      setNotice({ kind: "info", text: "El mensaje citado ya no está disponible." });
+      return;
+    }
+    setFindingQuote(true);
+    await requestHistory<QuoteWindow>(new URLSearchParams({ around: quote.id }), page => {
+      stickToBottom.current = false;
+      flushSync(() => setQuoteWindow(page));
+      highlightMessage(quote.id);
+    });
+  }
+
+  async function requestHistory<T>(query: URLSearchParams, apply: (page: T) => void) {
+    if (historyRequest.current) return;
+    const request = new AbortController();
+    historyRequest.current = request;
+    try {
+      const page = await api<T>(`/groups/${id}/messages?${query}`, { signal: request.signal });
+      if (!request.signal.aborted) apply(page);
+    } catch (err) {
+      if (!request.signal.aborted) setNotice({ kind: "error", text: (err as Error).message });
+    } finally {
+      if (historyRequest.current === request) {
+        historyRequest.current = null;
+        setFindingQuote(false);
+      }
+    }
+  }
+
+  function updatePublished(update: (list: GroupMessage[]) => GroupMessage[]) {
+    setMessages(update);
+    setQuoteWindow(page => page && { ...page, messages: update(page.messages) });
   }
 
   /** Abre (o crea) la charla privada con quien escribió el mensaje. */
@@ -70,7 +127,11 @@ export function GroupChat() {
   const [reportingGroupId, setReportingGroupId] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
   const listRef = useRef<HTMLDivElement>(null);
-  const positionMessageMenu = useMessageMenuPosition(listRef);
+  const positionMessageMenu = useMessageMenuPosition(listRef, setMenuFor);
+  const [findingQuote, setFindingQuote] = useState(false);
+  const endRef = useRef<HTMLDivElement>(null);
+  const [showJumpToEnd, setShowJumpToEnd] = useState(false);
+  const historyRequest = useRef<AbortController | null>(null);
   const stickToBottom = useRef(true);
 
   const isMember = Boolean(info?.role);
@@ -107,6 +168,8 @@ export function GroupChat() {
   useEffect(() => {
     if (!isMember) return;
     let alive = true;
+    setFindingQuote(false);
+    setQuoteWindow(null);
     setMessages([]);
     setQueued([]);
     api<{ messages: GroupMessage[]; queued: GroupMessage[]; hasMore: boolean }>(`/groups/${id}/messages`)
@@ -136,7 +199,7 @@ export function GroupChat() {
       if (p.groupId === id) setQueued((q) => q.filter((x) => x.id !== p.id));
     };
     const onDeleted = (p: { id: string; groupId: string }) => {
-      if (p.groupId === id) setMessages((list) => list.filter((x) => x.id !== p.id));
+      if (p.groupId === id) updatePublished((list) => list.filter((x) => x.id !== p.id));
     };
     s.on("group:message", onMessage);
     s.on("group:queued", onQueued);
@@ -144,11 +207,13 @@ export function GroupChat() {
     s.on("group:deleted", onDeleted);
     const onReaction = (p: ReactionEvent) => {
       if (p.scope !== "group" || p.groupId !== id) return;
-      setMessages((list) => list.map((x) => (x.id === p.messageId ? { ...x, reactions: p.reactions } : x)));
+      updatePublished((list) => list.map((x) => (x.id === p.messageId ? { ...x, reactions: p.reactions } : x)));
     };
     s.on("reaction", onReaction);
     return () => {
       alive = false;
+      historyRequest.current?.abort();
+      historyRequest.current = null;
       s.off("group:message", onMessage);
       s.off("group:queued", onQueued);
       s.off("group:cancelled", onCancelled);
@@ -166,27 +231,50 @@ export function GroupChat() {
 
   useLayoutEffect(() => {
     const el = listRef.current;
-    if (el && stickToBottom.current) el.scrollTop = el.scrollHeight;
-  }, [messages, queued]);
+    if (el && !quoteWindow && stickToBottom.current) el.scrollTop = el.scrollHeight;
+  }, [messages, queued, quoteWindow]);
+
+  useEffect(() => {
+    const end = endRef.current;
+    const root = listRef.current;
+    if (!end || !root) return;
+    const observer = new IntersectionObserver(([entry]) => setShowJumpToEnd(!entry.isIntersecting), {
+      root, rootMargin: "0px 0px 240px 0px",
+    });
+    observer.observe(end);
+    return () => observer.disconnect();
+  }, [id, isMember]);
 
   function onScroll() {
     const el = listRef.current;
     if (el) stickToBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
   }
 
-  async function loadOlder() {
-    const first = messages[0];
-    if (!first) return;
-    const el = listRef.current;
-    const prevHeight = el?.scrollHeight ?? 0;
-    const d = await api<{ messages: GroupMessage[]; hasMore: boolean }>(
-      `/groups/${id}/messages?before=${encodeURIComponent(first.scheduledAt)}`,
-    );
-    stickToBottom.current = false;
-    setMessages((list) => [...d.messages, ...list]);
-    setHasMore(d.hasMore);
-    requestAnimationFrame(() => {
-      if (el) el.scrollTop = el.scrollHeight - prevHeight;
+  async function loadHistory(direction: "before" | "after") {
+    const older = direction === "before";
+    const edge = older ? visibleMessages[0] : visibleMessages.at(-1);
+    if (!edge) return;
+    const query = new URLSearchParams({ [direction]: edge.scheduledAt, cursorId: edge.id });
+    await requestHistory<HistoryPage>(query, page => {
+      const list = listRef.current;
+      if (!list) return;
+      const anchor = document.getElementById(`gm-${edge.id}`)?.querySelector(".gmsg__body");
+      const top = anchor?.getBoundingClientRect().top;
+      stickToBottom.current = false;
+      flushSync(() => {
+        if (quoteWindow) {
+          setQuoteWindow(current => {
+            if (!current) return null;
+            return older
+              ? { ...current, messages: [...page.messages, ...current.messages], hasMore: page.hasMore }
+              : { ...current, messages: [...current.messages, ...page.messages], hasNewer: page.hasMore };
+          });
+        } else {
+          setMessages(current => [...page.messages, ...current]);
+          setHasMore(page.hasMore);
+        }
+      });
+      if (anchor && top !== undefined) list.scrollTop += anchor.getBoundingClientRect().top - top;
     });
   }
 
@@ -212,7 +300,7 @@ export function GroupChat() {
         method: "POST",
         json: { body, replyToId: wasReplying?.id },
       });
-      stickToBottom.current = true;
+      jumpToEnd();
       if (r.message.status === "queued") {
         setQueued((q) => (q.some((x) => x.id === r.message.id) ? q : [...q, r.message]));
         const why = r.reasons.length ? ` (${r.reasons.join(", ")})` : "";
@@ -242,7 +330,7 @@ export function GroupChat() {
     setMenuFor(null);
     try {
       const { reactions } = await api<{ reactions: GroupMessage["reactions"] }>(`/reactions/group/${m.id}`, { method: "PUT", json: { kind } });
-      setMessages((list) => list.map((x) => (x.id === m.id ? { ...x, reactions } : x)));
+      updatePublished((list) => list.map((x) => (x.id === m.id ? { ...x, reactions } : x)));
     } catch (e) {
       setNotice({ kind: "error", text: (e as Error).message });
     }
@@ -251,7 +339,7 @@ export function GroupChat() {
   async function remove(m: GroupMessage) {
     setMenuFor(null);
     await api(`/groups/${id}/messages/${m.id}`, { method: "DELETE" }).catch(() => {});
-    setMessages((list) => list.filter((x) => x.id !== m.id));
+    updatePublished((list) => list.filter((x) => x.id !== m.id));
   }
 
   if (!info) return <div className="chat" />;
@@ -309,17 +397,17 @@ export function GroupChat() {
       </header>
 
       <div className="chat__list" role="log" aria-label="Mensajes del grupo" ref={listRef} onScroll={onScroll}>
-        {hasMore && (
-          <button className="btn btn--ghost btn--small chat__older" onClick={loadOlder}>Ver mensajes anteriores</button>
+        {(quoteWindow?.hasMore ?? hasMore) && (
+          <button className="btn btn--ghost btn--small chat__older" onClick={() => void loadHistory("before")}>Ver mensajes anteriores</button>
         )}
-        {!messages.length && !queued.length && (
+        {!visibleMessages.length && !queued.length && (
           <div className="empty">
             <p className="empty__title">Todavía no habló nadie</p>
             <p className="muted">Rompé el hielo. Acá cada uno habla a su turno, así nadie copa el chat.</p>
           </div>
         )}
-        {messages.map((m, i) => {
-          const prev = messages[i - 1];
+        {visibleMessages.map((m, i) => {
+          const prev = visibleMessages[i - 1];
           const grouped =
             prev && prev.author.id === m.author.id &&
             new Date(m.scheduledAt).getTime() - new Date(prev.scheduledAt).getTime() < 5 * 60_000;
@@ -341,7 +429,7 @@ export function GroupChat() {
                   </div>
                 )}
                 {m.replyTo && (
-                  <button type="button" className="quote" onClick={() => jumpTo(m.replyTo!.id)}>
+                  <button type="button" className="quote" onClick={() => jumpTo(m.replyTo!)}>
                     <span className="quote__name">{m.replyTo.authorName}</span>
                     <span className="quote__body">{m.replyTo.body ?? "Mensaje borrado"}</span>
                   </button>
@@ -349,11 +437,11 @@ export function GroupChat() {
                 <p className="gmsg__body">{m.body}</p>
                 <ReactionBar reactions={m.reactions ?? []} myId={me?.user.id} onToggle={(k) => react(m, k)} />
               </div>
-              <button className="iconbtn gmsg__more" aria-label="Opciones del mensaje" onClick={() => setMenuFor(menuFor === m.id ? null : m.id)}>
+              <button className="iconbtn gmsg__more" aria-label="Opciones del mensaje" aria-expanded={menuFor === m.id} aria-controls={menuFor === m.id ? `message-options-${m.id}` : undefined} onClick={() => setMenuFor(menuFor === m.id ? null : m.id)}>
                 <DotsIcon />
               </button>
               {menuFor === m.id && (
-                <div className="menu" role="menu" ref={positionMessageMenu}>
+                <div className="menu" id={`message-options-${m.id}`} role="menu" ref={positionMessageMenu}>
                   {m.status === "published" && <ReactionPicker current={myReaction(m.reactions ?? [], me?.user.id)} onPick={(k) => react(m, k)} />}
                   {m.status === "published" && <button role="menuitem" onClick={() => startReply(m)}>Responder</button>}
                   {mine ? (
@@ -372,7 +460,10 @@ export function GroupChat() {
           );
         })}
 
-        {queued.map((m) => {
+        {quoteWindow?.hasNewer && (
+          <button className="btn btn--ghost btn--small chat__older" onClick={() => void loadHistory("after")}>Ver mensajes siguientes</button>
+        )}
+        {!quoteWindow && queued.map((m) => {
           const ms = new Date(m.scheduledAt).getTime() - now;
           return (
             <div key={m.id} className="queued">
@@ -387,8 +478,18 @@ export function GroupChat() {
             </div>
           );
         })}
+        <div ref={endRef} aria-hidden="true" />
       </div>
+      {(showJumpToEnd || quoteWindow || findingQuote) && (
+        <div className="chat__jump">
+          <button type="button" className="iconbtn chat__jump-button" aria-label="Ir al último mensaje"
+            onClick={jumpToEnd}>
+            <ChevronDownIcon />
+          </button>
+        </div>
+      )}
 
+      {findingQuote && <p className="notice" role="status">Buscando el mensaje citado…</p>}
       {notice && (
         <div className={`notice notice--${notice.kind}`} role="status">
           <span>{notice.text}</span>

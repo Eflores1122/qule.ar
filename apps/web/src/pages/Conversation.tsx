@@ -5,7 +5,7 @@ import { api, getSocket, upload, type Author, type Dm, type ReactionEvent } from
 import { myReaction, ReactionBar, ReactionPicker } from "../components/Reactions";
 import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
-import { BackIcon, ImageIcon, LockIcon, SendIcon, TimerIcon } from "../components/Icons";
+import { BackIcon, DotsIcon, ImageIcon, LockIcon, SendIcon, TimerIcon } from "../components/Icons";
 import { useSectionBack } from "../useSectionBack";
 import { useMessageMenuPosition } from "../useMessageMenuPosition";
 import { SavedPhrasesButton, SavedPhrasesMenu } from "../features/phrases/SavedPhrases";
@@ -29,7 +29,7 @@ export function Conversation() {
   const [msgMenu, setMsgMenu] = useState<string | null>(null);
   const [viewer, setViewer] = useState<{ src: string; seconds: number } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const positionMessageMenu = useMessageMenuPosition(listRef);
+  const positionMessageMenu = useMessageMenuPosition(listRef, setMsgMenu);
   const stickToBottom = useRef(true);
   const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
@@ -219,7 +219,7 @@ export function Conversation() {
         )}
       </header>
 
-      <div className="chat__list chat__list--dm" role="log" aria-label="Mensajes" ref={listRef} onScroll={onListScroll} onClick={() => setMsgMenu(null)}>
+      <div className="chat__list chat__list--dm" role="log" aria-label="Mensajes" ref={listRef} onScroll={onListScroll}>
         {messages.map((m) => {
           const mine = m.senderId === myId;
           return (
@@ -253,14 +253,14 @@ export function Conversation() {
               {m.kind !== "album" && (
                 <>
                   <button
-                    className="bubble__more"
-                    aria-label="Reaccionar u opciones del mensaje"
-                    onClick={(e) => { e.stopPropagation(); setMsgMenu(msgMenu === m.id ? null : m.id); }}
+                    className="iconbtn bubble__more"
+                    aria-label="Reaccionar u opciones del mensaje" aria-expanded={msgMenu === m.id} aria-controls={msgMenu === m.id ? `message-options-${m.id}` : undefined}
+                    onClick={() => setMsgMenu(msgMenu === m.id ? null : m.id)}
                   >
-                    ⋯
+                    <DotsIcon />
                   </button>
                   {msgMenu === m.id && (
-                    <div className={`menu menu--bubble ${mine ? "" : "menu--bubble-theirs"}`} role="menu" ref={positionMessageMenu} onClick={(e) => e.stopPropagation()}>
+                    <div className={`menu menu--bubble ${mine ? "" : "menu--bubble-theirs"}`} id={`message-options-${m.id}`} role="menu" ref={positionMessageMenu}>
                       <ReactionPicker current={myReaction(m.reactions ?? [], myId)} onPick={(k) => react(m, k)} />
                       {mine && <button role="menuitem" className="danger" onClick={() => unsend(m)}>Desenviar (se borra para los dos)</button>}
                     </div>
