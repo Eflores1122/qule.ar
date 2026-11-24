@@ -262,7 +262,7 @@ export function GroupChat() {
     return (
       <div className="page">
         <header className="topbar topbar--thread">
-          <button className="iconbtn" onClick={() => nav("/grupos?ver=todos")} aria-label="Volver"><BackIcon /></button>
+          <button className="iconbtn" onClick={() => (window.history.state?.idx > 0 ? nav(-1) : nav("/grupos?ver=todos"))} aria-label="Volver"><BackIcon /></button>
           <h1 className="topbar__title topbar__title--sm">{info.name}</h1>
         </header>
         <div className="preview">
