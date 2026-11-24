@@ -12,6 +12,7 @@ import { SavedPhrasesButton, SavedPhrasesMenu } from "../features/phrases/SavedP
 import { useDraft } from "../features/chat/useDraft";
 import { batchReadReceipts } from "../features/messages/readReceipts";
 import { ShareAlbumMenu } from "../features/chat/ShareAlbumMenu";
+import { ChatPhotoViewer } from "../features/messages/ChatPhotoViewer";
 
 export function Conversation() {
   const { id = "" } = useParams();
@@ -28,6 +29,7 @@ export function Conversation() {
   const [typing, setTyping] = useState(false);
   const [photoMenu, setPhotoMenu] = useState<false | "options" | "album">(false);
   const [msgMenu, setMsgMenu] = useState<string | null>(null);
+  const [photoMessageId, setPhotoMessageId] = useState<string | null>(null);
   const [viewer, setViewer] = useState<{ src: string; seconds: number } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const positionMessageMenu = useMessageMenuPosition(listRef);
@@ -39,6 +41,7 @@ export function Conversation() {
   const myId = me?.user.id;
 
   useEffect(() => {
+    setPhotoMessageId(null);
     let alive = true;
     let beforeHistory: Array<(messages: Dm[]) => Dm[]> | null = [];
     const receipts = batchReadReceipts(id);
@@ -201,6 +204,7 @@ export function Conversation() {
   }
 
   const lastMine = [...messages].reverse().find((m) => m.senderId === myId);
+  const openPhoto = messages.find((m) => m.id === photoMessageId && m.conversationId === id)?.photo;
 
   const lastSeen = lastMine && (lastMine.readAt || (seen?.conversationId === id &&
     (seen.ids.has(lastMine.id) || (seen.through && compareDmOrder(lastMine, seen.through) <= 0))));
@@ -245,7 +249,11 @@ export function Conversation() {
                 )
               ) : (
                 <>
-                  {m.photo && <img className="bubble__photo" src={m.photo} alt="Foto enviada" loading="lazy" />}
+                  {m.photo && (
+                    <button type="button" className="bubble__photo-button" aria-label="Abrir foto" onClick={() => setPhotoMessageId(m.id)}>
+                      <img className="bubble__photo" src={m.photo} alt="" loading="lazy" />
+                    </button>
+                  )}
                   {m.body && <p>{m.body}</p>}
                 </>
               )}
@@ -331,6 +339,7 @@ export function Conversation() {
         </div>
       </form>
 
+      {openPhoto && <ChatPhotoViewer src={openPhoto} onClose={() => setPhotoMessageId(null)} />}
       {viewer && <ExpiringViewer src={viewer.src} seconds={viewer.seconds} onClose={() => setViewer(null)} />}
     </div>
   );
