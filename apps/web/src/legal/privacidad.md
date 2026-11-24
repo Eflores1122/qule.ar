@@ -58,13 +58,13 @@ Solo para que la app funcione: mostrar tu perfil, la gente cerca y los grupos, m
 
 ## 5. Dónde están y quién más los ve
 
-**Dónde se guardan:** en un servidor alquilado (VPS) de Contabo, en Europa. Ahí están la base de datos, las fotos, los videos y los backups. La conexión con el servidor va cifrada, pero **los datos guardados en el servidor no están cifrados**: el disco no lo está. La excepción es el estado serológico y la fecha del último test, que se guardan cifrados (mirá el punto 3).
+**Dónde se guardan:** en un servidor alquilado (VPS) de Contabo, en Europa. Ahí están la base de datos, las fotos, los videos y los backups. La conexión con el servidor va cifrada, pero **los datos guardados en el servidor no están cifrados**: el disco no lo está. Las excepciones son el estado serológico y la fecha del último test (mirá el punto 3) y el texto de los mensajes privados, que se guardan cifrados.
 
 **Quién los ve:**
 
 - **Otras personas de la app:** ven tu perfil, tus fotos públicas y tu distancia aproximada, si no la ocultaste. Tus álbumes privados los ve solo quien vos elijas.
 - **Moderación:** para revisar un reporte, quien modera puede ver el mensaje o el perfil reportado, y la copia que se guarda al reportarlo (mirá el punto 6).
-- **Quienes mantienen el servidor:** técnicamente pueden acceder a la base de datos y a los archivos. Hoy los mensajes **no están cifrados de punta a punta**, y lo guardado en el servidor tampoco está cifrado. Solo acceden cuando hace falta para arreglar un problema o por una orden judicial.
+- **Quienes mantienen el servidor:** técnicamente pueden acceder a la base de datos y a los archivos. Hoy los mensajes **no están cifrados de punta a punta**: los privados se guardan cifrados en la base, pero la app los descifra en el servidor para mostrártelos. El resto de lo guardado en el servidor no está cifrado. Solo acceden cuando hace falta para arreglar un problema o por una orden judicial.
 - **Proveedores que usamos para que la app funcione:**
   - **Cloudflare** (Estados Unidos): por ahí pasa el tráfico entre tu celu y el servidor, para que la conexión sea segura y para proteger la app de ataques. Técnicamente, el contenido pasa por sus equipos.
   - **Notificaciones:** las entrega el servicio de tu navegador o teléfono (Google, Apple o Mozilla). Solo reciben un texto genérico como "Tenés un mensaje nuevo", sin nombres ni contenido.
@@ -91,12 +91,13 @@ Solo para que la app funcione: mostrar tu perfil, la gente cerca y los grupos, m
 - La conexión siempre va cifrada (HTTPS).
 - Las contraseñas se guardan cifradas.
 - El estado serológico y la fecha del último test se guardan cifrados.
+- El texto de los mensajes privados, y la copia que se guarda si alguien los reporta, se guardan cifrados.
 - La base de datos no es accesible desde internet: solo la ve la app.
 - Al servidor solo se entra con clave SSH, con bloqueo de intentos fallidos y actualizaciones de seguridad automáticas.
 - A las fotos y los videos les borramos los metadatos y la ubicación.
 - Las notificaciones no dicen quién te escribió ni qué.
 
-Lo que todavía no hacemos: cifrar el resto de los datos guardados en el servidor ni los mensajes de punta a punta, y guardar los backups fuera del servidor (los vamos a copiar afuera, cifrados). Ningún sistema es 100 % seguro, y menos uno en beta. Si pasa algo que afecte tus datos, te vamos a avisar.
+Lo que todavía no hacemos: cifrar el resto de los datos guardados en el servidor (por ejemplo, las fotos y los mensajes de los grupos) ni los mensajes de punta a punta, y guardar los backups fuera del servidor (los vamos a copiar afuera, cifrados). Ningún sistema es 100 % seguro, y menos uno en beta. Si pasa algo que afecte tus datos, te vamos a avisar.
 
 ## 8. Tus derechos
 

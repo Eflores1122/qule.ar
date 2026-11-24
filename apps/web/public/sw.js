@@ -36,7 +36,10 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const destination = new URL(event.notification.data?.url || "/", self.location.origin);
   const target = destination.origin === self.location.origin ? destination : new URL("/", self.location.origin);
-  if (target.pathname === "/toques" || /^\/mensajes\/[^/]+$/.test(target.pathname)) {
+  if (event.notification.tag.startsWith("req-") && /^\/grupos\/[^/]+\/info$/.test(target.pathname)) {
+    target.pathname = target.pathname.replace(/\/info$/, "/solicitudes");
+  }
+  if (/^\/grupos\/[^/]+\/solicitudes$/.test(target.pathname) || target.pathname === "/toques" || /^\/mensajes\/[^/]+$/.test(target.pathname)) {
     target.searchParams.set("aviso", "1");
   }
   const url = target.href;

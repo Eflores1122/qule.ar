@@ -1,5 +1,6 @@
 export const DM_EVENTS = {
   message: "dm:message",
+  updated: "dm:updated",
   read: "dm:read",
   deleted: "dm:deleted",
   opened: "dm:opened",

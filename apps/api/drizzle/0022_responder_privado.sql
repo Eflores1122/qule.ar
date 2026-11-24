@@ -1,0 +1,1 @@
+ALTER TABLE "direct_message" ADD COLUMN "reply_to_id" text;

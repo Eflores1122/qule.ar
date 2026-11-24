@@ -32,7 +32,7 @@ function ProfileView({ id }: { id: string }) {
   const isOwner = Boolean(me?.user.access?.includes("owner"));
   const { refreshAfterBlock } = useTabData();
   const [params, setParams] = useSearchParams();
-  // ?album=1 (desde el mensaje del chat) abre el álbum directo
+  const requestedAlbum = params.get("album");
   const [viewing, setViewing] = useState<{ items: Media[]; start: number; title: string } | null>(null);
   const [toquePicker, setToquePicker] = useState(false);
   const [toqueMsg, setToqueMsg] = useState("");
@@ -45,8 +45,9 @@ function ProfileView({ id }: { id: string }) {
     setMissing(false);
     api<PublicProfile>(`/users/${id}`).then((x) => {
       setP(x);
-      const first = x.privateAlbum?.albums[0];
-      if (params.get("album") === "1" && first) setViewing({ items: first.items, start: 0, title: first.name });
+      const albums = x.privateAlbum?.albums;
+      const selected = requestedAlbum === "1" ? albums?.[0] : albums?.find((album) => album.id === requestedAlbum);
+      if (selected) setViewing({ items: selected.items, start: 0, title: selected.name });
     }).catch(() => setMissing(true));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
@@ -147,7 +148,7 @@ function ProfileView({ id }: { id: string }) {
         {toquePicker && (
           <div className="toque-picker">
             <p className="muted small">Mandale un toque: le llega un aviso y lo ve en sus Toques.</p>
-            <ReactionPicker onPick={sendToque} label="Elegí un toque" />
+            <ReactionPicker onPick={sendToque} label="Elegí un toque" toque />
           </div>
         )}
         {toqueMsg && <p className="muted small toque-msg" role="status">{toqueMsg}</p>}

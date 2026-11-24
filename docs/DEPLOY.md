@@ -56,6 +56,8 @@ Protegelo: `chmod 600 /opt/mortero/app.env`.
 
 **Antes de actualizar a una versión con la migración `0016_cifrar_salud`**, agregá `DATA_KEY` en `~/mortero/app.env` (o la ruta de `app.env` de tu instalación). Usá una clave de 32 bytes en base64, generada con `openssl rand -base64 32`, y guardala fuera del servidor junto con las claves de recuperación. Los backups anteriores a esta migración pueden contener los datos de salud en claro. Los posteriores necesitan `DATA_KEY` para leer esos campos.
 
+**Mensajes privados:** desde la versión que los cifra, el texto de los mensajes privados y de las copias de los reportes también usa `DATA_KEY`. No hace falta migración: al arrancar, la API cifra los mensajes viejos de a tandas y en segundo plano (`Mensajes cifrados: N` en el log). Una versión anterior mostraría los mensajes cifrados como texto raro, así que para volver atrás hay que restaurar la base del backup previo.
+
 Si necesitás volver a una versión anterior al cifrado, restaurá también la base del backup previo a la actualización. La imagen anterior espera una fecha sin cifrar en `last_tested`. Conservá la clave para las copias tomadas después de cifrar.
 
 ## 3. Base de datos
@@ -75,7 +77,7 @@ Postgres no expone ningún puerto hacia afuera: solo lo ve la app, por la red `m
 
 ```bash
 cd /opt/mortero/src
-docker build -t mortero:latest .
+docker build -t mortero:latest --build-arg APP_URL=https://tu.dominio.com .
 docker volume create mortero-data
 docker run -d --name mortero-app --restart unless-stopped --network mortero \
   --env-file /opt/mortero/app.env \
@@ -84,6 +86,9 @@ docker run -d --name mortero-app --restart unless-stopped --network mortero \
   mortero:latest
 docker logs -f mortero-app   # tiene que decir "qule.ar API escuchando"
 ```
+
+El `--build-arg` deja tu dominio fijo en los tags para compartir en redes (`og:url`, `og:image`).
+Tiene que ser el mismo valor que `APP_URL` en `app.env`.
 
 Las migraciones de la base se aplican solas al arrancar. La app escucha solo en `127.0.0.1:3010`: el único acceso desde afuera es por nginx.
 
@@ -217,10 +222,12 @@ Antes de desplegar cambios en la carga o edición de fotos, completá la [checkl
 
 ```bash
 cd /opt/mortero/src && git pull
-docker build -t mortero:latest .
+docker build -t mortero:latest --build-arg APP_URL=https://tu.dominio.com .
 docker rm -f mortero-app
 docker run -d --name mortero-app ...   # el mismo comando del paso 4
 ```
+
+Usá el mismo `APP_URL` que figura en `/opt/mortero/app.env` para conservar el dominio de las vistas previas al actualizar.
 
 ## Login con Google
 

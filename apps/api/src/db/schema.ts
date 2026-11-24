@@ -2,7 +2,7 @@ import {
   pgTable, text, timestamp, boolean, integer, date, jsonb, uniqueIndex, index, primaryKey, doublePrecision,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { encryptedText } from "../crypt.js";
+import { encryptedMessageText, encryptedText } from "../crypt.js";
 
 // ---------- Better Auth (no cambiar nombres de campos) ----------
 
@@ -185,7 +185,8 @@ export const report = pgTable("report", {
   // o, si se reporta un perfil por algo urgente, sus fotos públicas). Esos archivos no se borran mientras
   // el reporte esté abierto o haya terminado en una medida; si se descarta, se liberan.
   targetName: text("target_name"),
-  messageBody: text("message_body"),
+  // Cifrada (ver src/crypt.ts): no se puede comparar en la base, se compara después de leerla
+  messageBody: encryptedMessageText("message_body"),
   evidenceKeys: jsonb("evidence_keys").$type<string[]>().notNull().default([]),
   reason: text("reason").notNull(),
   details: text("details"),
@@ -322,8 +323,14 @@ export const directMessage = pgTable("direct_message", {
   id: text("id").primaryKey(),
   conversationId: text("conversation_id").notNull().references(() => conversation.id, { onDelete: "cascade" }),
   senderId: text("sender_id").notNull().references(() => user.id, { onDelete: "cascade" }),
-  kind: text("kind").notNull().default("text"), // text | photo | album
-  body: text("body"),
+  kind: text("kind").notNull().default("text"), // text | photo | album | album_revoked | album_expired
+  // Identificador histórico del álbum, incluso después de borrarlo. Null en avisos anteriores a la columna.
+  albumId: text("album_id"),
+  // Cifrado en la base con DATA_KEY (ver src/crypt.ts). No se puede buscar por texto en la base.
+  body: encryptedMessageText("body"),
+  // Mensaje citado al responder (de la misma conversación). Sin FK a propósito:
+  // si se borra el original, la cita queda huérfana y se muestra "Mensaje borrado".
+  replyToId: text("reply_to_id"),
   photoKey: text("photo_key"),
   // Foto temporal: se ve una sola vez y después se borra del servidor
   expiring: boolean("expiring").notNull().default(false),
@@ -336,12 +343,20 @@ export const directMessage = pgTable("direct_message", {
   index("dm_photo_key_idx").on(t.photoKey),
   // Al borrar una cuenta se borran sus mensajes: sin esto había que recorrer la tabla entera
   index("dm_sender_idx").on(t.senderId),
+  // Un solo aviso por álbum en cada conversación: el aviso muestra el estado actual y se actualiza en su
+  // lugar en vez de duplicarse. Parcial: los mensajes comunes y los avisos viejos sin álbum quedan afuera
+  // (Postgres trata los NULL como distintos, así que esos nunca chocan).
+  uniqueIndex("dm_notice_album_idx")
+    .on(t.conversationId, t.senderId, t.albumId)
+    .where(sql`${t.kind} in ('album', 'album_revoked', 'album_expired') and ${t.albumId} is not null`),
 ]);
 
 // ---------- Toques y reacciones ----------
 
 /** Las reacciones que existen (los íconos están en apps/web/public/reacciones). */
 export const REACTIONS = ["hola", "fuego", "rayo", "lengua", "chispa", "ojitos", "ganas", "gotas"] as const;
+/** A los mensajes también se les puede reaccionar con risa (no es un toque). */
+export const MESSAGE_REACTIONS = [...REACTIONS, "risa"] as const;
 
 /** Un toque: avisarle a alguien que te gusta, con una reacción. A diferencia de la estrella, la otra persona se entera. */
 export const toque = pgTable("toque", {

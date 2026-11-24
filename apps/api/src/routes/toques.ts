@@ -4,7 +4,7 @@ import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db, schema } from "../db/index.js";
-import { REACTIONS } from "../db/schema.js";
+import { MESSAGE_REACTIONS, REACTIONS } from "../db/schema.js";
 import { authorsFor, blockedWith, isBlocked, newId, reactionsFor, requireProfile, requireUser, type AppEnv } from "../lib.js";
 import { limit } from "../ratelimit.js";
 import { emitToGroup, emitToUser } from "../realtime.js";
@@ -95,7 +95,7 @@ toqueRoutes.put("/reactions/:scope{dm|group}/:messageId", async (c) => {
   const me = c.get("user");
   const scope = c.req.param("scope") as "dm" | "group";
   const messageId = c.req.param("messageId");
-  const r = z.object({ kind: kindInput.nullable() }).safeParse(await c.req.json().catch(() => ({})));
+  const r = z.object({ kind: z.enum(MESSAGE_REACTIONS).nullable() }).safeParse(await c.req.json().catch(() => ({})));
   if (!r.success) throw new HTTPException(400, { message: "Reacción inválida" });
 
   // Que el mensaje exista y que yo esté en esa charla
@@ -104,7 +104,8 @@ toqueRoutes.put("/reactions/:scope{dm|group}/:messageId", async (c) => {
   if (scope === "dm") {
     const [m] = await db.select().from(directMessage).where(eq(directMessage.id, messageId));
     const [conv] = m ? await db.select().from(conversation).where(eq(conversation.id, m.conversationId)) : [];
-    if (!m || !conv || (conv.userA !== me.id && conv.userB !== me.id) || m.kind === "album") throw new HTTPException(404, { message: "Mensaje no encontrado" });
+    // Los avisos de álbum (activo, revocado, vencido) aceptan reacciones como cualquier mensaje
+    if (!m || !conv || (conv.userA !== me.id && conv.userB !== me.id)) throw new HTTPException(404, { message: "Mensaje no encontrado" });
     const other = conv.userA === me.id ? conv.userB : conv.userA;
     if (await isBlocked(me.id, other)) throw new HTTPException(404, { message: "Mensaje no encontrado" });
     where = { conversationId: conv.id };
