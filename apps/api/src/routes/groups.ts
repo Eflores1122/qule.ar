@@ -997,17 +997,53 @@ groupRoutes.get("/groups/:id/messages", async (c) => {
   if (!member) throw new HTTPException(403, { message: "No sos parte de este grupo" });
 
   const before = c.req.query("before");
+  const after = c.req.query("after");
+  const around = c.req.query("around");
+  const cursorId = c.req.query("cursorId");
   const blocked = [...(await blockedWith(u.id))];
   const conds = [eq(groupMessage.groupId, groupId), eq(groupMessage.status, "published")];
-  if (before) conds.push(lt(groupMessage.scheduledAt, new Date(before)));
   if (blocked.length) conds.push(notInArray(groupMessage.userId, blocked));
 
-  const published = await db
-    .select()
-    .from(groupMessage)
-    .where(and(...conds))
-    .orderBy(desc(groupMessage.scheduledAt))
-    .limit(50);
+  // El ID desempata cuando dos publicaciones comparten el mismo milisegundo.
+  const position = sql`(${groupMessage.scheduledAt}, ${groupMessage.id})`;
+  const cursor = (date: Date, id: string) => sql`(${date.toISOString()}::timestamptz, ${id}::text)`;
+  if (around) {
+    const [target] = await db.select().from(groupMessage).where(and(...conds, eq(groupMessage.id, around)));
+    if (!target) throw new HTTPException(404, { message: "El mensaje citado ya no está disponible." });
+    const pivot = cursor(target.scheduledAt, target.id);
+    const [older, newer] = await Promise.all([
+      db.select().from(groupMessage).where(and(...conds, sql`${position} < ${pivot}`))
+        .orderBy(desc(groupMessage.scheduledAt), desc(groupMessage.id)).limit(25),
+      db.select().from(groupMessage).where(and(...conds, sql`${position} > ${pivot}`))
+        .orderBy(asc(groupMessage.scheduledAt), asc(groupMessage.id)).limit(26),
+    ]);
+    return c.json({
+      messages: await serializeGroupMessages([...older.slice(0, 24).reverse(), target, ...newer.slice(0, 25)]),
+      hasMore: older.length > 24, hasNewer: newer.length > 25,
+    });
+  }
+
+  const boundary = before ?? after;
+  if (boundary !== undefined) {
+    const date = new Date(boundary);
+    if (!Number.isFinite(date.getTime()) || (before && after) || (after && !cursorId)) {
+      throw new HTTPException(400, { message: "Página inválida" });
+    }
+    if (cursorId) {
+      const pivot = cursor(date, cursorId);
+      conds.push(after ? sql`${position} > ${pivot}` : sql`${position} < ${pivot}`);
+    } else {
+      // Las versiones anteriores solo envían la fecha.
+      conds.push(lt(groupMessage.scheduledAt, date));
+    }
+  }
+  const order = after ? asc : desc;
+  const rows = await db.select().from(groupMessage).where(and(...conds))
+    .orderBy(order(groupMessage.scheduledAt), order(groupMessage.id)).limit(51);
+  const published = rows.slice(0, 50);
+  const hasMore = rows.length > 50;
+  if (after) return c.json({ messages: await serializeGroupMessages(published), hasMore, hasNewer: hasMore });
+
   const queued = before
     ? []
     : await db
@@ -1019,7 +1055,7 @@ groupRoutes.get("/groups/:id/messages", async (c) => {
   return c.json({
     messages: await serializeGroupMessages(published.reverse()),
     queued: await serializeGroupMessages(queued),
-    hasMore: published.length === 50,
+    hasMore,
   });
 });
 
