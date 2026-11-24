@@ -60,7 +60,7 @@ Solo para que la app funcione: mostrar tu perfil, la gente cerca y los grupos, m
 
 ## 5. Dónde están y quién más los ve
 
-**Dónde se guardan:** en un servidor alquilado (VPS) de Contabo, en Europa. Ahí están la base de datos, las fotos, los videos y los backups. La conexión con el servidor va cifrada. **Las fotos y los videos** (los de tu perfil, los de tus álbumes privados y los que mandás por mensaje privado) **se guardan cifrados**, igual que el estado serológico y la fecha del último test (mirá el punto 3). El resto de la base de datos no está cifrado.
+**Dónde se guardan:** en un servidor alquilado (VPS) de Contabo, en Europa. Ahí están la base de datos, las fotos y los videos. **Los backups** se guardan cifrados fuera del servidor, en Cloudflare R2: se cifran antes de salir y Cloudflare no puede leerlos. La conexión con el servidor va cifrada. **Las fotos y los videos** (los de tu perfil, los de tus álbumes privados y los que mandás por mensaje privado) **se guardan cifrados**, igual que el estado serológico y la fecha del último test (mirá el punto 3). El resto de la base de datos no está cifrado.
 
 **Quién los ve:**
 
@@ -69,6 +69,7 @@ Solo para que la app funcione: mostrar tu perfil, la gente cerca y los grupos, m
 - **Quienes mantienen el servidor:** técnicamente pueden acceder a la base de datos y a los archivos. Hoy los mensajes **no están cifrados de punta a punta**. Las fotos, los videos y los datos de salud se guardan cifrados, pero la clave está en el mismo servidor. Solo acceden cuando hace falta para arreglar un problema o por una orden judicial.
 - **Proveedores que usamos para que la app funcione:**
   - **Cloudflare** (Estados Unidos): por ahí pasa el tráfico entre tu celu y el servidor, para que la conexión sea segura y para proteger la app de ataques. Técnicamente, el contenido pasa por sus equipos.
+  - **Cloudflare R2:** guarda los backups, cifrados antes de salir del servidor. Sin la contraseña, que no tiene Cloudflare, no se pueden leer.
   - **Notificaciones:** las entrega el servicio de tu navegador o teléfono (Google, Apple o Mozilla). Solo reciben un texto genérico como "Tenés un mensaje nuevo", sin nombres ni contenido.
   - **Mails:** si la app te manda mails, los envía un proveedor de correo, que recibe tu dirección y el texto del mail.
   - **Google**, solo si elegís entrar con Google.
@@ -94,13 +95,14 @@ Solo para que la app funcione: mostrar tu perfil, la gente cerca y los grupos, m
 - Las contraseñas se guardan cifradas.
 - El estado serológico y la fecha del último test se guardan cifrados.
 - Las fotos y los videos se guardan cifrados: quien copie la carpeta de fotos o un backup sin la clave no los puede ver.
+- Los backups se cifran en el servidor antes de salir y se guardan afuera, así que si el servidor se pierde o lo vulneran, los backups siguen a salvo.
 - Las cuentas nuevas tienen que confirmar el mail antes de aparecer en Gente, y al crearlas hay un chequeo contra bots que no usa servicios de terceros.
 - La base de datos no es accesible desde internet: solo la ve la app.
 - Al servidor solo se entra con clave SSH, con bloqueo de intentos fallidos y actualizaciones de seguridad automáticas.
 - A las fotos y los videos les borramos los metadatos y la ubicación.
 - Las notificaciones no dicen quién te escribió ni qué.
 
-Lo que todavía no hacemos: cifrar el resto de los datos guardados en el servidor ni los mensajes de punta a punta, y guardar los backups fuera del servidor (los vamos a copiar afuera, cifrados). La clave que cifra las fotos y los videos está en el mismo servidor: protege las copias y los backups, pero no a alguien que tome el control del servidor entero. Ningún sistema es 100 % seguro, y menos uno en beta. Si pasa algo que afecte tus datos, te vamos a avisar.
+Lo que todavía no hacemos: cifrar el resto de los datos guardados en el servidor ni los mensajes de punta a punta. La clave que cifra las fotos y los videos está en el mismo servidor: protege las copias y los backups, pero no a alguien que tome el control del servidor entero. Ningún sistema es 100 % seguro, y menos uno en beta. Si pasa algo que afecte tus datos, te vamos a avisar.
 
 ## 8. Tus derechos
 
