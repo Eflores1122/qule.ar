@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { Link } from "react-router";
 import { useMe } from "../App";
+import { albumNoticeKind, useAlbumNoticeTime } from "../features/messages/albumNotices";
 import { Avatar } from "../components/Avatar";
 import { useTabData } from "../features/navigation/tabData";
 
@@ -15,6 +16,7 @@ function ago(iso: string) {
 export function Inbox() {
   const { me } = useMe();
   const { conversations: list } = useTabData();
+  const albumNoticeTime = useAlbumNoticeTime(list?.map(({ last }) => last) ?? []);
   const [query, setQuery] = useState("");
   const [unread, setUnread] = useState(false);
   const normalize = (value: string) => value.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().trim();
@@ -48,10 +50,13 @@ export function Inbox() {
         <ul className="inbox">
           {filtered?.map((c) => {
             const mine = c.last.senderId === me?.user.id;
+            const kind = albumNoticeKind(c.last, albumNoticeTime);
             const preview =
-              c.last.kind === "album" ? "🔒 Álbum privado compartido"
+              kind === "album" ? "Álbum privado compartido"
+              : kind === "album_revoked" ? (mine ? "Dejaste de compartir el álbum" : "Dejó de compartir el álbum")
+              : kind === "album_expired" ? (mine ? "Venció lo que compartiste" : "Venció lo que te compartieron")
               : c.last.expiring ? "⏱ Foto temporal"
-              : c.last.kind === "photo" || c.last.photo ? "📷 Foto"
+              : kind === "photo" || c.last.photo ? "📷 Foto"
               : c.last.body;
             return (
               <li key={c.id}>

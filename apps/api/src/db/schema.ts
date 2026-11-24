@@ -323,7 +323,9 @@ export const directMessage = pgTable("direct_message", {
   id: text("id").primaryKey(),
   conversationId: text("conversation_id").notNull().references(() => conversation.id, { onDelete: "cascade" }),
   senderId: text("sender_id").notNull().references(() => user.id, { onDelete: "cascade" }),
-  kind: text("kind").notNull().default("text"), // text | photo | album
+  kind: text("kind").notNull().default("text"), // text | photo | album | album_revoked | album_expired
+  // Identificador histórico del álbum, incluso después de borrarlo. Null en avisos anteriores a la columna.
+  albumId: text("album_id"),
   // Cifrado en la base con DATA_KEY (ver src/crypt.ts). No se puede buscar por texto en la base.
   body: encryptedMessageText("body"),
   // Mensaje citado al responder (de la misma conversación). Sin FK a propósito:
@@ -341,6 +343,12 @@ export const directMessage = pgTable("direct_message", {
   index("dm_photo_key_idx").on(t.photoKey),
   // Al borrar una cuenta se borran sus mensajes: sin esto había que recorrer la tabla entera
   index("dm_sender_idx").on(t.senderId),
+  // Un solo aviso por álbum en cada conversación: el aviso muestra el estado actual y se actualiza en su
+  // lugar en vez de duplicarse. Parcial: los mensajes comunes y los avisos viejos sin álbum quedan afuera
+  // (Postgres trata los NULL como distintos, así que esos nunca chocan).
+  uniqueIndex("dm_notice_album_idx")
+    .on(t.conversationId, t.senderId, t.albumId)
+    .where(sql`${t.kind} in ('album', 'album_revoked', 'album_expired') and ${t.albumId} is not null`),
 ]);
 
 // ---------- Toques y reacciones ----------

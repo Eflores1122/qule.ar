@@ -13,6 +13,7 @@ type Share = { albumId: string; expiresAt: string | null };
  */
 export function ShareAlbumMenu({ userId, name, onBack }: { userId: string; name: string; onBack: () => void }) {
   const { me } = useMe();
+  const title = me && me.albums.length > 1 ? "Álbumes privados" : "Álbum privado";
   const hasAlbum = Boolean(me?.photos.some((x) => x.isPrivate));
   // undefined: cargando
   const [shares, setShares] = useState<Share[] | undefined>(undefined);
@@ -32,7 +33,7 @@ export function ShareAlbumMenu({ userId, name, onBack }: { userId: string; name:
     <div className="album-menu" role="group" aria-label="Compartir álbumes privados">
       <div className="album-menu__head">
         <button type="button" className="iconbtn" aria-label="Volver a las opciones" onClick={onBack}><BackIcon /></button>
-        <p className="small"><LockIcon /> Álbum privado</p>
+        <p className="small"><LockIcon /> {title}</p>
       </div>
       {!hasAlbum || !me ? (
         <p className="muted small">
