@@ -355,6 +355,8 @@ export const directMessage = pgTable("direct_message", {
 
 /** Las reacciones que existen (los íconos están en apps/web/public/reacciones). */
 export const REACTIONS = ["hola", "fuego", "rayo", "lengua", "chispa", "ojitos", "ganas", "gotas"] as const;
+/** A los mensajes también se les puede reaccionar con risa (no es un toque). */
+export const MESSAGE_REACTIONS = [...REACTIONS, "risa"] as const;
 
 /** Un toque: avisarle a alguien que te gusta, con una reacción. A diferencia de la estrella, la otra persona se entera. */
 export const toque = pgTable("toque", {

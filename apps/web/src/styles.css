@@ -657,7 +657,7 @@ button.quote:hover { background: var(--surface-3); }
 
 /* ---------- Toques y reacciones ---------- */
 .reaction-icon { display: block; }
-.reaction-picker { display: grid; grid-template-columns: repeat(4, 44px); gap: 2px; padding: 4px; }
+.reaction-picker { display: grid; grid-template-columns: repeat(5, 44px); gap: 2px; padding: 4px; }
 .reaction-picker__btn { width: 44px; height: 44px; border: 0; border-radius: var(--radius-pill); background: none; display: grid; place-items: center; transition: transform 0.12s ease; }
 .reaction-picker__btn:hover { background: var(--surface-3); transform: scale(1.12); }
 .reaction-picker__btn--on { background: var(--accent-soft); outline: 1px solid var(--accent-line); }

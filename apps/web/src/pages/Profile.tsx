@@ -148,7 +148,7 @@ function ProfileView({ id }: { id: string }) {
         {toquePicker && (
           <div className="toque-picker">
             <p className="muted small">Mandale un toque: le llega un aviso y lo ve en sus Toques.</p>
-            <ReactionPicker onPick={sendToque} label="Elegí un toque" />
+            <ReactionPicker onPick={sendToque} label="Elegí un toque" toque />
           </div>
         )}
         {toqueMsg && <p className="muted small toque-msg" role="status">{toqueMsg}</p>}
