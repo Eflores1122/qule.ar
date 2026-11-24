@@ -300,7 +300,7 @@ export function GroupChat() {
         <button type="button" className="iconbtn" onClick={goBack} aria-label="Volver a Grupos"><BackIcon /></button>
         <GroupAvatar name={info.name} photo={info.photo} general={info.isGeneral} size="sm" />
         <div className="topbar__grow">
-          <h1 className="topbar__title topbar__title--sm"><Link to={`/grupos/${id}/info`}>{info.isGeneral ? "# " : ""}{info.name}</Link></h1>
+          <h1 className="topbar__title topbar__title--sm"><Link to={`/grupos/${id}/info`} state={{ fromGroupChat: true }}>{info.isGeneral ? "# " : ""}{info.name}</Link></h1>
           <p className="topbar__sub"><ClockIcon /> {rulesText}</p>
         </div>
         <GroupActions

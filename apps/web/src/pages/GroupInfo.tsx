@@ -110,6 +110,8 @@ export function GroupInfo() {
 
   if (location.hash === "#solicitudes") return <Navigate to={`/grupos/${id}/solicitudes`} replace />;
   if (!info) return <div className="page" />;
+  const showChatLink = Boolean(info.role && !location.state?.fromGroupChat);
+  const showRequestsLink = isMod && !info.isGeneral;
 
   return (
     <div className="page">
@@ -118,11 +120,18 @@ export function GroupInfo() {
             Si se entró directo (una notificación, o recargando), no hay a dónde volver: va al chat del grupo. */}
         <button className="iconbtn" onClick={() => (location.key === "default" ? nav(`/grupos/${id}`, { replace: true }) : nav(-1))} aria-label="Volver"><BackIcon /></button>
         <h1 className="topbar__grow topbar__title topbar__title--sm">{info.isGeneral ? "# " : ""}{info.name}</h1>
-        {isMod && !info.isGeneral && (
-          <Link className="btn btn--small group-info__requests" to={`/grupos/${id}/solicitudes`} state={{ groupRequestsFrom: "details" }}>
-            Solicitudes
-            {info.pendingCount > 0 && <span className="badge">{info.pendingCount}</span>}
-          </Link>
+        {(showChatLink || showRequestsLink) && (
+          <div className="topbar__actions">
+            {showRequestsLink && (
+              <Link className="btn btn--small group-info__requests" to={`/grupos/${id}/solicitudes`} state={{ groupRequestsFrom: "details" }}>
+                Solicitudes
+                {info.pendingCount > 0 && <span className="badge">{info.pendingCount}</span>}
+              </Link>
+            )}
+            {showChatLink && (
+              <Link className="btn btn--small" to={`/grupos/${id}`} aria-label="Ver chat del grupo">Ver</Link>
+            )}
+          </div>
         )}
       </header>
 

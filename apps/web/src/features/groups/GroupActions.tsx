@@ -78,7 +78,7 @@ export function GroupActions({ group, onMutedChange, onError }: {
             {hasPendingRequests && <span className="badge">{group.pendingCount}</span>}
           </Link>
         )}
-        <Link to={infoPath} onClick={() => setOpen(false)}>Ver detalles</Link>
+        <Link to={infoPath} state={{ fromGroupChat: true }} onClick={() => setOpen(false)}>Ver detalles</Link>
         <button type="button" aria-disabled={saving} onClick={toggleNotifications}>
           {group.muted ? "Reactivar notificaciones" : "Silenciar notificaciones"}
         </button>
