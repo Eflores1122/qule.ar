@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import sharp from "sharp";
 import { createAccount, openProfile, signIn } from "./fixtures";
 
 function gate() {
@@ -6,6 +7,55 @@ function gate() {
   const wait = new Promise<void>((resolve) => { release = resolve; });
   return { wait, release };
 }
+
+test("abre una foto del chat para quien la manda y quien la recibe", async ({ page, browser, baseURL }) => {
+  const sender = await createAccount(baseURL!, "Luz Fotos");
+  const recipient = await createAccount(baseURL!, "Mar Fotos");
+  const viewport = { width: 375, height: 700 };
+  await page.setViewportSize(viewport);
+  const recipientContext = await browser.newContext({ baseURL, viewport, hasTouch: true, isMobile: true });
+  try {
+    const recipientPage = await recipientContext.newPage();
+    await recipientPage.addInitScript(() => localStorage.setItem("mortero:tema", "penumbra"));
+    await signIn(recipientPage, recipient);
+    await recipientPage.getByRole("link", { name: "Mensajes", exact: true }).click();
+
+    await signIn(page, sender);
+    await openProfile(page, recipient);
+    await page.getByRole("button", { name: "Mandar mensaje" }).click();
+    await page.getByRole("button", { name: "Mandar foto" }).click();
+    const photo = await sharp({ create: { width: 720, height: 1000, channels: 3, background: "#53739e" } }).png().toBuffer();
+    const fileChooser = page.waitForEvent("filechooser");
+    await page.getByRole("menuitem", { name: "Foto", exact: true }).click();
+    await (await fileChooser).setFiles({ name: "foto.png", mimeType: "image/png", buffer: photo });
+    const sentPhoto = page.getByRole("button", { name: "Abrir foto" });
+    await sentPhoto.focus();
+    await sentPhoto.press("Enter");
+    const senderViewer = page.getByRole("dialog", { name: "Foto del chat" });
+    await expect(senderViewer).toBeVisible();
+    await page.keyboard.press("Escape");
+    await expect(senderViewer).toHaveCount(0);
+    await expect(sentPhoto).toBeFocused();
+
+    await recipientPage.getByRole("link", { name: new RegExp(sender.name) }).click();
+    await expect(recipientPage.locator("html")).toHaveAttribute("data-theme", "penumbra");
+    const receivedPhoto = recipientPage.getByRole("button", { name: "Abrir foto" });
+    await receivedPhoto.tap();
+    const recipientViewer = recipientPage.getByRole("dialog", { name: "Foto del chat" });
+    const image = recipientViewer.getByRole("img", { name: "Foto del chat" });
+    await expect.poll(() => image.evaluate((img: HTMLImageElement) => img.naturalWidth)).toBeGreaterThan(0);
+    const bounds = (await image.boundingBox())!;
+    expect(bounds.x).toBeGreaterThanOrEqual(0);
+    expect(bounds.x + bounds.width).toBeLessThanOrEqual(viewport.width);
+    expect(bounds.y + bounds.height).toBeLessThanOrEqual(viewport.height);
+    await recipientViewer.getByRole("button", { name: "Cerrar foto" }).tap();
+    await expect(recipientViewer).toHaveCount(0);
+    await receivedPhoto.tap();
+    await expect(recipientViewer).toBeVisible();
+  } finally {
+    await recipientContext.close();
+  }
+});
 
 test("entrega un mensaje a otra sesión y lo conserva al reabrir el chat", async ({ page, browser, baseURL }) => {
   const sender = await createAccount(baseURL!, "Camila Mensajes");
