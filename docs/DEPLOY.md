@@ -56,6 +56,8 @@ Protegelo: `chmod 600 /opt/mortero/app.env`.
 
 **Antes de actualizar a una versión con la migración `0016_cifrar_salud`**, agregá `DATA_KEY` en `~/mortero/app.env` (o la ruta de `app.env` de tu instalación). Usá una clave de 32 bytes en base64, generada con `openssl rand -base64 32`, y guardala fuera del servidor junto con las claves de recuperación. Los backups anteriores a esta migración pueden contener los datos de salud en claro. Los posteriores necesitan `DATA_KEY` para leer esos campos.
 
+**Mensajes privados:** desde la versión que los cifra, el texto de los mensajes privados y de las copias de los reportes también usa `DATA_KEY`. No hace falta migración: al arrancar, la API cifra los mensajes viejos de a tandas y en segundo plano (`Mensajes cifrados: N` en el log). Una versión anterior mostraría los mensajes cifrados como texto raro, así que para volver atrás hay que restaurar la base del backup previo.
+
 Si necesitás volver a una versión anterior al cifrado, restaurá también la base del backup previo a la actualización. La imagen anterior espera una fecha sin cifrar en `last_tested`. Conservá la clave para las copias tomadas después de cifrar.
 
 ## 3. Base de datos

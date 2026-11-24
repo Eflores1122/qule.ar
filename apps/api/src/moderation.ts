@@ -185,15 +185,14 @@ export async function checkMinorSignals(
   const isGroup = "groupId" in target;
   // No repite: si hay una alerta abierta, o una ya resuelta con el mismo texto (por ejemplo, descartada), no crea otra
   const text = Object.values(fields).filter(Boolean).join("\n");
-  const [dup] = await db.select({ id: report.id }).from(report)
+  // La copia del texto está cifrada: se trae y se compara acá (son pocas alertas por persona o grupo)
+  const prev = await db.select({ status: report.status, body: report.messageBody }).from(report)
     .where(and(
       sql`${report.reporterId} is null`,
       sql`${report.details} like ${AUTO_DETAILS_PREFIX + "%"}`,
       isGroup ? eq(report.groupId, target.groupId) : eq(report.targetUserId, target.userId),
-      or(eq(report.status, "open"), eq(report.messageBody, text)),
-    ))
-    .limit(1);
-  if (dup) return;
+    ));
+  if (prev.some((r) => r.status === "open" || r.body === text)) return;
   await db.insert(report).values({
     id: crypto.randomUUID(),
     reporterId: null,
@@ -288,10 +287,10 @@ export async function scanExistingGroups() {
     const bad = forbiddenGroupText(g.name, g.description);
     if (!bad) continue;
     const text = [g.name, g.description].filter(Boolean).join("\n");
-    const [dup] = await db.select({ id: report.id }).from(report)
-      .where(and(eq(report.groupId, g.id), sql`${report.reporterId} is null`, eq(report.messageBody, text)))
-      .limit(1);
-    if (dup) continue;
+    // La copia del texto está cifrada: se compara después de leerla
+    const prev = await db.select({ body: report.messageBody }).from(report)
+      .where(and(eq(report.groupId, g.id), sql`${report.reporterId} is null`));
+    if (prev.some((r) => r.body === text)) continue;
     await db.insert(report).values({
       id: crypto.randomUUID(),
       reporterId: null,
