@@ -1,14 +1,17 @@
-import { REACTIONS, reactionLabel, reactionSrc, type ReactionSummary } from "../reactions";
+import { MESSAGE_REACTIONS, REACTIONS, reactionLabel, reactionSrc, type ReactionSummary } from "../reactions";
 
 export function ReactionIcon({ kind, size = 20 }: { kind: string; size?: number }) {
   return <img src={reactionSrc(kind)} alt="" width={size} height={size} className="reaction-icon" draggable={false} />;
 }
 
-/** Fila con las 8 reacciones para elegir. `current` queda marcada (tocarla de nuevo la saca). */
-export function ReactionPicker({ current, onPick, label = "Reaccionar" }: { current?: string | null; onPick: (kind: string) => void; label?: string }) {
+/**
+ * Reacciones para elegir. `current` queda marcada (tocarla de nuevo la saca).
+ * Con `toque`, solo las que se mandan como toque (sin la risa).
+ */
+export function ReactionPicker({ current, onPick, label = "Reaccionar", toque = false }: { current?: string | null; onPick: (kind: string) => void; label?: string; toque?: boolean }) {
   return (
     <div className="reaction-picker" role="group" aria-label={label}>
-      {REACTIONS.map((r) => (
+      {(toque ? REACTIONS : MESSAGE_REACTIONS).map((r) => (
         <button
           key={r.kind}
           type="button"

@@ -72,6 +72,9 @@ export const SettingsIcon = () => (
 export const ChevronLeftIcon = () => (
   <svg {...base}><path d="m15 5-7 7 7 7" /></svg>
 );
+export const ChevronDownIcon = () => (
+  <svg {...base}><path d="m5 9 7 7 7-7" /></svg>
+);
 export const ChevronRightIcon = () => (
   <svg {...base}><path d="m9 5 7 7-7 7" /></svg>
 );

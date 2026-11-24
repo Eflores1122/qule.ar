@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { api, type Author, type Toque, type Viewer } from "../api";
 import { ReactionIcon } from "../components/Reactions";
@@ -6,6 +6,7 @@ import { reactionLabel } from "../reactions";
 import { useMe } from "../App";
 import { BackIcon } from "../components/Icons";
 import { useSectionBack } from "../useSectionBack";
+import { useRememberScroll } from "../features/navigation/viewMemory";
 
 function ago(iso: string) {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -17,8 +18,10 @@ function ago(iso: string) {
 
 function PeopleGrid({ title, people, empty, note }: { title: string; people: (Author & { sub?: string; reaction?: string; isNew?: boolean })[] | null; empty: string; note?: string }) {
   const goBack = useSectionBack("/yo");
+  const pageRef = useRef<HTMLDivElement>(null);
+  useRememberScroll(pageRef, people != null);
   return (
-    <div className="page">
+    <div className="page" ref={pageRef}>
       <header className="topbar topbar--thread">
         <button className="iconbtn" onClick={goBack} aria-label="Volver"><BackIcon /></button>
         <h1 className="topbar__title topbar__title--sm">{title}</h1>

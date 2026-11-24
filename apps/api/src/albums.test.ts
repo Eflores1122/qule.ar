@@ -36,6 +36,7 @@ test("varios álbumes privados, compartidos de a uno", async (t) => {
   const { meRoutes } = await import("./routes/me.js");
   const { premiumRoutes } = await import("./routes/premium.js");
   const { socialRoutes } = await import("./routes/social.js");
+  const { toqueRoutes } = await import("./routes/toques.js");
   const { saveImage } = await import("./storage.js");
   const { MAX_ALBUMS, MAX_ALBUM_ITEMS } = await import("./albums.js");
 
@@ -43,6 +44,7 @@ test("varios álbumes privados, compartidos de a uno", async (t) => {
   app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
   app.route("/api", meRoutes);
   app.route("/api", socialRoutes);
+  app.route("/api", toqueRoutes);
   app.route("/api", premiumRoutes);
 
   type Account = { id: string; cookie: string };
@@ -214,6 +216,14 @@ test("varios álbumes privados, compartidos de a uno", async (t) => {
     // Al desbloquear no vuelve ningún acceso
     assert.equal((await request(`/api/blocks/${other.id}`, owner, { method: "DELETE" })).status, 200);
     assert.equal(await canSee(other, enActivo), false);
+    // Los avisos del chat quedaron como revocados en las dos direcciones, y siguen así al desbloquear
+    const convs = await db.select().from(schema.conversation);
+    const conv = convs.find((c) => [c.userA, c.userB].includes(owner.id) && [c.userA, c.userB].includes(other.id));
+    assert.ok(conv);
+    const notices = (await db.select().from(schema.directMessage))
+      .filter((m) => m.conversationId === conv.id && m.kind.startsWith("album"));
+    assert.equal(notices.length, 3);
+    assert.ok(notices.every((m) => m.kind === "album_revoked"));
   });
 
   await t.test("el tope de archivos privados suma todos los álbumes", async () => {
@@ -245,5 +255,364 @@ test("varios álbumes privados, compartidos de a uno", async (t) => {
     const albums = await (await request("/api/album/albums", owner)).json() as { id: string }[];
     assert.deepEqual(albums.map((a) => a.id), [base]);
     assert.equal(await canSee(owner, first), true);
+  });
+
+  await t.test("el aviso del chat sigue el estado de lo compartido", async () => {
+    const bruno = await account("Bruno");
+    const mia = await account("Mia");
+    const up = await upload(bruno, null);
+    const baseAlbum = up.albumId;
+    const noche = await createAlbum(bruno, "De noche");
+    await upload(bruno, noche);
+
+    type Notice = { id: string; kind: string; body: string | null; expiresAt?: string | null };
+    async function convId() {
+      const conv = await request("/api/conversations", bruno, json("POST", { userId: mia.id }));
+      assert.equal(conv.status, 200, await conv.clone().text());
+      return (await conv.json() as { id: string }).id;
+    }
+    async function notices(viewer: Account = bruno): Promise<Notice[]> {
+      const res = await request(`/api/conversations/${await convId()}/messages`, viewer);
+      assert.equal(res.status, 200);
+      const { messages } = await res.json() as { messages: Notice[] };
+      return messages.filter((m) => m.kind.startsWith("album"));
+    }
+
+    assert.deepEqual(await notices(), []);
+    // Compartir por 1 hora: un aviso que dice el plazo y hasta cuándo vale
+    assert.equal((await share(baseAlbum, mia, 1, bruno)).status, 200);
+    const [created] = await notices();
+    assert.deepEqual([created.kind, created.body], ["album", "1 hora"]);
+    assert.equal(typeof created.expiresAt, "string");
+    const left = new Date(created.expiresAt as string).getTime() - Date.now();
+    assert.ok(left > 50 * 60_000 && left <= 60 * 60_000);
+    // Del otro lado se ve lo mismo
+    assert.deepEqual((await notices(mia)).map((m) => [m.kind, m.body]), [["album", "1 hora"]]);
+    // Los avisos no se pueden desenviar
+    assert.equal((await request(`/api/conversations/${await convId()}/messages/${created.id}`, bruno, { method: "DELETE" })).status, 400);
+    assert.equal((await notices()).length, 1);
+    // Cambiar el plazo actualiza el mismo aviso, no suma otro
+    assert.equal((await share(baseAlbum, mia, 24, bruno)).status, 200);
+    assert.deepEqual((await notices()).map((m) => [m.id, m.kind, m.body]), [[created.id, "album", "24 horas"]]);
+    // Revocar lo marca como revocado, en el mismo lugar
+    assert.equal((await request(`/api/album/albums/${baseAlbum}/grants/${mia.id}`, bruno, { method: "DELETE" })).status, 200);
+    assert.deepEqual((await notices()).map((m) => [m.id, m.kind, m.body]), [[created.id, "album_revoked", "24 horas"]]);
+    // Volver a compartir lo reactiva, sin duplicar
+    assert.equal((await share(baseAlbum, mia, null, bruno)).status, 200);
+    assert.deepEqual((await notices()).map((m) => [m.id, m.kind, m.body]), [[created.id, "album", null]]);
+    // El otro álbum tiene su propio aviso; revocar uno no toca el otro
+    assert.equal((await share(noche, mia, 168, bruno)).status, 200);
+    assert.deepEqual((await notices()).map((m) => m.kind).sort(), ["album", "album"]);
+    assert.equal((await request(`/api/album/albums/${baseAlbum}/grants/${mia.id}`, bruno, { method: "DELETE" })).status, 200);
+    assert.deepEqual((await notices()).map((m) => m.kind).sort(), ["album", "album_revoked"]);
+    const revoked = (await db.select().from(schema.directMessage)).filter((m) => m.senderId === bruno.id && m.kind === "album_revoked");
+    assert.equal(revoked.length, 1);
+    assert.equal(revoked[0].albumId, baseAlbum);
+    // Quitarle todo revoca cada aviso por separado, sin juntar álbumes
+    assert.equal((await request(`/api/album/grants/${mia.id}`, bruno, { method: "DELETE" })).status, 200);
+    assert.deepEqual((await notices()).map((m) => m.kind).sort(), ["album_revoked", "album_revoked"]);
+  });
+
+  await t.test("los avisos viejos se juntan en uno al compartir y al revocar", async () => {
+    const tomas = await account("Tomas");
+    const nina = await account("Nina");
+    const up = await upload(tomas, null);
+    const conv = await request("/api/conversations", tomas, json("POST", { userId: nina.id }));
+    assert.equal(conv.status, 200, await conv.clone().text());
+    const { id } = await conv.json() as { id: string };
+    const { eq } = await import("drizzle-orm");
+    async function tomasNotices() {
+      return db.select().from(schema.directMessage).where(eq(schema.directMessage.senderId, tomas.id));
+    }
+    // Dos avisos de antes de guardar el álbum (sin albumId): compartir los junta directo
+    await db.insert(schema.directMessage).values([
+      { id: randomUUID(), conversationId: id, senderId: tomas.id, kind: "album", body: "1 hora", createdAt: new Date(Date.now() - 2000) },
+      { id: randomUUID(), conversationId: id, senderId: tomas.id, kind: "album", body: "1 hora", createdAt: new Date(Date.now() - 1000) },
+    ]);
+    assert.equal((await share(up.albumId, nina, 24, tomas)).status, 200);
+    const afterShare = await tomasNotices();
+    assert.equal(afterShare.length, 1);
+    assert.equal(afterShare[0].kind, "album");
+    assert.equal(afterShare[0].body, "24 horas");
+    assert.equal(afterShare[0].albumId, up.albumId);
+    // Otros dos duplicados: revocar también los junta en uno solo
+    await db.insert(schema.directMessage).values([
+      { id: randomUUID(), conversationId: id, senderId: tomas.id, kind: "album", body: "1 hora", createdAt: new Date(Date.now() - 2000) },
+      { id: randomUUID(), conversationId: id, senderId: tomas.id, kind: "album", body: "1 hora", createdAt: new Date(Date.now() - 1000) },
+    ]);
+    assert.equal((await request(`/api/album/albums/${up.albumId}/grants/${nina.id}`, tomas, { method: "DELETE" })).status, 200);
+    const afterRevoke = await tomasNotices();
+    assert.equal(afterRevoke.length, 1);
+    assert.equal(afterRevoke[0].kind, "album_revoked");
+    assert.equal(afterRevoke[0].albumId, up.albumId);
+    // Volver a compartir lo reactiva, y quitar todo lo revoca
+    assert.equal((await share(up.albumId, nina, null, tomas)).status, 200);
+    assert.equal((await tomasNotices()).length, 1);
+    assert.equal((await tomasNotices())[0].kind, "album");
+    assert.equal((await request("/api/album/grants", tomas, { method: "DELETE" })).status, 200);
+    assert.equal((await tomasNotices()).length, 1);
+    assert.equal((await tomasNotices())[0].kind, "album_revoked");
+  });
+
+  await t.test("el vencimiento marca el aviso al abrir el chat, y borrar el álbum lo revoca", async () => {
+    const eva = await account("Eva");
+    const leo = await account("Leo");
+    const up = await upload(eva, null);
+    const conv = await request("/api/conversations", eva, json("POST", { userId: leo.id }));
+    assert.equal(conv.status, 200, await conv.clone().text());
+    const { id } = await conv.json() as { id: string };
+    type Notice = { id: string; kind: string; body: string | null; expiresAt?: string | null; createdAt: string; readAt: string | null };
+    async function notices(viewer: Account): Promise<Notice[]> {
+      const res = await request(`/api/conversations/${id}/messages`, viewer);
+      assert.equal(res.status, 200);
+      const { messages } = await res.json() as { messages: Notice[] };
+      return messages.filter((m) => m.kind.startsWith("album"));
+    }
+    assert.equal((await share(up.albumId, leo, 1, eva)).status, 200);
+    assert.deepEqual((await notices(eva)).map((m) => m.kind), ["album"]);
+    // Activo con plazo: trae hasta cuándo vale
+    const [primero] = await notices(eva);
+    assert.equal(typeof primero.expiresAt, "string");
+    // Vence el plazo: al abrir el chat el aviso queda como vencido para los dos
+    const { and, eq } = await import("drizzle-orm");
+    await db.update(schema.albumGrant).set({ expiresAt: new Date(0) })
+      .where(and(eq(schema.albumGrant.albumId, up.albumId), eq(schema.albumGrant.granteeId, leo.id)));
+    assert.deepEqual((await notices(eva)).map((m) => m.kind), ["album_expired"]);
+    assert.deepEqual((await notices(leo)).map((m) => m.kind), ["album_expired"]);
+    // Vencido: es el mismo aviso, y ya no trae vencimiento
+    const [vencido] = await notices(eva);
+    assert.equal(vencido.id, primero.id);
+    assert.ok(!("expiresAt" in vencido));
+    // Lo envejezco y lo marco leído para probar que reactivar lo sube y lo desmarca
+    const viejo = new Date(Date.now() - 60_000);
+    await db.update(schema.directMessage).set({ createdAt: viejo })
+      .where(eq(schema.directMessage.id, vencido.id));
+    const leido = await request(`/api/conversations/${id}/read`, leo, json("POST", { messageIds: [vencido.id] }));
+    assert.equal(leido.status, 200);
+    assert.equal(((await leido.json()) as { changed: boolean }).changed, true);
+    const [antes] = await notices(eva);
+    assert.equal(antes.id, primero.id);
+    assert.ok(antes.readAt != null);
+    assert.equal(new Date(antes.createdAt).getTime(), viejo.getTime());
+    // Compartir de nuevo lo reactiva (mismo aviso, más nuevo, sin leer, sin límite), y borrar el álbum lo revoca
+    assert.equal((await share(up.albumId, leo, null, eva)).status, 200);
+    const [reactivado] = await notices(eva);
+    assert.deepEqual([reactivado.id, reactivado.kind], [primero.id, "album"]);
+    assert.ok(new Date(reactivado.createdAt).getTime() > new Date(antes.createdAt).getTime());
+    assert.equal(reactivado.readAt, null);
+    assert.ok("expiresAt" in reactivado);
+    assert.equal(reactivado.expiresAt, null);
+    assert.equal((await request(`/api/album/albums/${up.albumId}`, eva, { method: "DELETE" })).status, 200);
+    const [revocado] = await notices(eva);
+    assert.deepEqual([revocado.id, revocado.kind], [primero.id, "album_revoked"]);
+  });
+
+  await t.test("reacciones en avisos de álbum", async () => {
+    const romi = await account("Romi");
+    const gabi = await account("Gabi");
+    const up = await upload(romi, null);
+    const conv = await request("/api/conversations", romi, json("POST", { userId: gabi.id }));
+    assert.equal(conv.status, 200, await conv.clone().text());
+    const { id } = await conv.json() as { id: string };
+    type Notice = { id: string; kind: string };
+    async function noticeId(): Promise<Notice> {
+      const res = await request(`/api/conversations/${id}/messages`, romi);
+      assert.equal(res.status, 200);
+      const { messages } = await res.json() as { messages: Notice[] };
+      const found = messages.find((m) => m.kind.startsWith("album"));
+      assert.ok(found);
+      return found;
+    }
+    async function react(who: Account, messageId: string, kind: string | null = "fuego") {
+      const res = await request(`/api/reactions/dm/${messageId}`, who, json("PUT", { kind }));
+      assert.equal(res.status, 200, await res.clone().text());
+      return await res.json() as { reactions: { kind: string; by: string[] }[] };
+    }
+    // Aviso activo: reaccionan los dos
+    assert.equal((await share(up.albumId, gabi, 1, romi)).status, 200);
+    const active = await noticeId();
+    assert.equal(active.kind, "album");
+    assert.deepEqual((await react(gabi, active.id)).reactions, [{ kind: "fuego", by: [gabi.id] }]);
+    assert.deepEqual((await react(romi, active.id)).reactions, [{ kind: "fuego", by: [gabi.id, romi.id] }]);
+    // Aviso revocado: también se puede reaccionar
+    assert.equal((await request(`/api/album/albums/${up.albumId}/grants/${gabi.id}`, romi, { method: "DELETE" })).status, 200);
+    const revoked = await noticeId();
+    assert.equal(revoked.kind, "album_revoked");
+    assert.equal(revoked.id, active.id);
+    const afterRevoke = await react(gabi, revoked.id, "ojitos");
+    assert.deepEqual(afterRevoke.reactions.map((r) => r.kind).sort(), ["fuego", "ojitos"]);
+    // Aviso vencido: también se puede reaccionar
+    assert.equal((await share(up.albumId, gabi, 1, romi)).status, 200);
+    const { and, eq } = await import("drizzle-orm");
+    await db.update(schema.albumGrant).set({ expiresAt: new Date(0) })
+      .where(and(eq(schema.albumGrant.albumId, up.albumId), eq(schema.albumGrant.granteeId, gabi.id)));
+    const expired = await noticeId();
+    assert.equal(expired.kind, "album_expired");
+    const afterExpire = await react(romi, expired.id, "chispa");
+    assert.deepEqual(afterExpire.reactions.map((r) => r.kind).sort(), ["chispa", "ojitos"]);
+  });
+
+  await t.test("los avisos sin álbum no se vencen si hay dos álbumes", async () => {
+    const pau = await account("Pau");
+    const seba = await account("Seba");
+    const up = await upload(pau, null);
+    const baseAlbum = up.albumId;
+    const noche = await createAlbum(pau, "De noche");
+    await upload(pau, noche);
+    const conv = await request("/api/conversations", pau, json("POST", { userId: seba.id }));
+    assert.equal(conv.status, 200, await conv.clone().text());
+    const { id } = await conv.json() as { id: string };
+    // Dos avisos legacy sin albumId: no se sabe de cuál álbum son
+    const legacyIds = [randomUUID(), randomUUID()];
+    await db.insert(schema.directMessage).values([
+      { id: legacyIds[0], conversationId: id, senderId: pau.id, kind: "album", body: "1 hora", createdAt: new Date(Date.now() - 2000) },
+      { id: legacyIds[1], conversationId: id, senderId: pau.id, kind: "album", body: "1 hora", createdAt: new Date(Date.now() - 1000) },
+    ]);
+    type Notice = { id: string; kind: string; body: string | null; expiresAt?: string | null };
+    async function notices(): Promise<Notice[]> {
+      const res = await request(`/api/conversations/${id}/messages`, pau);
+      assert.equal(res.status, 200);
+      const { messages } = await res.json() as { messages: Notice[] };
+      return messages.filter((m) => m.kind.startsWith("album"));
+    }
+    async function legacyRows() {
+      const { inArray } = await import("drizzle-orm");
+      return db.select().from(schema.directMessage).where(inArray(schema.directMessage.id, legacyIds));
+    }
+    // Compartir un álbum crea su propio aviso sin tocar los legacy
+    assert.equal((await share(baseAlbum, seba, 1, pau)).status, 200);
+    let all = await notices();
+    assert.equal(all.length, 3);
+    const withExpiry = all.filter((m) => "expiresAt" in m);
+    assert.equal(withExpiry.length, 1);
+    assert.equal(withExpiry[0].kind, "album");
+    assert.equal(typeof withExpiry[0].expiresAt, "string");
+    assert.deepEqual(all.map((m) => m.kind).sort(), ["album", "album", "album"]);
+    assert.ok((await legacyRows()).every((m) => m.kind === "album" && m.albumId == null));
+    // Vencer ese álbum marca solo su aviso; los legacy siguen activos
+    const { and, eq } = await import("drizzle-orm");
+    await db.update(schema.albumGrant).set({ expiresAt: new Date(0) })
+      .where(and(eq(schema.albumGrant.albumId, baseAlbum), eq(schema.albumGrant.granteeId, seba.id)));
+    all = await notices();
+    assert.equal(all.length, 3);
+    assert.deepEqual(all.map((m) => m.kind).sort(), ["album", "album", "album_expired"]);
+    assert.ok((await legacyRows()).every((m) => m.kind === "album" && m.albumId == null));
+  });
+
+  await t.test("borrar un álbum con el acceso vencido y limpiado igual revoca el aviso", async () => {
+    const cleo = await account("Cleo");
+    const dario = await account("Dario");
+    const up = await upload(cleo, null);
+    const conv = await request("/api/conversations", cleo, json("POST", { userId: dario.id }));
+    assert.equal(conv.status, 200, await conv.clone().text());
+    const { id } = await conv.json() as { id: string };
+    assert.equal((await share(up.albumId, dario, 1, cleo)).status, 200);
+    // Vence el plazo y se limpia el acceso: ya no queda fila en album_grant
+    const { and, eq } = await import("drizzle-orm");
+    await db.update(schema.albumGrant).set({ expiresAt: new Date(0) })
+      .where(and(eq(schema.albumGrant.albumId, up.albumId), eq(schema.albumGrant.granteeId, dario.id)));
+    assert.equal((await request("/api/album/grants", cleo)).status, 200);
+    assert.equal((await db.select().from(schema.albumGrant)).filter((g) => g.albumId === up.albumId).length, 0);
+    // Borrar el álbum igual marca el aviso como revocado (no queda activo sin álbum)
+    assert.equal((await request(`/api/album/albums/${up.albumId}`, cleo, { method: "DELETE" })).status, 200);
+    const res = await request(`/api/conversations/${id}/messages`, cleo);
+    assert.equal(res.status, 200);
+    const { messages } = await res.json() as { messages: { kind: string }[] };
+    assert.deepEqual(messages.filter((m) => m.kind.startsWith("album")).map((m) => m.kind), ["album_revoked"]);
+  });
+
+  await t.test("un solo aviso por álbum aunque se comparta dos veces a la vez", async () => {
+    const noa = await account("Noa");
+    const ivan = await account("Ivan");
+    const up = await upload(noa, null);
+    const conv = await request("/api/conversations", noa, json("POST", { userId: ivan.id }));
+    assert.equal(conv.status, 200, await conv.clone().text());
+    const { id } = await conv.json() as { id: string };
+    const { eq } = await import("drizzle-orm");
+    // El índice único no deja duplicar el aviso directo en la base
+    const dupe = { conversationId: id, senderId: noa.id, kind: "album", albumId: up.albumId };
+    await db.insert(schema.directMessage).values({ ...dupe, id: randomUUID() });
+    await assert.rejects(async () => {
+      await db.insert(schema.directMessage).values({ ...dupe, id: randomUUID() });
+    });
+    await db.delete(schema.directMessage).where(eq(schema.directMessage.conversationId, id));
+    // Doble submit a la vez: los dos andan y queda un solo aviso
+    const [first, second] = await Promise.all([
+      share(up.albumId, ivan, 1, noa),
+      share(up.albumId, ivan, 24, noa),
+    ]);
+    assert.equal(first.status, 200, await first.clone().text());
+    assert.equal(second.status, 200, await second.clone().text());
+    const both = await db.select().from(schema.directMessage).where(eq(schema.directMessage.senderId, noa.id));
+    assert.equal(both.length, 1);
+    assert.equal(both[0].albumId, up.albumId);
+    // Un aviso viejo sin álbum más nuevo que el del álbum no rompe al compartir de nuevo
+    await db.update(schema.directMessage).set({ createdAt: new Date(Date.now() - 60_000) })
+      .where(eq(schema.directMessage.id, both[0].id));
+    await db.insert(schema.directMessage).values({
+      id: randomUUID(), conversationId: id, senderId: noa.id, kind: "album", body: "1 hora",
+    });
+    assert.equal((await share(up.albumId, ivan, 168, noa)).status, 200);
+    const after = await db.select().from(schema.directMessage).where(eq(schema.directMessage.senderId, noa.id));
+    assert.equal(after.length, 1);
+    assert.deepEqual([after[0].kind, after[0].body, after[0].albumId], ["album", "7 días", up.albumId]);
+  });
+
+  await t.test("borrar un álbum conserva su aviso y el del otro álbum", async () => {
+    const owner = await account("Lina");
+    const guest = await account("Mateo");
+    const first = (await upload(owner, null)).albumId;
+    const second = await createAlbum(owner, "Segundo");
+    const { eq } = await import("drizzle-orm");
+    const notices = () => db.select().from(schema.directMessage).where(eq(schema.directMessage.senderId, owner.id));
+    assert.equal((await share(first, guest, 1, owner)).status, 200);
+    assert.equal((await share(second, guest, null, owner)).status, 200);
+    const before = new Map((await notices()).map((row) => [row.albumId, row.id]));
+    assert.equal((await request(`/api/album/albums/${second}`, owner, { method: "DELETE" })).status, 200);
+    assert.equal((await share(first, guest, 24, owner)).status, 200);
+    const after = new Map((await notices()).map((row) => [row.albumId, row]));
+    assert.equal(after.size, 2);
+    assert.equal(after.get(first)?.id, before.get(first));
+    assert.equal(after.get(second)?.id, before.get(second));
+    assert.equal(after.get(first)?.kind, "album");
+    assert.equal(after.get(second)?.kind, "album_revoked");
+  });
+
+  await t.test("el resumen no queda rancio: al vencer muestra el aviso vencido", async () => {
+    const uli = await account("Uli");
+    const vera = await account("Vera");
+    const up = await upload(uli, null);
+    const conv = await request("/api/conversations", uli, json("POST", { userId: vera.id }));
+    assert.equal(conv.status, 200, await conv.clone().text());
+    const { id } = await conv.json() as { id: string };
+    type Summary = { last: { id: string; kind: string; expiresAt?: string | null; readAt: string | null } };
+    async function summary(viewer: Account): Promise<Summary> {
+      const res = await request(`/api/conversations/${id}/summary`, viewer);
+      assert.equal(res.status, 200, await res.clone().text());
+      return await res.json() as Summary;
+    }
+    assert.equal((await share(up.albumId, vera, 1, uli)).status, 200);
+    const fresh = await summary(uli);
+    assert.equal(fresh.last.kind, "album");
+    assert.equal(typeof fresh.last.expiresAt, "string");
+    const read = await request(`/api/conversations/${id}/read`, vera, json("POST", { messageIds: [fresh.last.id] }));
+    assert.equal(read.status, 200);
+    // Al vencer, la bandeja inicial y el resumen muestran el mismo estado.
+    const { and, eq } = await import("drizzle-orm");
+    await db.update(schema.albumGrant).set({ expiresAt: new Date(0) })
+      .where(and(eq(schema.albumGrant.albumId, up.albumId), eq(schema.albumGrant.granteeId, vera.id)));
+    const inbox = await request("/api/conversations", vera);
+    assert.equal(inbox.status, 200);
+    assert.equal(((await inbox.json()) as Summary[])[0].last.kind, "album_expired");
+    assert.equal((await summary(uli)).last.kind, "album_expired");
+    assert.equal((await summary(vera)).last.kind, "album_expired");
+    const [stored] = await db.select().from(schema.directMessage).where(eq(schema.directMessage.id, fresh.last.id));
+    assert.equal(stored.kind, "album");
+    assert.ok(stored.readAt);
+    assert.equal((await share(up.albumId, vera, 24, uli)).status, 200);
+    const { last } = await summary(vera);
+    assert.equal(last.id, fresh.last.id);
+    assert.equal(last.kind, "album");
+    assert.equal(last.readAt, null);
   });
 });

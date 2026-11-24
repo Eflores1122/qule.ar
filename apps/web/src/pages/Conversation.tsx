@@ -5,13 +5,24 @@ import { api, getSocket, upload, type Author, type Dm, type ReactionEvent } from
 import { myReaction, ReactionBar, ReactionPicker } from "../components/Reactions";
 import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
-import { BackIcon, ImageIcon, LockIcon, SendIcon, TimerIcon } from "../components/Icons";
+import { BackIcon, DotsIcon, ImageIcon, LockIcon, SendIcon, TimerIcon } from "../components/Icons";
 import { useSectionBack } from "../useSectionBack";
 import { useMessageMenuPosition } from "../useMessageMenuPosition";
 import { SavedPhrasesButton, SavedPhrasesMenu } from "../features/phrases/SavedPhrases";
 import { useDraft } from "../features/chat/useDraft";
 import { batchReadReceipts } from "../features/messages/readReceipts";
+import { albumExpiryLabel, albumNoticeKind, useAlbumNoticeTime } from "../features/messages/albumNotices";
 import { ShareAlbumMenu } from "../features/chat/ShareAlbumMenu";
+import { ChatPhotoViewer } from "../features/messages/ChatPhotoViewer";
+
+/** Texto corto para la cita en el composer y en la burbuja. */
+function replyPreview(m: Dm) {
+  const body = m.body?.trim() || null;
+  if (m.kind === "album") return body ? `Álbum privado · ${body}` : "Álbum privado";
+  if (m.expiring) return body ? `Foto temporal · ${body}` : "Foto temporal";
+  if (m.kind === "photo" || m.photo) return body ?? "Foto";
+  return body ?? "Mensaje borrado";
+}
 
 export function Conversation() {
   const { id = "" } = useParams();
@@ -20,7 +31,7 @@ export function Conversation() {
   const goBack = useSectionBack("/mensajes");
   const [other, setOther] = useState<Author | null>(null);
   const [messages, setMessages] = useState<Dm[]>([]);
-  const [seen, setSeen] = useState<{ conversationId: string; ids: Set<string>; through?: Pick<Dm, "createdAt" | "id"> }>();
+  const [seen, setSeen] = useState<{ conversationId: string; readAtById: Map<string, string>; through?: Pick<Dm, "createdAt" | "id"> }>();
   const [text, setText] = useDraft(`dm:${me?.user.id ?? ""}:${id}`);
   const [phrasesOpen, setPhrasesOpen] = useState(false);
   const [error, setError] = useState("");
@@ -28,18 +39,24 @@ export function Conversation() {
   const [typing, setTyping] = useState(false);
   const [photoMenu, setPhotoMenu] = useState<false | "options" | "album">(false);
   const [msgMenu, setMsgMenu] = useState<string | null>(null);
+  const [replyTo, setReplyTo] = useState<Dm | null>(null);
+  const [photoMessageId, setPhotoMessageId] = useState<string | null>(null);
   const [viewer, setViewer] = useState<{ src: string; seconds: number } | null>(null);
   const listRef = useRef<HTMLDivElement>(null);
-  const positionMessageMenu = useMessageMenuPosition(listRef);
+  const positionMessageMenu = useMessageMenuPosition(listRef, setMsgMenu);
   const stickToBottom = useRef(true);
   const fileRef = useRef<HTMLInputElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
   const expiringNext = useRef(false);
   const typingTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const myId = me?.user.id;
+  const albumNoticeTime = useAlbumNoticeTime(messages);
 
   useEffect(() => {
+    setPhotoMessageId(null);
     let alive = true;
+    setReplyTo(null);
+    setMessages([]);
     let beforeHistory: Array<(messages: Dm[]) => Dm[]> | null = [];
     const receipts = batchReadReceipts(id);
     const applyMessageUpdate = (update: (messages: Dm[]) => Dm[]) => {
@@ -67,17 +84,33 @@ export function Conversation() {
       applyMessageUpdate((list) => (list.some((x) => x.id === m.id) ? list : [...list, m]));
       if (m.senderId !== myId && !m.readAt) receipts.schedule(m.id);
     };
+    // Un mensaje que cambió (el aviso de álbum muestra siempre el estado actual; al reactivarse sube al final).
+    const onUpdated = (m: Dm) => {
+      if (m.conversationId !== id) return;
+      applyMessageUpdate((list) => (list.some((x) => x.id === m.id)
+        ? list.map((x) => (x.id === m.id ? m : x)).sort(compareDmOrder)
+        : [...list, m].sort(compareDmOrder)));
+      if (m.senderId !== myId && !m.readAt) receipts.schedule(m.id);
+    };
     const onRead = (p: DmReadReceipt) => {
       if (p.audience === "reader" || p.conversationId !== id || !p.messageIds) return;
       setSeen((previous) => {
         const current = previous?.conversationId === id ? previous : undefined;
         const through = p.through && (!current?.through || compareDmOrder(p.through, current.through) > 0)
           ? p.through : current?.through;
-        return { conversationId: id, ids: new Set([...(current?.ids ?? []), ...p.messageIds]), through };
+        const readAtById = new Map(current?.readAtById);
+        for (const messageId of p.messageIds) {
+          if ((readAtById.get(messageId) ?? "") < p.readAt) readAtById.set(messageId, p.readAt);
+        }
+        return { conversationId: id, readAtById, through };
       });
     };
     const onDeleted = (p: { conversationId: string; id: string }) => {
-      if (p.conversationId === id) applyMessageUpdate((list) => list.filter((m) => m.id !== p.id));
+      if (p.conversationId !== id) return;
+      setReplyTo((r) => (r?.id === p.id ? null : r));
+      applyMessageUpdate((list) => list
+        .filter((m) => m.id !== p.id)
+        .map((m) => (m.replyTo?.id === p.id ? { ...m, replyTo: { ...m.replyTo, authorName: null, body: null } } : m)));
     };
     const onOpened = (p: { conversationId: string; id: string }) => {
       if (p.conversationId === id) applyMessageUpdate((list) => list.map((m) => (m.id === p.id ? { ...m, opened: true } : m)));
@@ -94,6 +127,7 @@ export function Conversation() {
     };
     s.on("reaction", onReaction);
     s.on(DM_EVENTS.message, onMsg);
+    s.on(DM_EVENTS.updated, onUpdated);
     s.on(DM_EVENTS.read, onRead);
     s.on(DM_EVENTS.deleted, onDeleted);
     s.on(DM_EVENTS.opened, onOpened);
@@ -103,6 +137,7 @@ export function Conversation() {
       receipts.close();
       s.off("reaction", onReaction);
       s.off(DM_EVENTS.message, onMsg);
+      s.off(DM_EVENTS.updated, onUpdated);
       s.off(DM_EVENTS.read, onRead);
       s.off(DM_EVENTS.deleted, onDeleted);
       s.off(DM_EVENTS.opened, onOpened);
@@ -147,19 +182,38 @@ export function Conversation() {
     if (v.trim()) getSocket().emit(DM_EVENTS.typing, { conversationId: id });
   }
 
+  function startReply(m: Dm) {
+    setMsgMenu(null);
+    setPhotoMenu(false);
+    setPhrasesOpen(false);
+    setReplyTo(m);
+    inputRef.current?.focus();
+  }
+
+  function jumpTo(messageId: string) {
+    const el = document.getElementById(`dm-${messageId}`);
+    if (!el) return;
+    el.scrollIntoView({ behavior: "smooth", block: "center" });
+    el.classList.add("bubble--flash");
+    setTimeout(() => el.classList.remove("bubble--flash"), 1400);
+  }
+
   async function send(e?: React.FormEvent) {
     e?.preventDefault();
     const body = text.trim();
     if (!body) return;
+    const wasReplying = replyTo;
     // Mandar con el botón le saca el foco al campo y cierra el teclado. Se lo devolvemos.
     inputRef.current?.focus();
     setError("");
     setText("");
+    setReplyTo(null);
     try {
-      const m = await api<Dm>(`/conversations/${id}/messages`, { method: "POST", json: { body } });
+      const m = await api<Dm>(`/conversations/${id}/messages`, { method: "POST", json: { body, replyToId: wasReplying?.id } });
       setMessages((list) => (list.some((x) => x.id === m.id) ? list : [...list, m]));
     } catch (err) {
       setText((t) => t || body);
+      if (wasReplying) setReplyTo(wasReplying);
       setError((err as Error).message);
     }
   }
@@ -171,12 +225,17 @@ export function Conversation() {
   }
 
   async function sendPhoto(file: File) {
+    const wasReplying = replyTo;
     setSending(true);
     setError("");
+    setReplyTo(null);
+    const extra: Record<string, string> = expiringNext.current ? { expiring: "1" } : {};
+    if (wasReplying) extra.replyToId = wasReplying.id;
     try {
-      const m = await upload<Dm>(`/conversations/${id}/messages`, file, expiringNext.current ? { expiring: "1" } : {});
+      const m = await upload<Dm>(`/conversations/${id}/messages`, file, extra);
       setMessages((list) => (list.some((x) => x.id === m.id) ? list : [...list, m]));
     } catch (err) {
+      if (wasReplying) setReplyTo(wasReplying);
       setError((err as Error).message);
     } finally {
       setSending(false);
@@ -197,13 +256,18 @@ export function Conversation() {
   async function unsend(m: Dm) {
     setMsgMenu(null);
     await api(`/conversations/${id}/messages/${m.id}`, { method: "DELETE" }).catch(() => {});
-    setMessages((list) => list.filter((x) => x.id !== m.id));
+    setReplyTo((r) => (r?.id === m.id ? null : r));
+    setMessages((list) => list
+      .filter((x) => x.id !== m.id)
+      .map((x) => (x.replyTo?.id === m.id ? { ...x, replyTo: { ...x.replyTo, authorName: null, body: null } } : x)));
   }
 
+  const loadedMessageIds = new Set(messages.map((m) => m.id));
   const lastMine = [...messages].reverse().find((m) => m.senderId === myId);
+  const openPhoto = messages.find((m) => m.id === photoMessageId && m.conversationId === id)?.photo;
 
   const lastSeen = lastMine && (lastMine.readAt || (seen?.conversationId === id &&
-    (seen.ids.has(lastMine.id) || (seen.through && compareDmOrder(lastMine, seen.through) <= 0))));
+    ((seen.readAtById.get(lastMine.id) ?? "") >= lastMine.createdAt || (seen.through && compareDmOrder(lastMine, seen.through) <= 0))));
 
   return (
     <div className="chat">
@@ -220,18 +284,43 @@ export function Conversation() {
         )}
       </header>
 
-      <div className="chat__list chat__list--dm" role="log" aria-label="Mensajes" ref={listRef} onScroll={onListScroll} onClick={() => setMsgMenu(null)}>
+      <div className="chat__list chat__list--dm" role="log" aria-label="Mensajes" ref={listRef} onScroll={onListScroll}>
         {messages.map((m) => {
           const mine = m.senderId === myId;
+          const kind = albumNoticeKind(m, albumNoticeTime);
+          const albumNotice = kind === "album" || kind === "album_revoked" || kind === "album_expired";
+          const albumText = <><LockIcon /> {mine ? "Le compartiste tu álbum privado" : "Te compartió su álbum privado"}{m.body ? ` por ${m.body}` : ""}</>;
+          const expiry = albumExpiryLabel(m, albumNoticeTime);
+          const quoted = m.replyTo;
           return (
-            <div key={m.id} className={`bubble ${mine ? "bubble--mine" : ""} ${m.kind === "album" ? "bubble--album" : ""}`}>
-              {m.kind === "album" ? (
-                mine ? (
-                  <p><LockIcon /> Le compartiste tu álbum privado{m.body ? ` por ${m.body}` : ""}</p>
-                ) : (
-                  <Link to={`/perfil/${m.senderId}?album=1`} className="album-msg">
-                    <LockIcon /> Te compartió su álbum privado{m.body ? ` por ${m.body}` : ""} · <u>Ver</u>
+            <div id={`dm-${m.id}`} key={m.id} className={`bubble ${mine ? "bubble--mine" : ""} ${albumNotice ? "bubble--album" : ""}`}>
+              {quoted && (quoted.authorName && loadedMessageIds.has(quoted.id) ? (
+                <button
+                  type="button"
+                  className="quote"
+                  aria-label={`Ir al mensaje citado de ${quoted.authorName}`}
+                  onClick={() => jumpTo(quoted.id)}
+                >
+                  <span className="quote__name">{quoted.authorName}</span>
+                  <span className="quote__body">{quoted.body ?? "Mensaje borrado"}</span>
+                </button>
+              ) : (
+                <div className="quote">
+                  <span className="quote__name">{quoted.authorName ?? "Mensaje borrado"}</span>
+                  {quoted.authorName && quoted.body && <span className="quote__body">{quoted.body}</span>}
+                </div>
+              ))}
+              {kind === "album" || kind === "album_expired" ? (
+                kind === "album" && !mine ? (
+                  <Link to={`/perfil/${m.senderId}${m.albumId ? `?album=${encodeURIComponent(m.albumId)}` : ""}`} className="album-msg">
+                    {albumText} · <u>Ver</u>
                   </Link>
+                ) : <p>{albumText}</p>
+              ) : kind === "album_revoked" ? (
+                mine ? (
+                  <p><LockIcon /> Le dejaste de compartir tu álbum privado</p>
+                ) : (
+                  <p><LockIcon /> Te dejó de compartir su álbum privado</p>
                 )
               ) : m.expiring ? (
                 mine ? (
@@ -245,25 +334,33 @@ export function Conversation() {
                 )
               ) : (
                 <>
-                  {m.photo && <img className="bubble__photo" src={m.photo} alt="Foto enviada" loading="lazy" />}
+                  {m.photo && (
+                    <button type="button" className="bubble__photo-button" aria-label="Abrir foto" onClick={() => setPhotoMessageId(m.id)}>
+                      <img className="bubble__photo" src={m.photo} alt="" loading="lazy" />
+                    </button>
+                  )}
                   {m.body && <p>{m.body}</p>}
                 </>
               )}
-              <time>{new Date(m.createdAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}</time>
+              <div className="bubble__meta">
+                {expiry && `${expiry} · `}
+                <time dateTime={m.createdAt}>{new Date(m.createdAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}</time>
+              </div>
               <ReactionBar reactions={m.reactions ?? []} myId={myId} mine={mine} onToggle={(k) => react(m, k)} />
-              {m.kind !== "album" && (
+              {(
                 <>
                   <button
-                    className="bubble__more"
-                    aria-label="Reaccionar u opciones del mensaje"
-                    onClick={(e) => { e.stopPropagation(); setMsgMenu(msgMenu === m.id ? null : m.id); }}
+                    className="iconbtn bubble__more"
+                    aria-label="Reaccionar u opciones del mensaje" aria-expanded={msgMenu === m.id} aria-controls={msgMenu === m.id ? `message-options-${m.id}` : undefined}
+                    onClick={() => setMsgMenu(msgMenu === m.id ? null : m.id)}
                   >
-                    ⋯
+                    <DotsIcon />
                   </button>
                   {msgMenu === m.id && (
-                    <div className={`menu menu--bubble ${mine ? "" : "menu--bubble-theirs"}`} role="menu" ref={positionMessageMenu} onClick={(e) => e.stopPropagation()}>
+                    <div className={`menu menu--bubble ${mine ? "" : "menu--bubble-theirs"}`} id={`message-options-${m.id}`} role="menu" ref={positionMessageMenu}>
                       <ReactionPicker current={myReaction(m.reactions ?? [], myId)} onPick={(k) => react(m, k)} />
-                      {mine && <button role="menuitem" className="danger" onClick={() => unsend(m)}>Desenviar (se borra para los dos)</button>}
+                      {!albumNotice && <button role="menuitem" onClick={() => startReply(m)}>Responder</button>}
+                      {mine && !albumNotice && <button role="menuitem" className="danger" onClick={() => unsend(m)}>Desenviar (se borra para los dos)</button>}
                     </div>
                   )}
                 </>
@@ -295,11 +392,32 @@ export function Conversation() {
         {phrasesOpen && (
           <SavedPhrasesMenu text={text} onClose={() => setPhrasesOpen(false)} onPick={(p) => { onType(p); setPhrasesOpen(false); }} />
         )}
+        {replyTo && (
+          <div className="composer__reply">
+            <div className="quote quote--static">
+              <span className="quote__name">Respondiendo a {replyTo.senderId === myId ? "tu mensaje" : other?.name ?? "ese mensaje"}</span>
+              <span className="quote__body">{replyPreview(replyTo)}</span>
+            </div>
+            <button
+              type="button"
+              className="iconbtn"
+              aria-label="Cancelar respuesta"
+              onClick={() => {
+                setReplyTo(null);
+                inputRef.current?.focus();
+              }}
+            >✕</button>
+          </div>
+        )}
         <div className="composer__row">
-          <button type="button" className="iconbtn" aria-label="Mandar foto" aria-expanded={Boolean(photoMenu)} disabled={sending} onClick={() => { setPhotoMenu((v) => (v ? false : "options")); setPhrasesOpen(false); }}>
-            <ImageIcon />
-          </button>
-          <SavedPhrasesButton open={phrasesOpen} onToggle={() => { setPhrasesOpen((v) => !v); setPhotoMenu(false); }} />
+          <div className="composer__action">
+            <button type="button" className="iconbtn" aria-label="Mandar foto" aria-expanded={Boolean(photoMenu)} disabled={sending} onClick={() => { setPhotoMenu((v) => (v ? false : "options")); setPhrasesOpen(false); }}>
+              <ImageIcon />
+            </button>
+          </div>
+          <div className="composer__action">
+            <SavedPhrasesButton open={phrasesOpen} onToggle={() => { setPhrasesOpen((v) => !v); setPhotoMenu(false); }} />
+          </div>
           <input
             ref={fileRef}
             type="file"
@@ -321,16 +439,23 @@ export function Conversation() {
             value={text}
             onChange={(e) => onType(e.target.value)}
             onKeyDown={(e) => {
+              if (e.key === "Escape" && replyTo) {
+                e.preventDefault();
+                setReplyTo(null);
+              }
               if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 send();
               }
             }}
           />
-          <button className="sendbtn" aria-label="Mandar" disabled={!text.trim()} onMouseDown={(e) => e.preventDefault()}><SendIcon /></button>
+          <div className="composer__action">
+            <button className="sendbtn" aria-label="Mandar" disabled={!text.trim()} onMouseDown={(e) => e.preventDefault()}><SendIcon /></button>
+          </div>
         </div>
       </form>
 
+      {openPhoto && <ChatPhotoViewer src={openPhoto} onClose={() => setPhotoMessageId(null)} />}
       {viewer && <ExpiringViewer src={viewer.src} seconds={viewer.seconds} onClose={() => setViewer(null)} />}
     </div>
   );

@@ -6,7 +6,7 @@ type CloseWatcherConstructor = new () => EventTarget & { destroy(): void };
 export function useSectionBack(parent: string) {
   const navigate = useNavigate();
   const { pathname, search } = useLocation();
-  const fromNotification = (pathname === "/toques" || /^\/mensajes\/[^/]+$/.test(pathname)) &&
+  const fromNotification = (pathname === "/toques" || /^\/mensajes\/[^/]+$/.test(pathname) || /^\/grupos\/[^/]+(?:\/solicitudes)?$/.test(pathname)) &&
     new URLSearchParams(search).get("aviso") === "1";
 
   useEffect(() => {
@@ -20,5 +20,7 @@ export function useSectionBack(parent: string) {
     return () => watcher.destroy();
   }, [fromNotification, pathname, navigate, parent]);
 
-  return () => navigate(parent, { replace: fromNotification });
+  // Si se llegó desde otra pantalla de la app, Volver vuelve a esa misma vista (con su búsqueda y su scroll).
+  // Si no hay pantalla anterior (se abrió desde una notificación o un link), va a la sección.
+  return () => (window.history.state?.idx > 0 && !fromNotification ? navigate(-1) : navigate(parent, { replace: fromNotification }));
 }

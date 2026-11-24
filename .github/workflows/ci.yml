@@ -45,6 +45,8 @@ jobs:
       - run: npm ci --no-audit --no-fund
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+        env:
+          APP_URL: https://qule-staging.example.test/
       - uses: actions/upload-artifact@v7
         if: failure()
         with:

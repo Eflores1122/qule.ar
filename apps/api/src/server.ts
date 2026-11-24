@@ -10,6 +10,7 @@ import { HTTPException } from "hono/http-exception";
 import { auth } from "./auth.js";
 import { closeDb, db, runMigrations, schema } from "./db/index.js";
 import { encryptLegacyHealth } from "./db/health.js";
+import { encryptLegacyMessages } from "./db/messages.js";
 import { checkDataKey } from "./crypt.js";
 import { env } from "./env.js";
 import { APP_NAME } from "./brand.js";
@@ -39,6 +40,10 @@ if (leader) {
   await runMigrations();
   const encryptedProfiles = await encryptLegacyHealth(db);
   if (encryptedProfiles) console.log(`Datos de salud cifrados: ${encryptedProfiles} perfiles`);
+  // Mensajes privados y copias de reportes de antes del cifrado: de a tandas y en segundo plano
+  void encryptLegacyMessages(db)
+    .then((n) => n && console.log(`Mensajes cifrados: ${n}`))
+    .catch((e) => console.error("encryptLegacyMessages", e));
 
   // Fotos temporales ya vistas: se borran al arrancar (por si el API se reinició justo después de abrir una) y cada minuto
   await sweepExpiredPhotos().catch((e) => console.error("sweepExpiredPhotos", e));

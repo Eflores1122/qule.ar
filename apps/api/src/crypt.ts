@@ -5,11 +5,13 @@ import { customType } from "drizzle-orm/pg-core";
 import { env } from "./env.js";
 
 /**
- * Cifrado de datos sensibles en la base (hoy: estado serológico y fecha del último test).
+ * Cifrado de datos sensibles en la base: estado serológico y fecha del último test, mensajes privados y las
+ * copias de los reportes.
  * AES-256-GCM con la clave DATA_KEY. Quien vea la base o un backup sin la clave no puede leerlos.
  *
  * Formato guardado: "v1:" + base64(iv de 12 bytes | tag de 16 bytes | texto cifrado).
- * Un valor sin el prefijo es de antes del cifrado: se lee tal cual y se cifra al arrancar (encryptLegacyHealth).
+ * Un valor sin el prefijo es de antes del cifrado: se lee tal cual y se cifra al arrancar (encryptLegacyHealth,
+ * encryptLegacyMessages).
  *
  * Si se pierde DATA_KEY, esos datos no se pueden recuperar. Ver docs/DEPLOY.md.
  */
@@ -58,9 +60,27 @@ export function decrypt(stored: string): string {
   return Buffer.concat([d.update(raw.subarray(28)), d.final()]).toString("utf8");
 }
 
+/**
+ * Forma de un valor cifrado: el prefijo y al menos 28 bytes (iv + tag) en base64. Un mensaje viejo, sin cifrar,
+ * puede empezar con "v1:" porque lo escribió alguien; con esto se lo distingue de uno cifrado.
+ */
+export const ENCRYPTED_SHAPE = /^v1:[A-Za-z0-9+/]{38,}={0,2}$/;
+
 /** Columna de texto que se guarda cifrada y se lee en claro. No se puede buscar ni ordenar por ella. */
 export const encryptedText = customType<{ data: string; driverData: string }>({
   dataType: () => "text",
   toDriver: (v) => encrypt(v),
   fromDriver: (v) => decrypt(v),
+});
+
+/**
+ * Como encryptedText, para textos que escribe la gente (mensajes privados, copias de reportes).
+ * Mientras se cifran los mensajes viejos (encryptLegacyMessages), uno sin cifrar que empiece con "v1:" se lee
+ * tal cual en vez de fallar. Uno con forma de cifrado que no se puede descifrar (clave equivocada) sí falla.
+ * Igual que encryptedText: no se puede buscar, comparar ni ordenar por esta columna en la base.
+ */
+export const encryptedMessageText = customType<{ data: string; driverData: string }>({
+  dataType: () => "text",
+  toDriver: (v) => encrypt(v),
+  fromDriver: (v) => (ENCRYPTED_SHAPE.test(v) ? decrypt(v) : v),
 });

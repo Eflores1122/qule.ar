@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
+import { loadedCount, useRememberScroll } from "../features/navigation/viewMemory";
 import { api, getSocket, ROLE_LABEL, upload, type GroupListing } from "../api";
 import { GroupAvatar } from "../components/GroupAvatar";
 import { PhotoPicker } from "../components/GroupPhoto";
@@ -21,7 +22,11 @@ export function Groups() {
   const [all, setAll] = useState<GroupListing[] | null>(null);
   const [nextOffset, setNextOffset] = useState<number | null>(null);
   const [loadingMore, setLoadingMore] = useState(false);
-  const [q, setQ] = useState("");
+  // La búsqueda va en la dirección: al volver de un grupo sigue ahí
+  const q = params.get("q") ?? "";
+  const setQ = (value: string) => setParams(value ? { ver: "todos", q: value } : { ver: "todos" }, { replace: true });
+  const pageRef = useRef<HTMLDivElement>(null);
+  useRememberScroll(pageRef, tab === "mine" ? mine != null : all != null);
   const [creating, setCreating] = useState(false);
   const shown = all?.length ?? 0;
 
@@ -63,14 +68,19 @@ export function Groups() {
     };
   }, [loadAll, tab, q, shown]);
 
+  // Cuántos grupos había cargados con esta búsqueda, para volver a mostrarlos todos
+  useEffect(() => {
+    if (all) loadedCount.set(`grupos:${q}`, all.length);
+  }, [all, q]);
+
   useEffect(() => {
     if (tab !== "all") return;
-    const t = setTimeout(() => loadAll(q), 250);
+    const t = setTimeout(() => loadAll(q, loadedCount.get(`grupos:${q}`)), 250);
     return () => clearTimeout(t);
   }, [tab, q, loadAll]);
 
   return (
-    <div className="page">
+    <div className="page" ref={pageRef}>
       <header className="topbar">
         <h1 className="topbar__title">Grupos</h1>
         <button className="btn btn--small btn--primary" onClick={() => setCreating(true)}><PlusIcon /> Crear</button>

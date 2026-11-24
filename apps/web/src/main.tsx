@@ -5,6 +5,13 @@ import { App } from "./App";
 import "virtual:brand.css";
 import "./styles.css";
 
+if (window.matchMedia("(display-mode: standalone)").matches || (navigator as { standalone?: boolean }).standalone) {
+  const viewport = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
+  if (viewport) viewport.content += ", maximum-scale=1, user-scalable=no";
+  // WebKit también expone el gesto de pinza como un evento cancelable.
+  document.addEventListener("gesturestart", event => event.preventDefault(), { passive: false });
+}
+
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <BrowserRouter>
