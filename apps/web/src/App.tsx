@@ -17,6 +17,7 @@ import { Onboarding } from "./pages/Onboarding";
 import { GroupChat } from "./pages/GroupChat";
 import { Groups } from "./pages/Groups";
 import { GroupInfo } from "./pages/GroupInfo";
+import { GroupRequests } from "./pages/GroupRequests";
 import { Inbox } from "./pages/Inbox";
 import { Conversation } from "./pages/Conversation";
 import { ProfilePage } from "./pages/Profile";
@@ -71,6 +72,7 @@ export function App() {
           <Route path="/grupos" element={<Groups />} />
           <Route path="/grupos/:id" element={<GroupChat />} />
           <Route path="/grupos/:id/info" element={<GroupInfo />} />
+          <Route path="/grupos/:id/solicitudes" element={<GroupRequests />} />
           <Route path="/mensajes" element={<Inbox />} />
           <Route path="/mensajes/:id" element={<Conversation />} />
           <Route path="/perfil/:id" element={<ProfilePage />} />

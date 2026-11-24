@@ -6,7 +6,7 @@ type CloseWatcherConstructor = new () => EventTarget & { destroy(): void };
 export function useSectionBack(parent: string) {
   const navigate = useNavigate();
   const { pathname, search } = useLocation();
-  const fromNotification = (pathname === "/toques" || /^\/mensajes\/[^/]+$/.test(pathname)) &&
+  const fromNotification = (pathname === "/toques" || /^\/mensajes\/[^/]+$/.test(pathname) || /^\/grupos\/[^/]+(?:\/solicitudes)?$/.test(pathname)) &&
     new URLSearchParams(search).get("aviso") === "1";
 
   useEffect(() => {

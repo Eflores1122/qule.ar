@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { Link, useLocation, useNavigate, useParams } from "react-router";
-import { api, getSocket, ROLE_LABEL, type GroupInfo as Info, type JoinRequest, type Member, type MemberPage, type SentInvite, type SpamRules } from "../api";
+import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router";
+import { api, getSocket, ROLE_LABEL, type GroupInfo as Info, type Member, type MemberPage, type SentInvite, type SpamRules } from "../api";
 import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { BackIcon, PlusIcon } from "../components/Icons";
 import { InvitePeopleSheet } from "../components/Invite";
-import { JoinRequests } from "../features/groups/JoinRequests";
+import { setGroupMuted } from "../features/groups/groupNotifications";
 import { ReportDialog } from "../components/ReportDialog";
 import { slowModeText } from "../features/groups/groupRules";
 import { useTabData } from "../features/navigation/tabData";
@@ -108,6 +108,7 @@ export function GroupInfo() {
     }
   }
 
+  if (location.hash === "#solicitudes") return <Navigate to={`/grupos/${id}/solicitudes`} replace />;
   if (!info) return <div className="page" />;
 
   return (
@@ -116,7 +117,13 @@ export function GroupInfo() {
         {/* Volver al lugar desde donde se abrió: si no, el gesto de atrás vuelve a entrar a la info.
             Si se entró directo (una notificación, o recargando), no hay a dónde volver: va al chat del grupo. */}
         <button className="iconbtn" onClick={() => (location.key === "default" ? nav(`/grupos/${id}`, { replace: true }) : nav(-1))} aria-label="Volver"><BackIcon /></button>
-        <h1 className="topbar__title topbar__title--sm">{info.isGeneral ? "# " : ""}{info.name}</h1>
+        <h1 className="topbar__grow topbar__title topbar__title--sm">{info.isGeneral ? "# " : ""}{info.name}</h1>
+        {isMod && !info.isGeneral && (
+          <Link className="btn btn--small group-info__requests" to={`/grupos/${id}/solicitudes`} state={{ groupRequestsFrom: "details" }}>
+            Solicitudes
+            {info.pendingCount > 0 && <span className="badge">{info.pendingCount}</span>}
+          </Link>
+        )}
       </header>
 
       <section className="section group-head">
@@ -154,7 +161,7 @@ export function GroupInfo() {
             onClick={async () => {
               const muted = !info.muted;
               setInfo({ ...info, muted });
-              await api(`/groups/${id}/notifications`, { method: "PUT", json: { muted } }).catch(() => setInfo({ ...info }));
+              await setGroupMuted(id, muted).catch(() => setInfo({ ...info }));
             }}
           >
             <span />
@@ -163,14 +170,6 @@ export function GroupInfo() {
       </section>
 
       {error && <div className="notice notice--error" role="alert">{error}</div>}
-
-      {isMod && !info.isGeneral && (
-        <section className="section">
-          <h2 className="section__title">Solicitudes <span className="muted">{info.pendingCount}</span></h2>
-          <JoinRequests groupId={id} onChanged={load} />
-          <p className="muted small hint">Si rechazás a alguien, puede volver a pedir ingreso en 7 días.</p>
-        </section>
-      )}
 
       {isMod && !info.isGeneral && (
         <section className="section">

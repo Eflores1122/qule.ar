@@ -2,14 +2,34 @@ import { useEffect, useId, useRef, useState } from "react";
 import { Link } from "react-router";
 import type { GroupInfo } from "../../api";
 import { DotsIcon } from "../../components/Icons";
+import { setGroupMuted } from "./groupNotifications";
 
-export function GroupActions({ group }: { group: GroupInfo }) {
+export function GroupActions({ group, onMutedChange, onError }: {
+  group: GroupInfo;
+  onMutedChange: (muted: boolean) => void;
+  onError: (message: string) => void;
+}) {
   const [open, setOpen] = useState(false);
+  const [saving, setSaving] = useState(false);
   const actionsId = useId();
   const container = useRef<HTMLDivElement>(null);
   const trigger = useRef<HTMLButtonElement>(null);
   const infoPath = `/grupos/${group.id}/info`;
-  const pending = group.pendingCount;
+  const canManageRequests = !group.isGeneral && (group.role === "owner" || group.role === "moderator");
+  const hasPendingRequests = canManageRequests && group.pendingCount > 0;
+
+  async function toggleNotifications() {
+    if (saving) return;
+    setSaving(true);
+    try {
+      const { muted } = await setGroupMuted(group.id, !group.muted);
+      onMutedChange(muted);
+    } catch {
+      onError("No se pudieron cambiar los avisos. Probá de nuevo.");
+    } finally {
+      setSaving(false);
+    }
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -43,16 +63,25 @@ export function GroupActions({ group }: { group: GroupInfo }) {
         type="button"
         className="iconbtn iconbtn--badge"
         ref={trigger}
-        aria-label={`Opciones del grupo${pending ? `, ${pending} ${pending === 1 ? "solicitud pendiente" : "solicitudes pendientes"}` : ""}`}
+        aria-label={hasPendingRequests && !open ? "Opciones del grupo, hay solicitudes pendientes" : "Opciones del grupo"}
         aria-expanded={open}
         aria-controls={actionsId}
         onClick={() => setOpen(!open)}
       >
         <DotsIcon />
-        {pending > 0 && <b className="badge" aria-hidden="true">{pending}</b>}
+        {hasPendingRequests && !open && <span className="group-actions__dot" aria-hidden="true" />}
       </button>
       <div className="menu group-actions__menu" id={actionsId} hidden={!open}>
+        {canManageRequests && (
+          <Link className="group-actions__requests" to={`/grupos/${group.id}/solicitudes`} state={{ groupRequestsFrom: "chat" }} onClick={() => setOpen(false)}>
+            Solicitudes
+            {hasPendingRequests && <span className="badge">{group.pendingCount}</span>}
+          </Link>
+        )}
         <Link to={infoPath} onClick={() => setOpen(false)}>Ver detalles</Link>
+        <button type="button" aria-disabled={saving} onClick={toggleNotifications}>
+          {group.muted ? "Reactivar notificaciones" : "Silenciar notificaciones"}
+        </button>
       </div>
     </div>
   );

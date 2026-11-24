@@ -303,7 +303,12 @@ export function GroupChat() {
           <h1 className="topbar__title topbar__title--sm"><Link to={`/grupos/${id}/info`}>{info.isGeneral ? "# " : ""}{info.name}</Link></h1>
           <p className="topbar__sub"><ClockIcon /> {rulesText}</p>
         </div>
-        <GroupActions key={id} group={info} />
+        <GroupActions
+          key={id}
+          group={info}
+          onMutedChange={(muted) => setInfo((current) => current?.id === id ? { ...current, muted } : current)}
+          onError={(message) => setNotice({ kind: "error", text: message })}
+        />
       </header>
 
       <div className="chat__list" role="log" aria-label="Mensajes del grupo" ref={listRef} onScroll={onScroll}>
