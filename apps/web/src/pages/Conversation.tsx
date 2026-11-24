@@ -1,3 +1,4 @@
+import { compareDmOrder, DM_EVENTS, type DmReadReceipt } from "@mortero/shared/realtime";
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router";
 import { api, getSocket, upload, type Author, type Dm, type ReactionEvent } from "../api";
@@ -9,6 +10,8 @@ import { useSectionBack } from "../useSectionBack";
 import { useMessageMenuPosition } from "../useMessageMenuPosition";
 import { SavedPhrasesButton, SavedPhrasesMenu } from "../features/phrases/SavedPhrases";
 import { useDraft } from "../features/chat/useDraft";
+import { batchReadReceipts } from "../features/messages/readReceipts";
+import { ShareAlbumMenu } from "../features/chat/ShareAlbumMenu";
 
 /** Texto corto para la cita en el composer y en la burbuja. */
 function replyPreview(m: Dm) {
@@ -26,12 +29,13 @@ export function Conversation() {
   const goBack = useSectionBack("/mensajes");
   const [other, setOther] = useState<Author | null>(null);
   const [messages, setMessages] = useState<Dm[]>([]);
+  const [seen, setSeen] = useState<{ conversationId: string; ids: Set<string>; through?: Pick<Dm, "createdAt" | "id"> }>();
   const [text, setText] = useDraft(`dm:${me?.user.id ?? ""}:${id}`);
   const [phrasesOpen, setPhrasesOpen] = useState(false);
   const [error, setError] = useState("");
   const [sending, setSending] = useState(false);
   const [typing, setTyping] = useState(false);
-  const [photoMenu, setPhotoMenu] = useState(false);
+  const [photoMenu, setPhotoMenu] = useState<false | "options" | "album">(false);
   const [msgMenu, setMsgMenu] = useState<string | null>(null);
   const [replyTo, setReplyTo] = useState<Dm | null>(null);
   const [viewer, setViewer] = useState<{ src: string; seconds: number } | null>(null);
@@ -48,38 +52,51 @@ export function Conversation() {
     let alive = true;
     setReplyTo(null);
     setMessages([]);
-    const markRead = () =>
-      api(`/conversations/${id}/read`, { method: "POST" })
-        .then(() => window.dispatchEvent(new Event("mortero:read")))
-        .catch(() => {});
+    let beforeHistory: Array<(messages: Dm[]) => Dm[]> | null = [];
+    const receipts = batchReadReceipts(id);
+    const applyMessageUpdate = (update: (messages: Dm[]) => Dm[]) => {
+      beforeHistory?.push(update);
+      setMessages(update);
+    };
     api<{ other: Author }>(`/conversations/${id}`)
       .then((c) => alive && setOther(c.other))
       .catch(() => nav("/mensajes", { replace: true }));
-    api<{ messages: Dm[] }>(`/conversations/${id}/messages`).then((d) => {
+    api<{ messages: Dm[]; hasMore: boolean }>(`/conversations/${id}/messages`).then((d) => {
       if (!alive) return;
-      setMessages(d.messages);
-      markRead();
-    });
+      const history = beforeHistory?.reduce((list, update) => update(list), d.messages) ?? d.messages;
+      const loaded = [...history].sort(compareDmOrder);
+      beforeHistory = null;
+      setMessages(loaded);
+      // Al abrir el chat, marcá también los mensajes anteriores a la página de historial.
+      const oldestLoaded = d.messages[0];
+      if (oldestLoaded && d.hasMore) receipts.includeOlderMessages(oldestLoaded.id);
+      receipts.schedule(...loaded.filter((message) => message.senderId !== myId && !message.readAt).map(({ id }) => id));
+    }).catch(() => { beforeHistory = null; });
     const s = getSocket();
     const onMsg = (m: Dm) => {
       if (m.conversationId !== id) return;
       setTyping(false);
-      setMessages((list) => (list.some((x) => x.id === m.id) ? list : [...list, m]));
-      if (m.senderId !== myId) markRead();
+      applyMessageUpdate((list) => (list.some((x) => x.id === m.id) ? list : [...list, m]));
+      if (m.senderId !== myId && !m.readAt) receipts.schedule(m.id);
     };
-    const onRead = (p: { conversationId: string; readAt: string }) => {
-      if (p.conversationId !== id) return;
-      setMessages((list) => list.map((m) => (m.senderId === myId && !m.readAt ? { ...m, readAt: p.readAt } : m)));
+    const onRead = (p: DmReadReceipt) => {
+      if (p.audience === "reader" || p.conversationId !== id || !p.messageIds) return;
+      setSeen((previous) => {
+        const current = previous?.conversationId === id ? previous : undefined;
+        const through = p.through && (!current?.through || compareDmOrder(p.through, current.through) > 0)
+          ? p.through : current?.through;
+        return { conversationId: id, ids: new Set([...(current?.ids ?? []), ...p.messageIds]), through };
+      });
     };
     const onDeleted = (p: { conversationId: string; id: string }) => {
       if (p.conversationId !== id) return;
       setReplyTo((r) => (r?.id === p.id ? null : r));
-      setMessages((list) => list
+      applyMessageUpdate((list) => list
         .filter((m) => m.id !== p.id)
         .map((m) => (m.replyTo?.id === p.id ? { ...m, replyTo: { ...m.replyTo, authorName: null, body: null } } : m)));
     };
     const onOpened = (p: { conversationId: string; id: string }) => {
-      if (p.conversationId === id) setMessages((list) => list.map((m) => (m.id === p.id ? { ...m, opened: true } : m)));
+      if (p.conversationId === id) applyMessageUpdate((list) => list.map((m) => (m.id === p.id ? { ...m, opened: true } : m)));
     };
     const onTyping = (p: { conversationId: string }) => {
       if (p.conversationId !== id) return;
@@ -89,22 +106,23 @@ export function Conversation() {
     };
     const onReaction = (p: ReactionEvent) => {
       if (p.scope !== "dm" || p.conversationId !== id) return;
-      setMessages((list) => list.map((m) => (m.id === p.messageId ? { ...m, reactions: p.reactions } : m)));
+      applyMessageUpdate((list) => list.map((m) => (m.id === p.messageId ? { ...m, reactions: p.reactions } : m)));
     };
     s.on("reaction", onReaction);
-    s.on("dm:message", onMsg);
-    s.on("dm:read", onRead);
-    s.on("dm:deleted", onDeleted);
-    s.on("dm:opened", onOpened);
-    s.on("dm:typing", onTyping);
+    s.on(DM_EVENTS.message, onMsg);
+    s.on(DM_EVENTS.read, onRead);
+    s.on(DM_EVENTS.deleted, onDeleted);
+    s.on(DM_EVENTS.opened, onOpened);
+    s.on(DM_EVENTS.typing, onTyping);
     return () => {
       alive = false;
+      receipts.close();
       s.off("reaction", onReaction);
-      s.off("dm:message", onMsg);
-      s.off("dm:read", onRead);
-      s.off("dm:deleted", onDeleted);
-      s.off("dm:opened", onOpened);
-      s.off("dm:typing", onTyping);
+      s.off(DM_EVENTS.message, onMsg);
+      s.off(DM_EVENTS.read, onRead);
+      s.off(DM_EVENTS.deleted, onDeleted);
+      s.off(DM_EVENTS.opened, onOpened);
+      s.off(DM_EVENTS.typing, onTyping);
       clearTimeout(typingTimer.current);
     };
   }, [id, myId, nav]);
@@ -142,7 +160,7 @@ export function Conversation() {
 
   function onType(v: string) {
     setText(v);
-    if (v.trim()) getSocket().emit("dm:typing", { conversationId: id });
+    if (v.trim()) getSocket().emit(DM_EVENTS.typing, { conversationId: id });
   }
 
   function startReply(m: Dm) {
@@ -225,7 +243,11 @@ export function Conversation() {
       .map((x) => (x.replyTo?.id === m.id ? { ...x, replyTo: { ...x.replyTo, authorName: null, body: null } } : x)));
   }
 
+  const loadedMessageIds = new Set(messages.map((m) => m.id));
   const lastMine = [...messages].reverse().find((m) => m.senderId === myId);
+
+  const lastSeen = lastMine && (lastMine.readAt || (seen?.conversationId === id &&
+    (seen.ids.has(lastMine.id) || (seen.through && compareDmOrder(lastMine, seen.through) <= 0))));
 
   return (
     <div className="chat">
@@ -245,21 +267,23 @@ export function Conversation() {
       <div className="chat__list chat__list--dm" role="log" aria-label="Mensajes" ref={listRef} onScroll={onListScroll} onClick={() => setMsgMenu(null)}>
         {messages.map((m) => {
           const mine = m.senderId === myId;
+          const quoted = m.replyTo;
           return (
             <div id={`dm-${m.id}`} key={m.id} className={`bubble ${mine ? "bubble--mine" : ""} ${m.kind === "album" ? "bubble--album" : ""}`}>
-              {m.replyTo && (m.replyTo.authorName ? (
+              {quoted && (quoted.authorName && loadedMessageIds.has(quoted.id) ? (
                 <button
                   type="button"
                   className="quote"
-                  aria-label={`Ir al mensaje citado de ${m.replyTo.authorName}`}
-                  onClick={() => jumpTo(m.replyTo!.id)}
+                  aria-label={`Ir al mensaje citado de ${quoted.authorName}`}
+                  onClick={() => jumpTo(quoted.id)}
                 >
-                  <span className="quote__name">{m.replyTo.authorName}</span>
-                  <span className="quote__body">{m.replyTo.body ?? "Mensaje borrado"}</span>
+                  <span className="quote__name">{quoted.authorName}</span>
+                  <span className="quote__body">{quoted.body ?? "Mensaje borrado"}</span>
                 </button>
               ) : (
                 <div className="quote">
-                  <span className="quote__name">Mensaje borrado</span>
+                  <span className="quote__name">{quoted.authorName ?? "Mensaje borrado"}</span>
+                  {quoted.authorName && quoted.body && <span className="quote__body">{quoted.body}</span>}
                 </div>
               ))}
               {m.kind === "album" ? (
@@ -309,18 +333,24 @@ export function Conversation() {
             </div>
           );
         })}
-        {lastMine?.readAt && messages[messages.length - 1]?.id === lastMine.id && <p className="seen">Visto</p>}
+        {lastSeen && messages[messages.length - 1]?.id === lastMine.id && <p className="seen">Visto</p>}
         {typing && <div className="bubble typing" aria-label="Está escribiendo"><i /><i /><i /></div>}
       </div>
 
       {error && <div className="notice notice--error" role="alert">{error}</div>}
 
       <form className="composer" onSubmit={send}>
-        {photoMenu && (
+        {photoMenu === "album" && other && (
+          <ShareAlbumMenu userId={other.id} name={other.name} onBack={() => setPhotoMenu("options")} />
+        )}
+        {photoMenu === "options" && (
           <div className="photo-menu" role="menu">
             <button type="button" role="menuitem" onClick={() => pickPhoto(false)}><ImageIcon /> Foto</button>
             <button type="button" role="menuitem" onClick={() => pickPhoto(true)}>
               <TimerIcon /> Foto temporal <span className="muted small">se ve una vez, {10} s</span>
+            </button>
+            <button type="button" role="menuitem" onClick={() => setPhotoMenu("album")}>
+              <LockIcon /> Álbum privado <span className="muted small">compartilo</span>
             </button>
           </div>
         )}
@@ -345,7 +375,7 @@ export function Conversation() {
           </div>
         )}
         <div className="composer__row">
-          <button type="button" className="iconbtn" aria-label="Mandar foto" aria-expanded={photoMenu} disabled={sending} onClick={() => { setPhotoMenu((v) => !v); setPhrasesOpen(false); }}>
+          <button type="button" className="iconbtn" aria-label="Mandar foto" aria-expanded={Boolean(photoMenu)} disabled={sending} onClick={() => { setPhotoMenu((v) => (v ? false : "options")); setPhrasesOpen(false); }}>
             <ImageIcon />
           </button>
           <SavedPhrasesButton open={phrasesOpen} onToggle={() => { setPhrasesOpen((v) => !v); setPhotoMenu(false); }} />

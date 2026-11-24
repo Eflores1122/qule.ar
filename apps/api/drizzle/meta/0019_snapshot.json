@@ -1,5 +1,5 @@
 {
-  "id": "7df10eb1-39d5-4ba1-bd5a-c1ae5b240e88",
+  "id": "c262db7a-7e0c-4d39-bf69-4b145d1e3a8c",
   "prevId": "ca7b968f-f16b-478b-99b3-0dea878c9f4a",
   "version": "7",
   "dialect": "postgresql",
@@ -606,12 +606,6 @@
           "primaryKey": false,
           "notNull": false
         },
-        "reply_to_id": {
-          "name": "reply_to_id",
-          "type": "text",
-          "primaryKey": false,
-          "notNull": false
-        },
         "photo_key": {
           "name": "photo_key",
           "type": "text",
@@ -1101,8 +1095,8 @@
         }
       },
       "indexes": {
-        "gjr_group_status_idx": {
-          "name": "gjr_group_status_idx",
+        "gjr_group_status_created_idx": {
+          "name": "gjr_group_status_created_idx",
           "columns": [
             {
               "expression": "group_id",
@@ -1112,6 +1106,18 @@
             },
             {
               "expression": "status",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "created_at",
+              "isExpression": false,
+              "asc": true,
+              "nulls": "last"
+            },
+            {
+              "expression": "id",
               "isExpression": false,
               "asc": true,
               "nulls": "last"
