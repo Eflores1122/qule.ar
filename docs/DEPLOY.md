@@ -75,7 +75,7 @@ Postgres no expone ningún puerto hacia afuera: solo lo ve la app, por la red `m
 
 ```bash
 cd /opt/mortero/src
-docker build -t mortero:latest .
+docker build -t mortero:latest --build-arg APP_URL=https://tu.dominio.com .
 docker volume create mortero-data
 docker run -d --name mortero-app --restart unless-stopped --network mortero \
   --env-file /opt/mortero/app.env \
@@ -84,6 +84,9 @@ docker run -d --name mortero-app --restart unless-stopped --network mortero \
   mortero:latest
 docker logs -f mortero-app   # tiene que decir "qule.ar API escuchando"
 ```
+
+El `--build-arg` deja tu dominio fijo en los tags para compartir en redes (`og:url`, `og:image`).
+Tiene que ser el mismo valor que `APP_URL` en `app.env`.
 
 Las migraciones de la base se aplican solas al arrancar. La app escucha solo en `127.0.0.1:3010`: el único acceso desde afuera es por nginx.
 
@@ -217,10 +220,12 @@ Antes de desplegar cambios en la carga o edición de fotos, completá la [checkl
 
 ```bash
 cd /opt/mortero/src && git pull
-docker build -t mortero:latest .
+docker build -t mortero:latest --build-arg APP_URL=https://tu.dominio.com .
 docker rm -f mortero-app
 docker run -d --name mortero-app ...   # el mismo comando del paso 4
 ```
+
+Usá el mismo `APP_URL` que figura en `/opt/mortero/app.env` para conservar el dominio de las vistas previas al actualizar.
 
 ## Login con Google
 
