@@ -155,6 +155,13 @@
       "when": 1795443305149,
       "tag": "0021_albumes_privados",
       "breakpoints": true
+    },
+    {
+      "idx": 22,
+      "version": "7",
+      "when": 1795509461711,
+      "tag": "0022_avisos_album",
+      "breakpoints": true
     }
   ]
 }

@@ -6,12 +6,12 @@ import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db, schema } from "../db/index.js";
 import {
-  ageFrom, authorsFor, imageUrl, isBlocked, mediaOut, newId, reactionsFor, type ReactionSummary, requireProfile, requireUser, type AppEnv,
+  ageFrom, authorsFor, imageUrl, isBlocked, mediaOut, newId, reactionsFor, requireProfile, requireUser, serializeDm, type AppEnv,
 } from "../lib.js";
 import { emitToUser, isOnline } from "../realtime.js";
 import { distanceLabel, visibleKm } from "../geo.js";
 import { deleteImage, MAX_UPLOAD_BYTES, saveImage } from "../storage.js";
-import { albumAccess, recordView } from "./premium.js";
+import { albumAccess, markAlbumNoticesRevoked, recordView } from "./premium.js";
 import { myRecentToque } from "./toques.js";
 import { pushTo } from "../push.js";
 import { EXPIRING_GRACE_MS, EXPIRING_SECONDS } from "../expiring.js";
@@ -111,23 +111,47 @@ async function myConversation(convId: string, userId: string) {
   return { conv, otherId: conv.userA === userId ? conv.userB : conv.userA };
 }
 
-function serializeDm(m: typeof directMessage.$inferSelect, reactions: ReactionSummary[] = []) {
-  return {
-    id: m.id,
-    conversationId: m.conversationId,
-    senderId: m.senderId,
-    kind: m.kind === "text" && m.photoKey ? "photo" : m.kind,
-    body: m.body,
-    // Las fotos temporales nunca viajan en la lista: se piden una sola vez con /open
-    photo: m.expiring ? null : imageUrl(m.photoKey),
-    expiring: m.expiring,
-    opened: Boolean(m.openedAt),
-    readAt: m.readAt?.toISOString() ?? null,
-    createdAt: m.createdAt.toISOString(),
-    reactions,
-  };
-}
+/** El acceso vigente determina el estado visible. Consultarlo nunca modifica el aviso. */
+async function albumNoticeStates(
+  meId: string,
+  rows: { message: typeof directMessage.$inferSelect; otherId: string }[],
+) {
+  const states = new Map<string, { kind: string; albumId: string | null; expiresAt?: string | null }>();
+  const notices = rows.filter(({ message }) => message.kind === "album" || message.kind === "album_expired");
+  if (!notices.length) return states;
 
+  const peers = [...new Set(notices.map(({ otherId }) => otherId))];
+  const legacyOwners = [...new Set(notices.filter(({ message }) => message.albumId == null).map(({ message }) => message.senderId))];
+  const [grants, albums] = await Promise.all([
+    db.select().from(schema.albumGrant).where(or(
+      and(eq(schema.albumGrant.ownerId, meId), inArray(schema.albumGrant.granteeId, peers)),
+      and(inArray(schema.albumGrant.ownerId, peers), eq(schema.albumGrant.granteeId, meId)),
+    )),
+    legacyOwners.length
+      ? db.select({ id: schema.album.id, ownerId: schema.album.userId }).from(schema.album).where(inArray(schema.album.userId, legacyOwners))
+      : [],
+  ]);
+  const byGrant = new Map(grants.map((g) => [JSON.stringify([g.albumId, g.ownerId, g.granteeId]), g]));
+  const byOwner = new Map<string, string[]>();
+  for (const a of albums) {
+    const ids = byOwner.get(a.ownerId) ?? [];
+    ids.push(a.id);
+    byOwner.set(a.ownerId, ids);
+  }
+  const now = new Date();
+  for (const { message, otherId } of notices) {
+    const candidates = byOwner.get(message.senderId) ?? [];
+    if (message.albumId == null && candidates.length > 1) continue;
+    const albumId = message.albumId ?? candidates[0] ?? null;
+    const granteeId = message.senderId === meId ? otherId : meId;
+    const grant = byGrant.get(JSON.stringify([albumId, message.senderId, granteeId]));
+    const active = grant && (grant.expiresAt == null || grant.expiresAt > now);
+    states.set(message.id, active
+      ? { kind: "album", albumId, expiresAt: grant.expiresAt?.toISOString() ?? null }
+      : { kind: "album_expired", albumId });
+  }
+  return states;
+}
 
 socialRoutes.get("/conversations", async (c) => {
   const me = c.get("user");
@@ -164,12 +188,16 @@ socialRoutes.get("/conversations", async (c) => {
       .groupBy(directMessage.conversationId),
   ]);
   const latestById = new Map(latest.map(({ last_message }) => [last_message.conversationId, last_message]));
+  const states = await albumNoticeStates(me.id, visible.flatMap((cv) => {
+    const message = latestById.get(cv.id);
+    return message ? [{ message, otherId: otherIdFor(cv) }] : [];
+  }));
   const unreadById = new Map(unreadCounts.map((r) => [r.id, r.unread]));
   return c.json(visible.flatMap((cv) => {
     const last = latestById.get(cv.id);
     return last ? [{
       id: cv.id, lastMessageAt: cv.lastMessageAt.toISOString(),
-      other: authors.get(otherIdFor(cv)), last: serializeDm(last), unread: unreadById.get(cv.id) ?? 0,
+      other: authors.get(otherIdFor(cv)), last: { ...serializeDm(last), ...states.get(last.id) }, unread: unreadById.get(cv.id) ?? 0,
     }] : [];
   }));
 });
@@ -220,10 +248,13 @@ socialRoutes.get("/conversations/:id/summary", async (c) => {
     .orderBy(desc(directMessage.createdAt), desc(directMessage.id))
     .limit(1);
   if (!last) return c.json(null);
-  const authors = await authorsFor([otherId]);
+  const [states, authors] = await Promise.all([
+    albumNoticeStates(me.id, [{ message: last.message, otherId }]),
+    authorsFor([otherId]),
+  ]);
   return c.json({
     id: conv.id, lastMessageAt: new Date(Math.max(conv.lastMessageAt.getTime(), last.message.createdAt.getTime())).toISOString(),
-    other: authors.get(otherId), last: serializeDm(last.message), unread: last.unread,
+    other: authors.get(otherId), last: { ...serializeDm(last.message), ...states.get(last.message.id) }, unread: last.unread,
   });
 });
 
@@ -240,8 +271,14 @@ socialRoutes.get("/conversations/:id/messages", async (c) => {
     .where(and(...conds))
     .orderBy(desc(directMessage.createdAt), desc(directMessage.id))
     .limit(50);
-  const reactions = await reactionsFor(rows.map((m) => m.id));
-  return c.json({ messages: rows.reverse().map((m) => serializeDm(m, reactions.get(m.id))), hasMore: rows.length === 50 });
+  const [reactions, states] = await Promise.all([
+    reactionsFor(rows.map((m) => m.id)),
+    albumNoticeStates(me.id, rows.map((message) => ({ message, otherId }))),
+  ]);
+  return c.json({
+    messages: rows.reverse().map((m) => ({ ...serializeDm(m, reactions.get(m.id)), ...states.get(m.id) })),
+    hasMore: rows.length === 50,
+  });
 });
 
 socialRoutes.post("/conversations/:id/messages", async (c) => {
@@ -322,9 +359,18 @@ socialRoutes.post("/conversations/:id/messages/:mid/open", async (c) => {
 socialRoutes.delete("/conversations/:id/messages/:mid", async (c) => {
   const me = c.get("user");
   const { conv, otherId } = await myConversation(c.req.param("id"), me.id);
+  const [existing] = await db
+    .select()
+    .from(directMessage)
+    .where(and(eq(directMessage.id, c.req.param("mid")), eq(directMessage.conversationId, conv.id), eq(directMessage.senderId, me.id)));
+  if (!existing) return c.notFound();
+  // Los avisos de álbum muestran el estado de lo compartido: no se desenvían, se actualizan solos.
+  if (existing.kind === "album" || existing.kind === "album_revoked" || existing.kind === "album_expired") {
+    throw new HTTPException(400, { message: "Los avisos de álbum no se pueden desenviar" });
+  }
   const [row] = await db
     .delete(directMessage)
-    .where(and(eq(directMessage.id, c.req.param("mid")), eq(directMessage.conversationId, conv.id), eq(directMessage.senderId, me.id)))
+    .where(eq(directMessage.id, existing.id))
     .returning();
   if (!row) return c.notFound();
   if (row.photoKey) await deleteImageUnlessEvidence(row.photoKey);
@@ -406,6 +452,10 @@ socialRoutes.post("/blocks", async (c) => {
     return true;
   });
   if (added) {
+    // Los avisos de álbum quedan como revocados: al desbloquear, el chat muestra el estado real.
+    // Emitimos después del commit. Si el proceso se interrumpe, las consultas igual reflejan que el acceso terminó.
+    await markAlbumNoticesRevoked(me.id, userId, null);
+    await markAlbumNoticesRevoked(userId, me.id, null);
     for (const id of [me.id, userId]) emitToUser(id, DM_EVENTS.access, null);
   }
   return c.json({ ok: true });

@@ -11,6 +11,7 @@ import { useMessageMenuPosition } from "../useMessageMenuPosition";
 import { SavedPhrasesButton, SavedPhrasesMenu } from "../features/phrases/SavedPhrases";
 import { useDraft } from "../features/chat/useDraft";
 import { batchReadReceipts } from "../features/messages/readReceipts";
+import { albumExpiryLabel, albumNoticeKind, useAlbumNoticeTime } from "../features/messages/albumNotices";
 import { ShareAlbumMenu } from "../features/chat/ShareAlbumMenu";
 
 export function Conversation() {
@@ -20,7 +21,7 @@ export function Conversation() {
   const goBack = useSectionBack("/mensajes");
   const [other, setOther] = useState<Author | null>(null);
   const [messages, setMessages] = useState<Dm[]>([]);
-  const [seen, setSeen] = useState<{ conversationId: string; ids: Set<string>; through?: Pick<Dm, "createdAt" | "id"> }>();
+  const [seen, setSeen] = useState<{ conversationId: string; readAtById: Map<string, string>; through?: Pick<Dm, "createdAt" | "id"> }>();
   const [text, setText] = useDraft(`dm:${me?.user.id ?? ""}:${id}`);
   const [phrasesOpen, setPhrasesOpen] = useState(false);
   const [error, setError] = useState("");
@@ -37,6 +38,7 @@ export function Conversation() {
   const expiringNext = useRef(false);
   const typingTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
   const myId = me?.user.id;
+  const albumNoticeTime = useAlbumNoticeTime(messages);
 
   useEffect(() => {
     let alive = true;
@@ -67,13 +69,25 @@ export function Conversation() {
       applyMessageUpdate((list) => (list.some((x) => x.id === m.id) ? list : [...list, m]));
       if (m.senderId !== myId && !m.readAt) receipts.schedule(m.id);
     };
+    // Un mensaje que cambió (el aviso de álbum muestra siempre el estado actual; al reactivarse sube al final).
+    const onUpdated = (m: Dm) => {
+      if (m.conversationId !== id) return;
+      applyMessageUpdate((list) => (list.some((x) => x.id === m.id)
+        ? list.map((x) => (x.id === m.id ? m : x)).sort(compareDmOrder)
+        : [...list, m].sort(compareDmOrder)));
+      if (m.senderId !== myId && !m.readAt) receipts.schedule(m.id);
+    };
     const onRead = (p: DmReadReceipt) => {
       if (p.audience === "reader" || p.conversationId !== id || !p.messageIds) return;
       setSeen((previous) => {
         const current = previous?.conversationId === id ? previous : undefined;
         const through = p.through && (!current?.through || compareDmOrder(p.through, current.through) > 0)
           ? p.through : current?.through;
-        return { conversationId: id, ids: new Set([...(current?.ids ?? []), ...p.messageIds]), through };
+        const readAtById = new Map(current?.readAtById);
+        for (const messageId of p.messageIds) {
+          if ((readAtById.get(messageId) ?? "") < p.readAt) readAtById.set(messageId, p.readAt);
+        }
+        return { conversationId: id, readAtById, through };
       });
     };
     const onDeleted = (p: { conversationId: string; id: string }) => {
@@ -94,6 +108,7 @@ export function Conversation() {
     };
     s.on("reaction", onReaction);
     s.on(DM_EVENTS.message, onMsg);
+    s.on(DM_EVENTS.updated, onUpdated);
     s.on(DM_EVENTS.read, onRead);
     s.on(DM_EVENTS.deleted, onDeleted);
     s.on(DM_EVENTS.opened, onOpened);
@@ -103,6 +118,7 @@ export function Conversation() {
       receipts.close();
       s.off("reaction", onReaction);
       s.off(DM_EVENTS.message, onMsg);
+      s.off(DM_EVENTS.updated, onUpdated);
       s.off(DM_EVENTS.read, onRead);
       s.off(DM_EVENTS.deleted, onDeleted);
       s.off(DM_EVENTS.opened, onOpened);
@@ -203,7 +219,7 @@ export function Conversation() {
   const lastMine = [...messages].reverse().find((m) => m.senderId === myId);
 
   const lastSeen = lastMine && (lastMine.readAt || (seen?.conversationId === id &&
-    (seen.ids.has(lastMine.id) || (seen.through && compareDmOrder(lastMine, seen.through) <= 0))));
+    ((seen.readAtById.get(lastMine.id) ?? "") >= lastMine.createdAt || (seen.through && compareDmOrder(lastMine, seen.through) <= 0))));
 
   return (
     <div className="chat">
@@ -223,15 +239,23 @@ export function Conversation() {
       <div className="chat__list chat__list--dm" role="log" aria-label="Mensajes" ref={listRef} onScroll={onListScroll} onClick={() => setMsgMenu(null)}>
         {messages.map((m) => {
           const mine = m.senderId === myId;
+          const kind = albumNoticeKind(m, albumNoticeTime);
+          const albumNotice = kind === "album" || kind === "album_revoked" || kind === "album_expired";
+          const albumText = <><LockIcon /> {mine ? "Le compartiste tu álbum privado" : "Te compartió su álbum privado"}{m.body ? ` por ${m.body}` : ""}</>;
+          const expiry = albumExpiryLabel(m, albumNoticeTime);
           return (
-            <div key={m.id} className={`bubble ${mine ? "bubble--mine" : ""} ${m.kind === "album" ? "bubble--album" : ""}`}>
-              {m.kind === "album" ? (
-                mine ? (
-                  <p><LockIcon /> Le compartiste tu álbum privado{m.body ? ` por ${m.body}` : ""}</p>
-                ) : (
-                  <Link to={`/perfil/${m.senderId}?album=1`} className="album-msg">
-                    <LockIcon /> Te compartió su álbum privado{m.body ? ` por ${m.body}` : ""} · <u>Ver</u>
+            <div key={m.id} className={`bubble ${mine ? "bubble--mine" : ""} ${albumNotice ? "bubble--album" : ""}`}>
+              {kind === "album" || kind === "album_expired" ? (
+                kind === "album" && !mine ? (
+                  <Link to={`/perfil/${m.senderId}${m.albumId ? `?album=${encodeURIComponent(m.albumId)}` : ""}`} className="album-msg">
+                    {albumText} · <u>Ver</u>
                   </Link>
+                ) : <p>{albumText}</p>
+              ) : kind === "album_revoked" ? (
+                mine ? (
+                  <p><LockIcon /> Le dejaste de compartir tu álbum privado</p>
+                ) : (
+                  <p><LockIcon /> Te dejó de compartir su álbum privado</p>
                 )
               ) : m.expiring ? (
                 mine ? (
@@ -249,24 +273,23 @@ export function Conversation() {
                   {m.body && <p>{m.body}</p>}
                 </>
               )}
-              <time>{new Date(m.createdAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}</time>
+              <div className="bubble__meta">
+                {expiry && `${expiry} · `}
+                <time dateTime={m.createdAt}>{new Date(m.createdAt).toLocaleTimeString("es-AR", { hour: "2-digit", minute: "2-digit" })}</time>
+              </div>
               <ReactionBar reactions={m.reactions ?? []} myId={myId} mine={mine} onToggle={(k) => react(m, k)} />
-              {m.kind !== "album" && (
-                <>
-                  <button
-                    className="bubble__more"
-                    aria-label="Reaccionar u opciones del mensaje"
-                    onClick={(e) => { e.stopPropagation(); setMsgMenu(msgMenu === m.id ? null : m.id); }}
-                  >
-                    ⋯
-                  </button>
-                  {msgMenu === m.id && (
-                    <div className={`menu menu--bubble ${mine ? "" : "menu--bubble-theirs"}`} role="menu" ref={positionMessageMenu} onClick={(e) => e.stopPropagation()}>
-                      <ReactionPicker current={myReaction(m.reactions ?? [], myId)} onPick={(k) => react(m, k)} />
-                      {mine && <button role="menuitem" className="danger" onClick={() => unsend(m)}>Desenviar (se borra para los dos)</button>}
-                    </div>
-                  )}
-                </>
+              <button
+                className="bubble__more"
+                aria-label="Reaccionar u opciones del mensaje"
+                onClick={(e) => { e.stopPropagation(); setMsgMenu(msgMenu === m.id ? null : m.id); }}
+              >
+                ⋯
+              </button>
+              {msgMenu === m.id && (
+                <div className={`menu menu--bubble ${mine ? "" : "menu--bubble-theirs"}`} role="menu" ref={positionMessageMenu} onClick={(e) => e.stopPropagation()}>
+                  <ReactionPicker current={myReaction(m.reactions ?? [], myId)} onPick={(k) => react(m, k)} />
+                  {mine && !albumNotice && <button role="menuitem" className="danger" onClick={() => unsend(m)}>Desenviar (se borra para los dos)</button>}
+                </div>
               )}
             </div>
           );

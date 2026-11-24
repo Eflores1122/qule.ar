@@ -160,7 +160,10 @@ export type Dm = {
   id: string;
   conversationId: string;
   senderId: string;
-  kind: "text" | "photo" | "album";
+  kind: "text" | "photo" | "album" | "album_revoked" | "album_expired";
+  albumId?: string | null;
+  // Solo en avisos de álbum activos: hasta cuándo vale el acceso (ISO) o null si es sin límite.
+  expiresAt?: string | null;
   body: string | null;
   photo: string | null;
   expiring: boolean;

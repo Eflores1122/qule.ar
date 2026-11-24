@@ -1,11 +1,11 @@
 import { DM_EVENTS } from "@mortero/shared/realtime";
 // Lo que en otras apps es "premium", acá es gratis para todo el mundo.
-import { and, desc, eq, gt, isNull, lte, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db, schema } from "../db/index.js";
-import { authorsFor, blockedWith, isBlocked, newId, requireProfile, requireUser, type AppEnv } from "../lib.js";
+import { authorsFor, blockedWith, isBlocked, newId, reactionsFor, requireProfile, requireUser, serializeDm, type AppEnv } from "../lib.js";
 import { emitToUser } from "../realtime.js";
 import { pushTo } from "../push.js";
 import { deleteImageUnlessEvidence } from "../moderation.js";
@@ -172,22 +172,53 @@ premiumRoutes.patch("/album/albums/:id", async (c) => {
  */
 premiumRoutes.delete("/album/albums/:id", async (c) => {
   const u = c.get("user");
-  const a = await ownAlbum(u.id, c.req.param("id"));
+  const albumId = c.req.param("id");
   const moveTo = c.req.query("moveTo");
-  if (moveTo) {
-    if (moveTo === a.id) throw new HTTPException(400, { message: "Elegí otro álbum" });
-    const target = await ownAlbum(u.id, moveTo);
-    await db.update(photo).set({ albumId: target.id }).where(and(eq(photo.userId, u.id), eq(photo.albumId, a.id)));
-  } else {
-    const gone = await db.delete(photo).where(and(eq(photo.userId, u.id), eq(photo.albumId, a.id))).returning();
-    for (const p of gone) {
-      await deleteImageUnlessEvidence(p.key);
-      if (p.posterKey) await deleteImageUnlessEvidence(p.posterKey);
+  if (moveTo === albumId) throw new HTTPException(400, { message: "Elegí otro álbum" });
+  const { removed, notices } = await db.transaction(async (tx) => {
+    const owned = await tx.select({ id: album.id }).from(album)
+      .where(and(eq(album.userId, u.id), inArray(album.id, moveTo ? [albumId, moveTo] : [albumId])))
+      .orderBy(asc(album.id)).for("update");
+    if (owned.length !== (moveTo ? 2 : 1)) throw new HTTPException(404, { message: "Álbum no disponible" });
+
+    const photos = and(eq(photo.userId, u.id), eq(photo.albumId, albumId));
+    const removed = [];
+    if (moveTo) {
+      await tx.update(photo).set({ albumId: moveTo }).where(photos);
+    } else {
+      removed.push(...await tx.delete(photo).where(photos).returning());
     }
-    if (gone.length) await renumberPhotos(u.id);
+    const albums = await tx.select({ id: album.id }).from(album).where(eq(album.userId, u.id)).limit(2);
+    // Los avisos anteriores al identificador solo se pueden atribuir si había un único álbum.
+    const changed = await tx.update(directMessage).set({ kind: "album_revoked", albumId })
+      .where(and(
+        eq(directMessage.senderId, u.id),
+        eq(directMessage.albumId, albumId),
+        inArray(directMessage.kind, ["album", "album_expired"]),
+      )).returning();
+    if (albums.length === 1) {
+      const legacy = await tx.update(directMessage).set({ kind: "album_revoked" })
+        .where(and(eq(directMessage.senderId, u.id), isNull(directMessage.albumId),
+          inArray(directMessage.kind, ["album", "album_expired"]))).returning();
+      changed.push(...legacy);
+    }
+    await tx.delete(album).where(eq(album.id, albumId));
+    const conversationIds = [...new Set(changed.map((notice) => notice.conversationId))];
+    const chats = conversationIds.length
+      ? await tx.select().from(conversation).where(inArray(conversation.id, conversationIds))
+      : [];
+    const peers = new Map(chats.map((chat) => [chat.id, chat.userA === u.id ? chat.userB : chat.userA]));
+    return { removed, notices: changed.flatMap((row) => {
+      const other = peers.get(row.conversationId);
+      return other ? [{ row, other }] : [];
+    }) };
+  });
+  for (const { row, other } of notices) await emitNoticeUpdated(u.id, other, row);
+  for (const p of removed) {
+    await deleteImageUnlessEvidence(p.key);
+    if (p.posterKey) await deleteImageUnlessEvidence(p.posterKey);
   }
-  // Los accesos se van en cascada con el álbum
-  await db.delete(album).where(eq(album.id, a.id));
+  if (removed.length) await renumberPhotos(u.id);
   return c.json({ ok: true });
 });
 
@@ -209,9 +240,47 @@ premiumRoutes.get("/album/grants", async (c) => {
   }));
 });
 
+/** La conversación entre dos personas, creándola si no existe. */
+async function conversationBetween(a: string, b: string, database: Pick<typeof db, "insert" | "select">) {
+  const key = a < b ? { userA: a, userB: b } : { userA: b, userB: a };
+  await database.insert(conversation).values({ id: newId(), ...key }).onConflictDoNothing();
+  const [conv] = await database.select().from(conversation)
+    .where(and(eq(conversation.userA, key.userA), eq(conversation.userB, key.userB)));
+  return conv;
+}
+
+/**
+ * Los avisos de álbum (activos, revocados o vencidos) que alguien puso en una conversación, del más viejo al más nuevo.
+ * Con `albumId`, solo los de ese álbum; los avisos de antes de guardar el álbum (albumId null) solo se
+ * pueden atribuir si hay un único álbum.
+ */
+async function albumNotices(conversationId: string, senderId: string, albumId?: string, database: Pick<typeof db, "select"> = db) {
+  const rows = await database.select().from(directMessage)
+    .where(and(
+      eq(directMessage.conversationId, conversationId),
+      eq(directMessage.senderId, senderId),
+      inArray(directMessage.kind, ["album", "album_revoked", "album_expired"]),
+    ))
+    .orderBy(asc(directMessage.createdAt), asc(directMessage.id));
+  if (albumId === undefined) return rows;
+  const hasLegacy = rows.some((m) => m.albumId == null && m.kind !== "album_revoked");
+  const adoptLegacy = hasLegacy && (await database.select({ id: album.id }).from(album).where(eq(album.userId, senderId)).limit(2)).length === 1;
+  return rows.filter((m) => m.albumId === albumId || (adoptLegacy && m.albumId == null && m.kind !== "album_revoked"));
+}
+
+/** Avisa a los dos en vivo que un aviso cambió (las reacciones no cambian y se conservan). */
+async function emitNoticeUpdated(ownerId: string, otherId: string, row: typeof directMessage.$inferSelect, expiresAt?: string | null) {
+  const reactions = await reactionsFor([row.id]);
+  const msg = serializeDm(row, reactions.get(row.id), expiresAt);
+  emitToUser(ownerId, DM_EVENTS.updated, msg);
+  emitToUser(otherId, DM_EVENTS.updated, msg);
+}
+
 /**
  * Compartir un álbum con alguien, por un tiempo o sin límite. Si ya lo tenía, se actualiza el plazo.
- * Le llega como mensaje en el chat (solo si no lo tenía vigente).
+ * El aviso del chat muestra siempre el estado actual: hay uno por álbum, se actualiza al cambiar el plazo
+ * o al volver a compartir, y los duplicados viejos se borran. El push solo llega cuando alguien recibe
+ * acceso que no tenía (la primera vez o al recuperarlo después de una revocación).
  */
 async function shareAlbum(ownerId: string, albumId: string, target: string, hours: number | null) {
   if (target === ownerId) throw new HTTPException(400, { message: "Ya ves tus propios álbumes" });
@@ -219,36 +288,148 @@ async function shareAlbum(ownerId: string, albumId: string, target: string, hour
   const [p] = await db.select().from(profile).where(eq(profile.userId, target));
   if (!p) throw new HTTPException(404, { message: "Perfil no disponible" });
 
-  const hadAccess = (await albumAccess(ownerId, target)).has(albumId);
-  const now = new Date();
-  const expiresAt = hours == null ? null : new Date(now.getTime() + hours * 3_600_000);
-  await db
-    .insert(albumGrant)
-    .values({ albumId, ownerId, granteeId: target, expiresAt, createdAt: now })
-    .onConflictDoUpdate({ target: [albumGrant.albumId, albumGrant.granteeId], set: { expiresAt, createdAt: now } });
+  const result = await db.transaction(async (tx) => {
+    const [owned] = await tx.select({ id: album.id }).from(album)
+      .where(and(eq(album.id, albumId), eq(album.userId, ownerId))).for("update");
+    if (!owned) throw new HTTPException(404, { message: "Álbum no disponible" });
 
-  if (!hadAccess) {
-    // Aviso en la conversación (la crea si no existe). El cuerpo dice por cuánto tiempo.
-    const key = ownerId < target ? { userA: ownerId, userB: target } : { userA: target, userB: ownerId };
-    await db.insert(conversation).values({ id: newId(), ...key }).onConflictDoNothing();
-    const [conv] = await db.select().from(conversation)
-      .where(and(eq(conversation.userA, key.userA), eq(conversation.userB, key.userB)));
-    const body = durationLabel(hours);
-    const [row] = await db.insert(directMessage)
-      .values({ id: newId(), conversationId: conv.id, senderId: ownerId, kind: "album", body, createdAt: now })
-      .returning();
-    await db.update(conversation)
-      .set({ lastMessageAt: sql`greatest(${conversation.lastMessageAt}, ${now.toISOString()})` })
-      .where(eq(conversation.id, conv.id));
-    const msg = {
-      id: row.id, conversationId: conv.id, senderId: ownerId, kind: "album", body, photo: null,
-      expiring: false, opened: false, readAt: null, createdAt: now.toISOString(),
-    };
+    const now = new Date();
+    const [grant] = await tx.select().from(albumGrant)
+      .where(and(eq(albumGrant.albumId, albumId), eq(albumGrant.granteeId, target), activeGrant(now)));
+    const expiresAt = hours == null ? null : new Date(now.getTime() + hours * 3_600_000);
+    await tx.insert(albumGrant).values({ albumId, ownerId, granteeId: target, expiresAt, createdAt: now })
+      .onConflictDoUpdate({ target: [albumGrant.albumId, albumGrant.granteeId], set: { expiresAt, createdAt: now } });
+
+    const conv = await conversationBetween(ownerId, target, tx);
+    const notices = await albumNotices(conv.id, ownerId, albumId, tx);
+    const existing = notices.find((m) => m.albumId === albumId) ?? notices.at(-1);
+    const duplicates = notices.filter((m) => m.id !== existing?.id).map((m) => m.id);
+    if (duplicates.length) {
+      await tx.delete(directMessage).where(inArray(directMessage.id, duplicates));
+      await tx.delete(schema.reaction).where(inArray(schema.reaction.messageId, duplicates));
+    }
+    const reactivating = Boolean(existing && (!grant || existing.kind === "album_revoked"));
+    const stamp = existing && reactivating ? new Date(Math.max(now.getTime(), existing.createdAt.getTime() + 1)) : now;
+    const fields = { kind: "album", body: durationLabel(hours), albumId };
+    const [row] = existing
+      ? await tx.update(directMessage).set({ ...fields, ...(reactivating ? { createdAt: stamp, readAt: null } : {}) })
+        .where(eq(directMessage.id, existing.id)).returning()
+      : await tx.insert(directMessage).values({ ...fields, id: newId(), conversationId: conv.id, senderId: ownerId, createdAt: stamp }).returning();
+    if (!existing || reactivating) {
+      await tx.update(conversation)
+        .set({ lastMessageAt: sql`greatest(${conversation.lastMessageAt}, ${stamp.toISOString()})` })
+        .where(eq(conversation.id, conv.id));
+    }
+    return { row, conv, expiresAt, duplicates, isNew: !existing, hadAccess: Boolean(grant) };
+  });
+
+  const { row, conv, expiresAt, duplicates, isNew, hadAccess } = result;
+  for (const id of duplicates) {
+    const gone = { conversationId: conv.id, id };
+    emitToUser(ownerId, DM_EVENTS.deleted, gone);
+    emitToUser(target, DM_EVENTS.deleted, gone);
+  }
+  const expiresAtIso = expiresAt?.toISOString() ?? null;
+  if (isNew) {
+    const msg = serializeDm(row, [], expiresAtIso);
     emitToUser(ownerId, DM_EVENTS.message, msg);
     emitToUser(target, DM_EVENTS.message, msg);
+  } else {
+    await emitNoticeUpdated(ownerId, target, row, expiresAtIso);
+  }
+  if (!hadAccess) {
     pushTo(target, { title: "Te llegó un mensaje", body: "Abrí el chat para leerlo.", url: `/mensajes/${conv.id}`, tag: `dm-${conv.id}`, kind: "mensajes" }).catch(() => {});
   }
   return expiresAt;
+}
+
+/** Conserva el aviso identificado y elimina los duplicados anteriores. */
+async function revokeNoticeGroup(
+  database: Pick<typeof db, "delete" | "update">,
+  notices: (typeof directMessage.$inferSelect)[],
+  albumId: string | null,
+) {
+  const latest = (albumId != null ? notices.find((m) => m.albumId === albumId) : undefined) ?? notices.at(-1);
+  if (!latest) return null;
+  const duplicates = notices.filter((m) => m.id !== latest.id).map((m) => m.id);
+  if (duplicates.length) {
+    await database.delete(directMessage).where(inArray(directMessage.id, duplicates));
+    await database.delete(schema.reaction).where(inArray(schema.reaction.messageId, duplicates));
+  }
+  const [row] = latest.kind === "album_revoked" ? [] : await database.update(directMessage)
+    .set({ kind: "album_revoked", albumId })
+    .where(eq(directMessage.id, latest.id))
+    .returning();
+  return { row, duplicates, conversationId: latest.conversationId };
+}
+
+async function publishRevocation(ownerId: string, otherId: string, result: Awaited<ReturnType<typeof revokeNoticeGroup>>) {
+  if (!result) return;
+  for (const id of result.duplicates) {
+    const payload = { conversationId: result.conversationId, id };
+    emitToUser(ownerId, DM_EVENTS.deleted, payload);
+    emitToUser(otherId, DM_EVENTS.deleted, payload);
+  }
+  if (result.row) await emitNoticeUpdated(ownerId, otherId, result.row);
+}
+
+/** Con un único álbum se pueden atribuir los avisos anteriores al identificador. */
+async function adoptedAlbumId(ownerId: string, notices: Pick<typeof directMessage.$inferSelect, "albumId" | "kind">[]) {
+  if (!notices.some((m) => m.albumId == null && m.kind !== "album_revoked")) return null;
+  const albums = await myAlbums(ownerId);
+  return albums.length === 1 ? albums[0].id : null;
+}
+
+/**
+ * Marca como revocados los avisos de álbum de alguien en su chat con otra persona (de un álbum o,
+ * con null, de todos) y avisa a los dos en vivo. Queda un solo aviso por álbum: los duplicados se van.
+ * Al revocar todo, los avisos viejos sin álbum también se revocan: como se corta todo acceso, no hay
+ * riesgo de atribuir mal (distinto de share, que solo toca los del álbum que se comparte).
+ * Si no hay conversación o no hay avisos, no hace nada.
+ */
+export async function markAlbumNoticesRevoked(ownerId: string, granteeId: string, albumId: string | null) {
+  const key = ownerId < granteeId ? { userA: ownerId, userB: granteeId } : { userA: granteeId, userB: ownerId };
+  const [conv] = await db.select().from(conversation)
+    .where(and(eq(conversation.userA, key.userA), eq(conversation.userB, key.userB)));
+  if (!conv) return;
+  const notices = albumId === null
+    ? await albumNotices(conv.id, ownerId)
+    : await albumNotices(conv.id, ownerId, albumId);
+  if (!notices.length) return;
+  const adopted = await adoptedAlbumId(ownerId, notices);
+  const groups = new Map<string, { albumId: string | null; list: typeof notices }>();
+  for (const m of notices) {
+    const id = m.albumId ?? (m.kind === "album_revoked" ? null : adopted);
+    const k = id ?? (m.kind === "album_revoked" ? m.id : "legacy");
+    const g = groups.get(k) ?? { albumId: id, list: [] };
+    g.list.push(m);
+    groups.set(k, g);
+  }
+  for (const g of groups.values()) {
+    await publishRevocation(ownerId, granteeId, await db.transaction((tx) => revokeNoticeGroup(tx, g.list, g.albumId)));
+  }
+}
+
+/** Marca como revocados todos los avisos de álbum de alguien, en todos sus chats, avisando en vivo. */
+async function markAllMyNoticesRevoked(ownerId: string) {
+  const rows = await db.select({ m: directMessage, userA: conversation.userA, userB: conversation.userB })
+    .from(directMessage)
+    .innerJoin(conversation, eq(conversation.id, directMessage.conversationId))
+    .where(and(eq(directMessage.senderId, ownerId), inArray(directMessage.kind, ["album", "album_revoked", "album_expired"])))
+    .orderBy(asc(directMessage.createdAt), asc(directMessage.id));
+  if (!rows.length) return;
+  const adopted = await adoptedAlbumId(ownerId, rows.map((r) => r.m));
+  const groups = new Map<string, { other: string; albumId: string | null; list: (typeof directMessage.$inferSelect)[] }>();
+  for (const r of rows) {
+    const id = r.m.albumId ?? (r.m.kind === "album_revoked" ? null : adopted);
+    const k = `${r.m.conversationId} ${id ?? (r.m.kind === "album_revoked" ? r.m.id : "legacy")}`;
+    const g = groups.get(k) ?? { other: r.userA === ownerId ? r.userB : r.userA, albumId: id, list: [] };
+    g.list.push(r.m);
+    groups.set(k, g);
+  }
+  for (const g of groups.values()) {
+    await publishRevocation(ownerId, g.other, await db.transaction((tx) => revokeNoticeGroup(tx, g.list, g.albumId)));
+  }
 }
 
 premiumRoutes.put("/album/albums/:id/grants/:userId", async (c) => {
@@ -261,8 +442,19 @@ premiumRoutes.put("/album/albums/:id/grants/:userId", async (c) => {
 
 premiumRoutes.delete("/album/albums/:id/grants/:userId", async (c) => {
   const u = c.get("user");
-  const a = await ownAlbum(u.id, c.req.param("id"));
-  await db.delete(albumGrant).where(and(eq(albumGrant.albumId, a.id), eq(albumGrant.granteeId, c.req.param("userId"))));
+  const albumId = c.req.param("id");
+  const target = c.req.param("userId");
+  const result = await db.transaction(async (tx) => {
+    const [owned] = await tx.select({ id: album.id }).from(album)
+      .where(and(eq(album.id, albumId), eq(album.userId, u.id))).for("update");
+    if (!owned) throw new HTTPException(404, { message: "Álbum no disponible" });
+    await tx.delete(albumGrant).where(and(eq(albumGrant.albumId, albumId), eq(albumGrant.granteeId, target)));
+    const key = u.id < target ? { userA: u.id, userB: target } : { userA: target, userB: u.id };
+    const [conv] = await tx.select().from(conversation)
+      .where(and(eq(conversation.userA, key.userA), eq(conversation.userB, key.userB)));
+    return conv ? revokeNoticeGroup(tx, await albumNotices(conv.id, u.id, albumId, tx), albumId) : null;
+  });
+  await publishRevocation(u.id, target, result);
   return c.json({ ok: true });
 });
 
@@ -278,7 +470,9 @@ premiumRoutes.put("/album/grants/:userId", async (c) => {
 /** Le quita a alguien el acceso a todos mis álbumes. */
 premiumRoutes.delete("/album/grants/:userId", async (c) => {
   const u = c.get("user");
-  await db.delete(albumGrant).where(and(eq(albumGrant.ownerId, u.id), eq(albumGrant.granteeId, c.req.param("userId"))));
+  const target = c.req.param("userId");
+  await db.delete(albumGrant).where(and(eq(albumGrant.ownerId, u.id), eq(albumGrant.granteeId, target)));
+  await markAlbumNoticesRevoked(u.id, target, null);
   return c.json({ ok: true });
 });
 
@@ -286,5 +480,6 @@ premiumRoutes.delete("/album/grants/:userId", async (c) => {
 premiumRoutes.delete("/album/grants", async (c) => {
   const u = c.get("user");
   await db.delete(albumGrant).where(eq(albumGrant.ownerId, u.id));
+  await markAllMyNoticesRevoked(u.id);
   return c.json({ ok: true });
 });

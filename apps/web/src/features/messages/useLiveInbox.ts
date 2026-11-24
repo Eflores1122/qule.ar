@@ -122,6 +122,11 @@ export function useLiveInbox(
       update(replaceConversation(list, id, addMessage(chat, message, userId)));
     }
 
+    // Un mensaje que cambió (el aviso de álbum muestra siempre el estado actual).
+    function onUpdated(message: Dm) {
+      void refreshConversation(message.conversationId);
+    }
+
     function onDeleted({ conversationId, id }: { conversationId: string; id: string }) {
       const list = currentData.current;
       const hidesPreview = list?.some((chat) => chat.id === conversationId && chat.last.id === id);
@@ -159,6 +164,7 @@ export function useLiveInbox(
 
     window.addEventListener("mortero:read", onLocalRead);
     socket.on(DM_EVENTS.message, onMessage);
+    socket.on(DM_EVENTS.updated, onUpdated);
     socket.on(DM_EVENTS.read, onRead);
     socket.on(DM_EVENTS.deleted, onDeleted);
     socket.on(DM_EVENTS.access, reset);
@@ -166,6 +172,7 @@ export function useLiveInbox(
     return () => {
       window.removeEventListener("mortero:read", onLocalRead);
       socket.off(DM_EVENTS.message, onMessage);
+      socket.off(DM_EVENTS.updated, onUpdated);
       socket.off(DM_EVENTS.read, onRead);
       socket.off(DM_EVENTS.deleted, onDeleted);
       socket.off(DM_EVENTS.access, reset);
