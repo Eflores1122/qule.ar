@@ -8,7 +8,7 @@ import { loadPhrases, MAX_PHRASE_LENGTH, MAX_PHRASES, savePhrases } from "./phra
  */
 export function SavedPhrasesButton({ open, onToggle, disabled }: { open: boolean; onToggle: () => void; disabled?: boolean }) {
   return (
-    <button type="button" className="iconbtn iconbtn--phrases" aria-label="Frases guardadas" aria-expanded={open} disabled={disabled} onClick={onToggle}>
+    <button type="button" className="iconbtn" aria-label="Frases guardadas" aria-expanded={open} disabled={disabled} onClick={onToggle}>
       <PhraseIcon />
     </button>
   );
