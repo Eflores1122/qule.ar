@@ -7,6 +7,7 @@ import { Login } from "./pages/Login";
 import { NotifyBanner } from "./components/NotifyBanner";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { TermsBanner } from "./components/TermsBanner";
+import { VerifyEmailBanner } from "./features/auth/VerifyEmailBanner";
 import { Legal } from "./pages/Legal";
 import { Logo } from "./components/Logo";
 import { TAB_PATHS, useTabSwipe } from "./features/navigation/useTabSwipe";
@@ -176,6 +177,7 @@ function ShellContent() {
         <Outlet />
       </main>
       {!inThread && <TermsBanner />}
+      {!inThread && <VerifyEmailBanner />}
       {!inThread && !inMyProfile && <NotifyBanner />}
       {toast && (
         <div className="toast" role="status" key={toast.id}>

@@ -40,7 +40,7 @@ const ME = "me";
 before(async () => {
   await runMigrations();
   const ids = Array.from({ length: N }, (_, i) => `u${i}`);
-  await db.insert(schema.user).values([ME, ...ids].map((id) => ({ id, name: id, email: `${id}@example.test` })));
+  await db.insert(schema.user).values([ME, ...ids].map((id) => ({ id, name: id, email: `${id}@example.test`, emailVerified: true })));
   const now = Date.now();
   await db.insert(schema.profile).values([
     { userId: ME, displayName: "Yo", birthdate: "1990-05-05", cellLat: -34.6, cellLng: -58.4 },
@@ -190,7 +190,7 @@ test("acomoda los filtros raros en vez de rechazarlos y conserva el texto como v
   for (const q of notNumbers) assert.throws(() => parseNearbyFilters(q));
 
   const id = "filtros-literales";
-  await db.insert(schema.user).values({ id, name: "Ana", email: "literal@example.test" });
+  await db.insert(schema.user).values({ id, name: "Ana", email: "literal@example.test", emailVerified: true });
   await db.insert(schema.profile).values({
     userId: id, displayName: "Ana", birthdate: "1990-01-01",
     bodyType: "D'Angelo", lookingFor: ["Música 100%"],
@@ -237,4 +237,26 @@ test("tener lugar: sin filtro no deja a nadie afuera, y con los dos solo quedan 
   const both = await nearbyPage(me, parseNearbyFilters({ hasPlace: "si,no" }));
   assert.equal(both.total, si.total + no.total);
   assert.ok(all.total > both.total, "quien no lo dijo aparece sin filtro");
+});
+
+test("una cuenta nueva aparece en Gente recién cuando confirma el mail", async () => {
+  const { env } = await import("./env.js");
+  const id = "sin-confirmar";
+  const old = "vieja-sin-confirmar";
+  await db.insert(schema.user).values([
+    { id, name: "Nueva", email: "nueva@example.test", createdAt: new Date(env.EMAIL_VERIFY_SINCE.getTime() + 1000) },
+    { id: old, name: "Vieja", email: "vieja@example.test", createdAt: new Date(env.EMAIL_VERIFY_SINCE.getTime() - 1000) },
+  ]);
+  await db.insert(schema.profile).values([
+    { userId: id, displayName: "Nueva", birthdate: "1990-01-01", bodyType: "confirmar-mail" },
+    { userId: old, displayName: "Vieja", birthdate: "1990-01-01", bodyType: "confirmar-mail" },
+  ]);
+  try {
+    const q = parseNearbyFilters({ bodyType: "confirmar-mail" });
+    assert.deepEqual((await nearbyPage(MES["sin ubicación"], q)).people.map((p) => p.id), [old]);
+    await db.update(schema.user).set({ emailVerified: true }).where(inArray(schema.user.id, [id]));
+    assert.deepEqual((await nearbyPage(MES["sin ubicación"], q)).people.map((p) => p.id).sort(), [id, old].sort());
+  } finally {
+    await db.delete(schema.user).where(inArray(schema.user.id, [id, old]));
+  }
 });

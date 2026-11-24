@@ -5,6 +5,7 @@ import { useMe } from "../App";
 import { albumCount, AlbumViewer } from "../components/AlbumViewer";
 import { EditIcon, EyeIcon, LockIcon, SettingsIcon, StarIcon } from "../components/Icons";
 import { ProfileCover, ProfileStats } from "../components/ProfileContent";
+import { VerifyEmailBanner } from "../features/auth/VerifyEmailBanner";
 
 export function MyProfileOverview() {
   const { me } = useMe();
@@ -38,6 +39,7 @@ export function MyProfileOverview() {
 
       <div className="profile__body">
         <Link to="/yo/editar" className="btn btn--primary"><EditIcon /> Editar perfil</Link>
+        <VerifyEmailBanner inline />
 
         <section aria-labelledby="my-profile-activity">
           <h2 id="my-profile-activity" className="section__title">Tu actividad</h2>

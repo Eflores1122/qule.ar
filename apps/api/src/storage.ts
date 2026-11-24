@@ -1,12 +1,13 @@
 import { execFile } from "node:child_process";
 import { createReadStream } from "node:fs";
 import { Readable } from "node:stream";
-import { mkdir, readFile, stat, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readFile, rename, stat, unlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { promisify } from "node:util";
 import path from "node:path";
 import sharp from "sharp";
 import { env } from "./env.js";
+import { decryptBlob, decryptRange, encryptBlob, HEADER, isEncryptedBlob, plainSize } from "./fileCrypt.js";
 import { createS3 } from "./s3.js";
 import { clustered } from "./shared.js";
 
@@ -14,6 +15,9 @@ import { clustered } from "./shared.js";
  * Dónde se guardan las fotos y los videos: en el disco del servidor (por defecto) o en un almacenamiento compatible
  * con S3, como Cloudflare R2 (STORAGE=s3, ver docs/DEPLOY.md). Las miniaturas van al mismo lugar, en "thumbs/".
  * Con S3, si un archivo todavía no está en el bucket se busca en el disco: así se puede migrar sin cortar nada.
+ *
+ * Todo se guarda cifrado con DATA_KEY (ver fileCrypt.ts). Lo de antes del cifrado se lee igual, sin cifrar,
+ * hasta que se corra files-encrypt.ts.
  */
 const dir = path.join(env.DATA_DIR, "uploads");
 await mkdir(path.join(dir, "thumbs"), { recursive: true });
@@ -37,17 +41,33 @@ function required(name: string, value: string | undefined): string {
 /** Dónde se guarda este archivo. */
 export const storageKind = s3 ? "s3" : "disk";
 
-async function putBlob(key: string, data: Buffer, contentType: string) {
-  if (s3) await s3.put(key, data, contentType);
-  else await writeFile(path.join(dir, key), data);
+/** Guarda un archivo tal cual (ya cifrado). En el disco se escribe aparte y se renombra: nadie lee uno a medias. */
+export async function putRawBlob(key: string, data: Buffer, contentType: string) {
+  if (s3) return s3.put(key, data, contentType);
+  const file = path.join(dir, key);
+  const tmp = `${file}.${crypto.randomUUID()}.tmp`;
+  await writeFile(tmp, data);
+  await rename(tmp, file);
 }
 
-async function getBlob(key: string): Promise<Buffer | null> {
+/** El archivo tal como está guardado (cifrado, o sin cifrar si es de antes). */
+export async function getRawBlob(key: string): Promise<Buffer | null> {
   if (s3) {
     const found = await s3.get(key);
     if (found) return found;
   }
   return readFile(path.join(dir, key)).catch(() => null);
+}
+
+const putBlob = (key: string, data: Buffer, contentType: string) => putRawBlob(key, encryptBlob(data), contentType);
+
+async function getBlob(key: string): Promise<Buffer | null> {
+  const raw = await getRawBlob(key);
+  return raw && decryptBlob(raw);
+}
+
+export async function deleteThumb(key: string) {
+  if (KEY_RE.test(key)) await deleteBlob(`thumbs/${key}`);
 }
 
 async function deleteBlob(key: string) {
@@ -187,15 +207,27 @@ export type VideoSource = { size: number; open: (start: number, end: number) => 
 /** Tamaño de un video guardado y cómo leer un pedazo, para servirlo por partes (Safari lo exige para reproducir). */
 export async function videoFile(key: string): Promise<VideoSource | null> {
   if (!VIDEO_RE.test(key)) return null;
+  let raw: { size: number; read: (from: number, to: number) => Promise<AsyncIterable<Uint8Array>> } | null = null;
   if (s3) {
     const size = await s3.size(key).catch(() => null);
-    if (size != null) return { size, open: (start, end) => s3.stream(key, start, end) };
+    if (size != null) raw = { size, read: async (from, to) => s3.stream(key, from, to) as unknown as AsyncIterable<Uint8Array> };
   }
-  const file = path.join(dir, key);
-  try {
-    const size = (await stat(file)).size;
-    return { size, open: async (start, end) => Readable.toWeb(createReadStream(file, { start, end })) as ReadableStream };
-  } catch {
-    return null;
+  if (!raw) {
+    const file = path.join(dir, key);
+    const size = await stat(file).then((s) => s.size, () => null);
+    if (size == null) return null;
+    raw = { size, read: async (from, to) => createReadStream(file, { start: from, end: to }) };
   }
+  const { size, read } = raw;
+  // Primeros bytes: ¿está cifrado o es de antes?
+  const parts: Buffer[] = [];
+  for await (const p of await read(0, Math.min(size, HEADER) - 1)) parts.push(Buffer.from(p));
+  const header = Buffer.concat(parts).subarray(0, HEADER);
+  if (!isEncryptedBlob(header)) {
+    return { size, open: async (start, end) => Readable.toWeb(Readable.from(await read(start, end))) as ReadableStream };
+  }
+  return {
+    size: plainSize(size),
+    open: async (start, end) => Readable.toWeb(Readable.from(decryptRange(header, size, start, end, read))) as ReadableStream,
+  };
 }

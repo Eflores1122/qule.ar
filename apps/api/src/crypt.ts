@@ -40,6 +40,9 @@ function key(): Buffer {
 /** Para chequear al arrancar que la clave está y es válida, antes de atender a nadie. */
 export const checkDataKey = () => void key();
 
+/** La clave base, para derivar otras (por ejemplo, la de los archivos en fileCrypt.ts). */
+export const dataKey = () => key();
+
 export const isEncrypted = (v: string) => v.startsWith(ENCRYPTED_PREFIX);
 
 export function encrypt(plain: string): string {
