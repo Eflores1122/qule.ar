@@ -5,16 +5,19 @@ import { useMe } from "../../App";
 const DISMISSED = "qule:aviso-confirmar-mail";
 
 /**
- * Aviso para confirmar el mail. A las cuentas nuevas sin confirmar no se las muestra en Gente, así que el aviso
- * queda fijo. A las de antes, que siguen apareciendo, se les pide igual, pero lo pueden cerrar.
+ * Aviso para confirmar el mail.
+ * - Cuentas nuevas sin confirmar: no se las muestra en Gente, así que el aviso flota abajo en toda la app.
+ * - Cuentas de antes (siguen apareciendo en Gente): una tarjeta en Yo que se puede cerrar (`inline`). Son muchas,
+ *   y un aviso flotante en todas las pantallas molestaría y taparía botones.
  */
-export function VerifyEmailBanner() {
+export function VerifyEmailBanner({ inline = false }: { inline?: boolean }) {
   const { me } = useMe();
   const [state, setState] = useState<"idle" | "busy" | "sent" | "error">("idle");
   const [dismissed, setDismissed] = useState(() => localStorage.getItem(DISMISSED) === "1");
 
   if (!me?.profile || me.user.emailVerified) return null;
-  if (me.user.listed && dismissed) return null;
+  if (me.user.listed !== inline) return null;
+  if (inline && dismissed) return null;
 
   async function resend() {
     setState("busy");
@@ -28,7 +31,7 @@ export function VerifyEmailBanner() {
   }
 
   return (
-    <div className="notify-banner" role="region" aria-label="Confirmar mail">
+    <div className={`notify-banner${inline ? " notify-banner--inline" : ""}`} role="region" aria-label="Confirmar mail">
       <div className="notify-banner__text">
         <b>{me.user.listed ? "Confirmá tu mail" : "Confirmá tu mail para aparecer en Gente"}</b>
         <span className="muted small">
