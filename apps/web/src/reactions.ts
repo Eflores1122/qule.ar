@@ -10,8 +10,11 @@ export const REACTIONS = [
   { kind: "gotas", label: "Gotitas" },
 ] as const;
 
+/** Para reaccionar a mensajes: los mismos, más la risa (que no se manda como toque). */
+export const MESSAGE_REACTIONS = [...REACTIONS, { kind: "risa", label: "Jaja" }] as const;
+
 export type ReactionKind = (typeof REACTIONS)[number]["kind"];
 export type ReactionSummary = { kind: string; by: string[] };
 
 export const reactionSrc = (kind: string) => `/reacciones/${kind}.svg`;
-export const reactionLabel = (kind: string) => REACTIONS.find((r) => r.kind === kind)?.label ?? kind;
+export const reactionLabel = (kind: string) => MESSAGE_REACTIONS.find((r) => r.kind === kind)?.label ?? kind;
