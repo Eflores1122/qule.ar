@@ -6,9 +6,10 @@ import { myReaction, ReactionBar, ReactionPicker } from "../components/Reactions
 import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { GroupAvatar } from "../components/GroupAvatar";
-import { BackIcon, ChevronDownIcon, ClockIcon, DotsIcon, InfoIcon, SendIcon } from "../components/Icons";
+import { BackIcon, ChevronDownIcon, ClockIcon, DotsIcon, SendIcon } from "../components/Icons";
 import { JoinButton } from "../components/JoinButton";
 import { ReportDialog } from "../components/ReportDialog";
+import { GroupActions } from "../features/groups/GroupActions";
 import { slowModeText } from "../features/groups/groupRules";
 import { SavedPhrasesButton, SavedPhrasesMenu } from "../features/phrases/SavedPhrases";
 import { useDraft } from "../features/chat/useDraft";
@@ -402,13 +403,15 @@ export function GroupChat() {
         <button type="button" className="iconbtn" onClick={goBack} aria-label="Volver a Grupos"><BackIcon /></button>
         <GroupAvatar name={info.name} photo={info.photo} general={info.isGeneral} size="sm" />
         <div className="topbar__grow">
-          <h1 className="topbar__title topbar__title--sm"><Link to={`/grupos/${id}/info`}>{info.isGeneral ? "# " : ""}{info.name}</Link></h1>
+          <h1 className="topbar__title topbar__title--sm"><Link to={`/grupos/${id}/info`} state={{ fromGroupChat: true }}>{info.isGeneral ? "# " : ""}{info.name}</Link></h1>
           <p className="topbar__sub"><ClockIcon /> {rulesText}</p>
         </div>
-        <Link to={`/grupos/${id}/info`} className="btn btn--small group-details-link" aria-label={`Ver detalles${info.pendingCount ? `, ${info.pendingCount} solicitudes pendientes` : ""}`}>
-          <InfoIcon /> Ver detalles
-          {info.pendingCount > 0 && <b className="badge">{info.pendingCount}</b>}
-        </Link>
+        <GroupActions
+          key={id}
+          group={info}
+          onMutedChange={(muted) => setInfo((current) => current?.id === id ? { ...current, muted } : current)}
+          onError={(message) => setNotice({ kind: "error", text: message })}
+        />
       </header>
 
       <div className="chat__list" role="log" aria-label="Mensajes del grupo" ref={listRef} onScroll={onScroll}>

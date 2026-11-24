@@ -404,7 +404,7 @@ groupRoutes.post("/groups/:id/requests", async (c) => {
   await db.insert(groupJoinRequest).values({ id, groupId: g.id, userId: u.id, message: message || null });
   const mods = await notifyMods(g.id, "group:request", { groupId: g.id });
   for (const m of mods) {
-    pushTo(m, { title: "Nueva solicitud de ingreso", body: "Abrí el grupo para revisarla.", url: `/grupos/${g.id}/info`, tag: `req-${g.id}`, kind: "solicitudes" }).catch(() => {});
+    pushTo(m, { title: "Nueva solicitud de ingreso", body: "Abrí el grupo para revisarla.", url: `/grupos/${g.id}/solicitudes`, tag: `req-${g.id}`, kind: "solicitudes" }).catch(() => {});
   }
   return c.json({ id });
 });
