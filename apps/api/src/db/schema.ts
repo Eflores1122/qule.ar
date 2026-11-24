@@ -2,7 +2,7 @@ import {
   pgTable, text, timestamp, boolean, integer, date, jsonb, uniqueIndex, index, primaryKey, doublePrecision,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { encryptedText } from "../crypt.js";
+import { encryptedMessageText, encryptedText } from "../crypt.js";
 
 // ---------- Better Auth (no cambiar nombres de campos) ----------
 
@@ -185,7 +185,8 @@ export const report = pgTable("report", {
   // o, si se reporta un perfil por algo urgente, sus fotos públicas). Esos archivos no se borran mientras
   // el reporte esté abierto o haya terminado en una medida; si se descarta, se liberan.
   targetName: text("target_name"),
-  messageBody: text("message_body"),
+  // Cifrada (ver src/crypt.ts): no se puede comparar en la base, se compara después de leerla
+  messageBody: encryptedMessageText("message_body"),
   evidenceKeys: jsonb("evidence_keys").$type<string[]>().notNull().default([]),
   reason: text("reason").notNull(),
   details: text("details"),
@@ -323,7 +324,8 @@ export const directMessage = pgTable("direct_message", {
   conversationId: text("conversation_id").notNull().references(() => conversation.id, { onDelete: "cascade" }),
   senderId: text("sender_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   kind: text("kind").notNull().default("text"), // text | photo | album
-  body: text("body"),
+  // Cifrado en la base con DATA_KEY (ver src/crypt.ts). No se puede buscar por texto en la base.
+  body: encryptedMessageText("body"),
   photoKey: text("photo_key"),
   // Foto temporal: se ve una sola vez y después se borra del servidor
   expiring: boolean("expiring").notNull().default(false),
