@@ -1,9 +1,10 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Link } from "react-router";
 import { useMe } from "../App";
 import { albumNoticeKind, useAlbumNoticeTime } from "../features/messages/albumNotices";
 import { Avatar } from "../components/Avatar";
 import { useTabData } from "../features/navigation/tabData";
+import { useRememberScroll } from "../features/navigation/viewMemory";
 
 function ago(iso: string) {
   const diff = (Date.now() - new Date(iso).getTime()) / 1000;
@@ -23,9 +24,11 @@ export function Inbox() {
   const words = normalize(query).split(/\s+/).filter(Boolean);
   const filtered = list?.filter((chat) => (!unread || chat.unread > 0)
     && words.every((word) => normalize(chat.other?.name ?? "").includes(word)));
+  const pageRef = useRef<HTMLDivElement>(null);
+  useRememberScroll(pageRef, list != null);
 
   return (
-    <div className="page">
+    <div className="page" ref={pageRef}>
       <header className="topbar"><h1 className="topbar__title">Mensajes</h1></header>
       {!!list?.length && (
         <div className="searchbar form">
