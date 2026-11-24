@@ -242,7 +242,7 @@ async function shareAlbum(ownerId: string, albumId: string, target: string, hour
       .where(eq(conversation.id, conv.id));
     const msg = {
       id: row.id, conversationId: conv.id, senderId: ownerId, kind: "album", body, photo: null,
-      expiring: false, opened: false, readAt: null, createdAt: now.toISOString(),
+      expiring: false, opened: false, readAt: null, createdAt: now.toISOString(), replyTo: null,
     };
     emitToUser(ownerId, DM_EVENTS.message, msg);
     emitToUser(target, DM_EVENTS.message, msg);

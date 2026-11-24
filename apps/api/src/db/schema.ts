@@ -326,6 +326,9 @@ export const directMessage = pgTable("direct_message", {
   kind: text("kind").notNull().default("text"), // text | photo | album
   // Cifrado en la base con DATA_KEY (ver src/crypt.ts). No se puede buscar por texto en la base.
   body: encryptedMessageText("body"),
+  // Mensaje citado al responder (de la misma conversación). Sin FK a propósito:
+  // si se borra el original, la cita queda huérfana y se muestra "Mensaje borrado".
+  replyToId: text("reply_to_id"),
   photoKey: text("photo_key"),
   // Foto temporal: se ve una sola vez y después se borra del servidor
   expiring: boolean("expiring").notNull().default(false),

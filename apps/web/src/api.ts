@@ -167,6 +167,7 @@ export type Dm = {
   opened: boolean;
   readAt: string | null;
   createdAt: string;
+  replyTo: { id: string; authorName: string | null; body: string | null } | null;
   reactions: { kind: string; by: string[] }[];
 };
 

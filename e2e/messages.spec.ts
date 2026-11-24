@@ -367,3 +367,41 @@ test("conserva una lectura que llega antes del mensaje y solo avisa cambios real
     await recipientContext.close();
   }
 });
+
+test("la cita solo permite saltar si el original está cargado", async ({ page, baseURL }) => {
+  const sender = await createAccount(baseURL!, "Ana Citas");
+  const recipient = await createAccount(baseURL!, "Sol Citas");
+  await signIn(page, sender);
+  await openProfile(page, recipient);
+  await page.getByRole("button", { name: "Mandar mensaje" }).click();
+  await page.getByRole("textbox", { name: "Mensaje", exact: true }).waitFor();
+
+  const path = new URL(page.url()).pathname.replace("/mensajes/", "/api/conversations/");
+  const headers = { Origin: baseURL! };
+  const original = await page.request.post(`${path}/messages`, { data: { body: "Mensaje original" }, headers });
+  await expect(original).toBeOK();
+  const { id } = await original.json();
+  await expect(await page.request.post(`${path}/messages`, {
+    data: { body: "Respuesta con cita", replyToId: id }, headers,
+  })).toBeOK();
+  await page.reload();
+
+  const jump = page.getByRole("button", { name: `Ir al mensaje citado de ${sender.name}` });
+  await jump.click();
+  await expect(page.locator(`[id="dm-${id}"]`)).toHaveClass(/bubble--flash/);
+
+  await page.route(`**${path}/messages`, async (route) => {
+    const response = await route.fetch();
+    const history = await response.json();
+    await route.fulfill({ response, json: {
+      ...history,
+      messages: history.messages.filter((message: { id: string }) => message.id !== id),
+      hasMore: true,
+    } });
+  });
+  await page.reload();
+  const quote = page.locator(".quote").filter({ hasText: "Mensaje original" });
+  await expect(quote).toBeVisible();
+  await expect(quote).toContainText(sender.name);
+  await expect(jump).toHaveCount(0);
+});

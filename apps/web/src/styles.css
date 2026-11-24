@@ -238,6 +238,9 @@ html:has(.nearby-page), .nearby-page { overscroll-behavior-y: none; }
 .bubble time { display: block; text-align: right; font-size: var(--text-2xs); color: var(--muted); margin-top: 2px; }
 .bubble--mine { align-self: flex-end; background: var(--accent); color: var(--accent-ink); border-radius: var(--radius-2xl) var(--radius-2xl) var(--radius-xs) var(--radius-2xl); }
 .bubble--mine time { color: var(--accent-ink-muted); }
+.bubble--flash { outline: 2px solid transparent; outline-offset: 2px; animation: bubble-flash 1.4s ease; }
+@keyframes bubble-flash { 0%, 40% { outline-color: var(--accent); } 100% { outline-color: transparent; } }
+@media (prefers-reduced-motion: reduce) { .bubble--flash { animation: none; outline-color: var(--accent); } }
 .bubble__photo { display: block; max-width: 100%; max-height: 360px; border-radius: var(--radius-lg); margin: 2px -6px 4px; width: calc(100% + 12px); object-fit: cover; }
 .seen { align-self: flex-end; font-size: var(--text-xs); color: var(--muted); padding-right: 4px; }
 
@@ -600,9 +603,9 @@ a.gcard:hover { background: var(--surface); }
 .center-link { display: block; text-align: center; margin-top: 4px; }
 .forgot { justify-self: end; align-self: flex-end; }
 
-/* ---------- Respuestas (citas) en grupos ---------- */
+/* ---------- Respuestas (citas) ---------- */
 .quote {
-  display: grid; gap: 1px; text-align: left; width: 100%; max-width: 420px;
+  display: grid; gap: 1px; text-align: left; width: 100%; min-width: 0; max-width: 420px;
   margin: 2px 0 4px; padding: 6px 10px; border: 0; border-left: 3px solid var(--accent);
   border-radius: var(--radius-sm); background: var(--surface-2); font-size: var(--text-sm);
 }
@@ -610,6 +613,8 @@ button.quote:hover { background: var(--surface-3); }
 .quote__name { font-weight: 700; color: var(--accent-2); }
 .quote__body { color: var(--muted); overflow: hidden; text-overflow: ellipsis; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
 .quote--static { margin: 0; max-width: none; }
+/* Sobre la burbuja propia la brasa se pierde: el borde de la cita va en blanco. */
+.bubble--mine .quote { border-left-color: var(--quote-line); }
 .composer__reply { display: flex; gap: 6px; align-items: center; padding: 0 0 8px; }
 .gmsg--flash { animation: gmsg-flash 1.4s ease; }
 @keyframes gmsg-flash { 0%, 40% { background: var(--accent-soft); } 100% { background: transparent; } }
