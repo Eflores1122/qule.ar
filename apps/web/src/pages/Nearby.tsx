@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type TouchEvent } from "react";
 import { InstallBanner } from "../components/InstallBanner";
-import { Link, useLocation } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { api, type NearbyPerson } from "../api";
 import { useMe } from "../App";
 import { CheckIcon, FilterIcon, PinIcon, RefreshIcon, StarIcon } from "../components/Icons";
@@ -77,14 +77,19 @@ const POSITION_LIMIT = 20;
 
 export function Nearby() {
   const { me, reload } = useMe();
-  const { key: entry, state } = useLocation();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { state } = location;
+  const filtersEntry = typeof state?.filtersEntry === "string" ? state.filtersEntry : undefined;
+  const showFilters = filtersEntry !== undefined;
+  // La hoja tiene su propia entrada del historial y comparte la posición de la grilla.
+  const entry = filtersEntry ?? location.key;
   const userId = me?.user.id;
   const [filters, setFilters] = useState<Filters>(loadFilters);
   const [people, setPeople] = useState<NearbyPerson[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [status, setStatus] = useState<Status>("loading");
   const [loc, setLoc] = useState<LocState>("ok");
-  const [showFilters, setShowFilters] = useState(false);
   const [updating, setUpdating] = useState<"idle" | "busy" | "done">("idle");
   const [refreshDistance, setRefreshDistance] = useState(0);
   const [refreshError, setRefreshError] = useState(false);
@@ -263,8 +268,11 @@ export function Nearby() {
     if (pageRef.current) pageRef.current.scrollTop = 0;
     setFilters(f);
     saveFilters(f);
-    setShowFilters(false);
     load(f);
+  }
+
+  function closeFilters() {
+    navigate(-1);
   }
 
   const active = countFilters(filters);
@@ -290,7 +298,7 @@ export function Nearby() {
                 <PinIcon size={20} />
               </button>
             )}
-            <button className={`btn btn--small ${active ? "btn--primary" : ""}`} onClick={() => setShowFilters(true)}>
+            <button className={`btn btn--small ${active ? "btn--primary" : ""}`} onClick={() => navigate(location, { state: { ...state, filtersEntry: entry } })}>
               <FilterIcon /> Filtros{active ? ` · ${active}` : ""}
             </button>
           </div>
@@ -375,7 +383,10 @@ export function Nearby() {
         </>
       )}
 
-      {showFilters && <FilterSheet initial={filters} onApply={applyFilters} onClose={() => setShowFilters(false)} />}
+      {showFilters && <FilterSheet initial={filters} onClose={closeFilters} onApply={(f) => {
+        applyFilters(f);
+        closeFilters();
+      }} />}
     </div>
   );
 }
