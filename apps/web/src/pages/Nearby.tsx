@@ -1,22 +1,24 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState, type TouchEvent } from "react";
 import { InstallBanner } from "../components/InstallBanner";
-import { Link, useLocation } from "react-router";
+import { Link, useLocation, useNavigate } from "react-router";
 import { api, type NearbyPerson } from "../api";
 import { useMe } from "../App";
 import { CheckIcon, FilterIcon, PinIcon, RefreshIcon, StarIcon } from "../components/Icons";
 import { LOCATION_EVENT, shareLocation } from "../location";
 import { BODY_TYPES, LOOKING_FOR, POSITIONS, RELATIONSHIP, TRIBES } from "../options";
 import { DialogFocus } from "../components/DialogFocus";
+import { getGridList, saveGridList, toGridPerson } from "../features/profileSwipe/gridList";
+import { HasPlaceChips, type HasPlace } from "../features/place/hasPlace";
 
 export type Filters = {
   ageMin?: number; ageMax?: number;
   heightMin?: number; heightMax?: number;
   weightMin?: number; weightMax?: number;
-  bodyType: string[]; position: string[]; tribes: string[]; lookingFor: string[]; relationship: string[];
+  bodyType: string[]; position: string[]; tribes: string[]; lookingFor: string[]; relationship: string[]; hasPlace: HasPlace[];
   online: boolean; withPhoto: boolean; favorites: boolean;
 };
 
-const EMPTY: Filters = { bodyType: [], position: [], tribes: [], lookingFor: [], relationship: [], online: false, withPhoto: false, favorites: false };
+const EMPTY: Filters = { bodyType: [], position: [], tribes: [], lookingFor: [], relationship: [], hasPlace: [], online: false, withPhoto: false, favorites: false };
 const STORE_KEY = "mortero:filtros";
 
 function loadFilters(): Filters {
@@ -41,7 +43,7 @@ function toQuery(f: Filters, offset: number) {
   for (const k of ["ageMin", "ageMax", "heightMin", "heightMax", "weightMin", "weightMax"] as const) {
     if (f[k] != null) q.set(k, String(f[k]));
   }
-  for (const k of ["bodyType", "position", "tribes", "lookingFor", "relationship"] as const) {
+  for (const k of ["bodyType", "position", "tribes", "lookingFor", "relationship", "hasPlace"] as const) {
     if (f[k].length) q.set(k, f[k].join(","));
   }
   if (f.online) q.set("online", "1");
@@ -56,7 +58,7 @@ export function countFilters(f: Filters) {
   if (f.ageMin != null || f.ageMax != null) n++;
   if (f.heightMin != null || f.heightMax != null) n++;
   if (f.weightMin != null || f.weightMax != null) n++;
-  n += [f.bodyType, f.position, f.tribes, f.lookingFor, f.relationship].filter((x) => x.length).length;
+  n += [f.bodyType, f.position, f.tribes, f.lookingFor, f.relationship, f.hasPlace].filter((x) => x.length).length;
   if (f.online) n++;
   if (f.withPhoto) n++;
   if (f.favorites) n++;
@@ -75,14 +77,19 @@ const POSITION_LIMIT = 20;
 
 export function Nearby() {
   const { me, reload } = useMe();
-  const { key: entry, state } = useLocation();
+  const location = useLocation();
+  const navigate = useNavigate();
+  const { state } = location;
+  const filtersEntry = typeof state?.filtersEntry === "string" ? state.filtersEntry : undefined;
+  const showFilters = filtersEntry !== undefined;
+  // La hoja tiene su propia entrada del historial y comparte la posición de la grilla.
+  const entry = filtersEntry ?? location.key;
   const userId = me?.user.id;
   const [filters, setFilters] = useState<Filters>(loadFilters);
   const [people, setPeople] = useState<NearbyPerson[]>([]);
   const [hasMore, setHasMore] = useState(false);
   const [status, setStatus] = useState<Status>("loading");
   const [loc, setLoc] = useState<LocState>("ok");
-  const [showFilters, setShowFilters] = useState(false);
   const [updating, setUpdating] = useState<"idle" | "busy" | "done">("idle");
   const [refreshDistance, setRefreshDistance] = useState(0);
   const [refreshError, setRefreshError] = useState(false);
@@ -94,12 +101,22 @@ export function Nearby() {
   const [returnPosition] = useState(() => {
     const previousEntry = typeof state?.nearbyEntry === "string" ? state.nearbyEntry : entry;
     const saved = positions.get(entry) ?? positions.get(previousEntry);
-    return saved && saved.userId === userId && saved.query === toQuery(filters, 0) ? saved : undefined;
+    if (!saved || saved.userId !== userId || saved.query !== toQuery(filters, 0)) return undefined;
+    // Si desde el perfil pasaste a personas de páginas que la grilla no había cargado, se cargan también.
+    const list = getGridList(positions.has(entry) ? entry : previousEntry, userId);
+    const swiped = list && list.query === saved.query ? list.people.length : 0;
+    return { ...saved, count: Math.max(saved.count, swiped) };
   });
   const pendingRestore = useRef(returnPosition);
   const visible = useRef({ count: 0, ready: false });
   const filtersRef = useRef(filters);
   filtersRef.current = filters;
+
+  // El perfil usa esta lista para pasar al anterior o al siguiente, con el mismo orden y los mismos filtros.
+  useLayoutEffect(() => {
+    if (status !== "ready" || !userId) return;
+    saveGridList(entry, { userId, query: toQuery(filtersRef.current, 0), people: people.map(toGridPerson), hasMore });
+  }, [entry, userId, people, hasMore, status]);
 
   useLayoutEffect(() => {
     visible.current = { count: people.length, ready: status === "ready" };
@@ -251,8 +268,11 @@ export function Nearby() {
     if (pageRef.current) pageRef.current.scrollTop = 0;
     setFilters(f);
     saveFilters(f);
-    setShowFilters(false);
     load(f);
+  }
+
+  function closeFilters() {
+    navigate(-1);
   }
 
   const active = countFilters(filters);
@@ -278,7 +298,7 @@ export function Nearby() {
                 <PinIcon size={20} />
               </button>
             )}
-            <button className={`btn btn--small ${active ? "btn--primary" : ""}`} onClick={() => setShowFilters(true)}>
+            <button className={`btn btn--small ${active ? "btn--primary" : ""}`} onClick={() => navigate(location, { state: { ...state, filtersEntry: entry } })}>
               <FilterIcon /> Filtros{active ? ` · ${active}` : ""}
             </button>
           </div>
@@ -363,7 +383,10 @@ export function Nearby() {
         </>
       )}
 
-      {showFilters && <FilterSheet initial={filters} onApply={applyFilters} onClose={() => setShowFilters(false)} />}
+      {showFilters && <FilterSheet initial={filters} onClose={closeFilters} onApply={(f) => {
+        applyFilters(f);
+        closeFilters();
+      }} />}
     </div>
   );
 }
@@ -436,6 +459,7 @@ function FilterSheet({ initial, onApply, onClose }: { initial: Filters; onApply:
           <Chips label="Tribus" options={TRIBES} value={f.tribes} onChange={(v) => set("tribes", v)} />
           <Chips label="Busca" options={LOOKING_FOR} value={f.lookingFor} onChange={(v) => set("lookingFor", v)} />
           <Chips label="Relación" options={RELATIONSHIP} value={f.relationship} onChange={(v) => set("relationship", v)} />
+          <HasPlaceChips value={f.hasPlace} onChange={(v) => set("hasPlace", v)} />
           <p className="muted small">Los filtros de altura, peso y demás dejan afuera a quien no completó ese dato.</p>
         </div>
         <div className="row sheet__foot">

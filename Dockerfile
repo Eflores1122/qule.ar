@@ -5,8 +5,12 @@ COPY package.json package-lock.json ./
 COPY apps/api/package.json apps/api/
 COPY apps/web/package.json apps/web/
 COPY packages/brand/package.json packages/brand/
+COPY packages/shared/package.json packages/shared/
 RUN npm ci --no-audit --no-fund
 COPY . .
+# URL pública para og:url, canonical y og:image (ver --build-arg en docs/DEPLOY.md)
+ARG APP_URL=https://qule.ar
+ENV APP_URL=$APP_URL
 RUN npm run build --workspace web
 
 FROM node:24-bookworm-slim
@@ -19,7 +23,7 @@ WORKDIR /app
 COPY --from=build /app/package.json ./
 COPY --from=build /app/node_modules ./node_modules
 COPY --from=build /app/apps/api ./apps/api
-# La marca (nombre, colores de los mails): el API la importa desde acá
+# Paquetes compartidos que usa el API
 COPY --from=build /app/packages ./packages
 COPY --from=build /app/apps/web/dist ./apps/web/dist
 # Corre sin privilegios de root

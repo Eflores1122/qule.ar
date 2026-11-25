@@ -1,10 +1,11 @@
-import { useCallback, useEffect, useState } from "react";
-import { Link, useNavigate, useParams } from "react-router";
-import { api, getSocket, ROLE_LABEL, type GroupInfo as Info, type JoinRequest, type Member, type SentInvite, type SpamRules } from "../api";
+import { useCallback, useEffect, useRef, useState } from "react";
+import { Link, Navigate, useLocation, useNavigate, useParams } from "react-router";
+import { api, getSocket, ROLE_LABEL, type GroupInfo as Info, type Member, type MemberPage, type SentInvite, type SpamRules } from "../api";
 import { useMe } from "../App";
 import { Avatar } from "../components/Avatar";
 import { BackIcon, PlusIcon } from "../components/Icons";
 import { InvitePeopleSheet } from "../components/Invite";
+import { setGroupMuted } from "../features/groups/groupNotifications";
 import { ReportDialog } from "../components/ReportDialog";
 import { slowModeText } from "../features/groups/groupRules";
 import { useTabData } from "../features/navigation/tabData";
@@ -16,9 +17,13 @@ export function GroupInfo() {
   const { me } = useMe();
   const { refreshGroups } = useTabData();
   const nav = useNavigate();
+  const location = useLocation();
   const [info, setInfo] = useState<Info | null>(null);
   const [members, setMembers] = useState<Member[]>([]);
-  const [requests, setRequests] = useState<JoinRequest[]>([]);
+  // Las recargas por socket o invitaciones llaman a load() sin cantidad: el ref conserva lo que se ve.
+  const visibleMembers = useRef(0);
+  const [memberNext, setMemberNext] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
   const [invites, setInvites] = useState<SentInvite[]>([]);
   const [inviting, setInviting] = useState(false);
   const [error, setError] = useState("");
@@ -29,21 +34,26 @@ export function GroupInfo() {
   const isMod = info?.role === "owner" || info?.role === "moderator";
   const isOwner = info?.role === "owner";
 
-  const load = useCallback(async () => {
+  const load = useCallback(async (keepMembers = visibleMembers.current) => {
     try {
       const g = await api<Info>(`/groups/${id}`);
       setInfo(g);
       if (!g.role) return nav(`/grupos/${id}`, { replace: true });
-      setMembers(await api<Member[]>(`/groups/${id}/members`));
+      // De a 25; si hace falta (por ejemplo al expulsar a alguien), se vuelven a pedir las páginas ya abiertas.
+      const first = await api<MemberPage>(`/groups/${id}/members`);
+      let list = first.members;
+      let next = first.nextOffset;
+      while (next != null && list.length < keepMembers) {
+        const more = await api<MemberPage>(`/groups/${id}/members?offset=${next}`);
+        list = [...list, ...more.members];
+        next = more.nextOffset;
+      }
+      visibleMembers.current = list.length;
+      setMembers(list);
+      setMemberNext(next);
       if ((g.role === "owner" || g.role === "moderator") && !g.isGeneral) {
-        const [reqs, invs] = await Promise.all([
-          api<JoinRequest[]>(`/groups/${id}/requests`),
-          api<SentInvite[]>(`/groups/${id}/invites`),
-        ]);
-        setRequests(reqs);
-        setInvites(invs);
+        setInvites(await api<SentInvite[]>(`/groups/${id}/invites`));
       } else {
-        setRequests([]);
         setInvites([]);
       }
     } catch {
@@ -79,13 +89,50 @@ export function GroupInfo() {
     }
   }
 
+  async function loadMoreMembers() {
+    if (memberNext == null || loadingMore) return;
+    setError("");
+    setLoadingMore(true);
+    try {
+      const page = await api<MemberPage>(`/groups/${id}/members?offset=${memberNext}`);
+      setMembers((prev) => {
+        const nextList = [...prev, ...page.members];
+        visibleMembers.current = nextList.length;
+        return nextList;
+      });
+      setMemberNext(page.nextOffset);
+    } catch (e) {
+      setError((e as Error).message);
+    } finally {
+      setLoadingMore(false);
+    }
+  }
+
+  if (location.hash === "#solicitudes") return <Navigate to={`/grupos/${id}/solicitudes`} replace />;
   if (!info) return <div className="page" />;
+  const showChatLink = Boolean(info.role && !location.state?.fromGroupChat);
+  const showRequestsLink = isMod && !info.isGeneral;
 
   return (
     <div className="page">
       <header className="topbar topbar--thread">
-        <button className="iconbtn" onClick={() => nav(`/grupos/${id}`)} aria-label="Volver al chat"><BackIcon /></button>
-        <h1 className="topbar__title topbar__title--sm">{info.isGeneral ? "# " : ""}{info.name}</h1>
+        {/* Volver al lugar desde donde se abrió: si no, el gesto de atrás vuelve a entrar a la info.
+            Si se entró directo (una notificación, o recargando), no hay a dónde volver: va al chat del grupo. */}
+        <button className="iconbtn" onClick={() => (location.key === "default" ? nav(`/grupos/${id}`, { replace: true }) : nav(-1))} aria-label="Volver"><BackIcon /></button>
+        <h1 className="topbar__grow topbar__title topbar__title--sm">{info.isGeneral ? "# " : ""}{info.name}</h1>
+        {(showChatLink || showRequestsLink) && (
+          <div className="topbar__actions">
+            {showRequestsLink && (
+              <Link className="btn btn--small group-info__requests" to={`/grupos/${id}/solicitudes`} state={{ groupRequestsFrom: "details" }}>
+                Solicitudes
+                {info.pendingCount > 0 && <span className="badge">{info.pendingCount}</span>}
+              </Link>
+            )}
+            {showChatLink && (
+              <Link className="btn btn--small" to={`/grupos/${id}`} aria-label="Ver chat del grupo">Ver</Link>
+            )}
+          </div>
+        )}
       </header>
 
       <section className="section group-head">
@@ -123,7 +170,7 @@ export function GroupInfo() {
             onClick={async () => {
               const muted = !info.muted;
               setInfo({ ...info, muted });
-              await api(`/groups/${id}/notifications`, { method: "PUT", json: { muted } }).catch(() => setInfo({ ...info }));
+              await setGroupMuted(id, muted).catch(() => setInfo({ ...info }));
             }}
           >
             <span />
@@ -132,32 +179,6 @@ export function GroupInfo() {
       </section>
 
       {error && <div className="notice notice--error" role="alert">{error}</div>}
-
-      {isMod && !info.isGeneral && (
-        <section className="section">
-          <h2 className="section__title">Solicitudes <span className="muted">{requests.length}</span></h2>
-          {requests.length === 0 ? (
-            <p className="muted">No hay solicitudes pendientes.</p>
-          ) : (
-            <ul className="reqs">
-              {requests.map((r) => (
-                <li key={r.id} className="req">
-                  <Link to={`/perfil/${r.user.id}`} className="req__who">
-                    <Avatar src={r.user.photo} name={r.user.name} size={44} />
-                    <span><b>{r.user.name}</b> <span className="muted">{r.user.age}</span></span>
-                  </Link>
-                  {r.message && <p className="req__msg">“{r.message}”</p>}
-                  <div className="row">
-                    <button className="btn btn--small" onClick={() => act(() => api(`/groups/${id}/requests/${r.id}/reject`, { method: "POST" }))}>Rechazar</button>
-                    <button className="btn btn--small btn--primary" onClick={() => act(() => api(`/groups/${id}/requests/${r.id}/accept`, { method: "POST" }))}>Aceptar</button>
-                  </div>
-                </li>
-              ))}
-            </ul>
-          )}
-          <p className="muted small hint">Si rechazás a alguien, puede volver a pedir ingreso en 7 días.</p>
-        </section>
-      )}
 
       {isMod && !info.isGeneral && (
         <section className="section">
@@ -182,7 +203,7 @@ export function GroupInfo() {
 
       {!info.isGeneral && (
         <section className="section">
-          <h2 className="section__title">Miembros <span className="muted">{members.length}</span></h2>
+          <h2 className="section__title">Miembros <span className="muted">{info.memberCount}</span></h2>
           <ul className="members">
             {members.map((m) => {
               const isMe = m.id === me?.user.id;
@@ -219,6 +240,13 @@ export function GroupInfo() {
               );
             })}
           </ul>
+          {memberNext != null && (
+            <div className="center">
+              <button className="btn btn--small" disabled={loadingMore} onClick={loadMoreMembers}>
+                {loadingMore ? "Cargando…" : "Ver más"}
+              </button>
+            </div>
+          )}
         </section>
       )}
 

@@ -10,6 +10,7 @@ import { HTTPException } from "hono/http-exception";
 import { auth } from "./auth.js";
 import { closeDb, db, runMigrations, schema } from "./db/index.js";
 import { encryptLegacyHealth } from "./db/health.js";
+import { encryptLegacyMessages } from "./db/messages.js";
 import { checkDataKey } from "./crypt.js";
 import { env } from "./env.js";
 import { APP_NAME } from "./brand.js";
@@ -22,7 +23,9 @@ import { nearbyRoutes } from "./routes/nearby.js";
 import { premiumRoutes } from "./routes/premium.js";
 import { adminRoutes } from "./routes/admin.js";
 import { toqueRoutes } from "./routes/toques.js";
+import { appealRoutes } from "./routes/appeals.js";
 import { securityHeaders } from "./security.js";
+import { limitApiBody } from "./requestBody.js";
 import { sweepExpiredPhotos } from "./expiring.js";
 import { purgeRemovedGroups, scanExistingGroups } from "./moderation.js";
 import { signalReady } from "./shared.js";
@@ -37,6 +40,10 @@ if (leader) {
   await runMigrations();
   const encryptedProfiles = await encryptLegacyHealth(db);
   if (encryptedProfiles) console.log(`Datos de salud cifrados: ${encryptedProfiles} perfiles`);
+  // Mensajes privados y copias de reportes de antes del cifrado: de a tandas y en segundo plano
+  void encryptLegacyMessages(db)
+    .then((n) => n && console.log(`Mensajes cifrados: ${n}`))
+    .catch((e) => console.error("encryptLegacyMessages", e));
 
   // Fotos temporales ya vistas: se borran al arrancar (por si el API se reinició justo después de abrir una) y cada minuto
   await sweepExpiredPhotos().catch((e) => console.error("sweepExpiredPhotos", e));
@@ -65,6 +72,13 @@ const app = new Hono<AppEnv>();
 // Encabezados de seguridad en todas las respuestas (ver security.ts). La CSP necesita el index.html compilado
 // para permitir, por su hash, el único script en línea (el del tema).
 const indexPath = path.join(env.WEB_DIST, "index.html");
+// Los íconos de la app (icon-192.png…) se pueden mostrar desde otros sitios: el logo de los mails sale de acá
+// y los clientes de mail web lo cargan desde su propio dominio. Son imágenes públicas, no exponen nada.
+// Va antes de securityHeaders para correr después que él y ganarle al "same-origin" que pone por defecto.
+app.use("/icon-*", async (c, next) => {
+  await next();
+  if (/^\/icon-[\w-]+\.png$/.test(c.req.path)) c.res.headers.set("Cross-Origin-Resource-Policy", "cross-origin");
+});
 app.use("*", securityHeaders(env.APP_URL, existsSync(indexPath) ? readFileSync(indexPath, "utf8") : null));
 
 // Si entran por otra dirección (www, el túnel provisorio viejo), los mandamos al dominio principal.
@@ -82,6 +96,7 @@ if (canonical.protocol === "https:") {
   });
 }
 
+app.use("/api/*", limitApiBody);
 app.on(["GET", "POST"], "/api/auth/*", (c) => auth.handler(c.req.raw));
 app.route("/api", meRoutes);
 app.route("/api", groupRoutes);
@@ -90,6 +105,7 @@ app.route("/api", nearbyRoutes);
 app.route("/api", premiumRoutes);
 app.route("/api", adminRoutes);
 app.route("/api", toqueRoutes);
+app.route("/api", appealRoutes);
 app.all("/api/*", (c) => c.json({ error: "No existe" }, 404));
 
 // En producción el API también sirve la web compilada (un solo proceso, un solo puerto)

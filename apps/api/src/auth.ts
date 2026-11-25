@@ -1,8 +1,10 @@
 import { betterAuth } from "better-auth";
 import { drizzleAdapter } from "better-auth/adapters/drizzle";
+import { APIError, createAuthMiddleware } from "better-auth/api";
+import { verifySolution } from "./botCheck.js";
 import { db, schema } from "./db/index.js";
 import { env } from "./env.js";
-import { resetMail, sendMail, welcomeMail } from "./mail.js";
+import { resetMail, sendMail, verifyMail } from "./mail.js";
 import { clustered, hit } from "./shared.js";
 
 export const googleEnabled = Boolean(env.GOOGLE_CLIENT_ID && env.GOOGLE_CLIENT_SECRET);
@@ -27,6 +29,7 @@ export const auth = betterAuth({
       "/sign-up/email": { window: 60 * 60, max: 5 },
       "/request-password-reset": { window: 60 * 60, max: 3 },
       "/reset-password": { window: 60 * 60, max: 10 },
+      "/send-verification-email": { window: 60 * 60, max: 5 },
     },
     // Con varios procesos del API, los intentos se cuentan en todos juntos (ver shared.ts). Si no, cada proceso
     // llevaría su propia cuenta y alcanzaría con repartir los intentos para multiplicar el límite.
@@ -53,18 +56,35 @@ export const auth = betterAuth({
     // Al cambiar la contraseña se cierran las demás sesiones abiertas
     revokeSessionsOnPasswordReset: true,
     sendResetPassword: async ({ user, url }) => {
-      void sendMail(resetMail(user.email, url));
+      // Tope por dirección y general en mail.ts. Better Auth responde lo mismo exista o no la cuenta.
+      void sendMail(resetMail(user.email, url), "reset");
     },
   },
-  databaseHooks: {
-    user: {
-      create: {
-        // Mail de bienvenida, también para quien entra con Google. No se espera: el registro sigue aunque falle.
-        after: async (user) => {
-          void sendMail(welcomeMail(user.email, user.name));
-        },
-      },
+  // Al crear una cuenta con mail se manda un link para confirmarlo. Se puede entrar y armar el perfil igual, pero
+  // hasta confirmarlo no se aparece en Gente (ver routes/nearby.ts). Las cuentas de Google ya vienen verificadas.
+  emailVerification: {
+    sendOnSignUp: true,
+    autoSignInAfterVerification: true,
+    expiresIn: 24 * 60 * 60,
+    sendVerificationEmail: async ({ user, url }) => {
+      // Tope por dirección y general en mail.ts
+      void sendMail(verifyMail(user.email, url), "verify");
     },
+  },
+  hooks: {
+    // Chequeo anti-bots antes de crear una cuenta con mail (ver botCheck.ts)
+    before: createAuthMiddleware(async (ctx) => {
+      if (ctx.path !== "/sign-up/email" || env.SIGNUP_POW_BITS <= 0) return;
+      // Campo trampa: invisible para las personas, los bots que completan todo lo llenan
+      if (ctx.headers?.get("x-qule-trampa")) throw new APIError("BAD_REQUEST", { code: "BOT_CHECK", message: "No se pudo crear la cuenta." });
+      const result = await verifySolution(ctx.headers?.get("x-qule-desafio"));
+      if (result !== "ok") {
+        throw new APIError("BAD_REQUEST", {
+          code: result === "expired" || result === "used" ? "BOT_CHECK_EXPIRED" : "BOT_CHECK",
+          message: "No pudimos confirmar que sos una persona. Probá de nuevo.",
+        });
+      }
+    }),
   },
   socialProviders: googleEnabled
     ? { google: { clientId: env.GOOGLE_CLIENT_ID!, clientSecret: env.GOOGLE_CLIENT_SECRET! } }

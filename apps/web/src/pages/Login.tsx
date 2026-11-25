@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link } from "react-router";
 import { api, authClient } from "../api";
 import { useMe } from "../App";
@@ -7,6 +7,7 @@ import { Logo } from "../components/Logo";
 import { APP_NAME, APP_SLOGAN } from "../brand";
 import { GoogleMark } from "../components/GoogleMark";
 import { EyeIcon, EyeOffIcon } from "../components/Icons";
+import { botCheckHeaders } from "../features/auth/botCheck";
 
 export function Login() {
   const { reload } = useMe();
@@ -19,6 +20,10 @@ export function Login() {
   const [busy, setBusy] = useState(false);
   const [google, setGoogle] = useState(false);
   const [canReset, setCanReset] = useState(false);
+  // Campo trampa: invisible, solo lo completan los bots
+  const [trap, setTrap] = useState("");
+  // Chequeo anti-bots: se resuelve en segundo plano apenas se elige "Crear cuenta" (ver features/auth/botCheck.ts)
+  const check = useRef<Promise<Record<string, string>> | null>(null);
 
   useEffect(() => {
     api<{ google: boolean; passwordReset: boolean }>("/config").then((c) => { setGoogle(c.google); setCanReset(c.passwordReset); }).catch(() => {});
@@ -28,6 +33,21 @@ export function Login() {
     if (next === mode) return;
     setShowPassword(false);
     setMode(next);
+    if (next === "up" && !check.current) check.current = botCheckHeaders();
+  }
+
+  async function signUp() {
+    let headers: Record<string, string>;
+    try {
+      headers = await (check.current ??= botCheckHeaders());
+    } catch {
+      check.current = null;
+      return { error: { code: "BOT_CHECK", message: undefined } };
+    }
+    // Cada desafío sirve una vez: el próximo intento pide otro
+    check.current = null;
+    if (trap) headers = { ...headers, "x-qule-trampa": trap };
+    return authClient.signUp.email({ name: name || email.split("@")[0], email, password, callbackURL: "/" }, { headers });
   }
 
   async function submit(e: React.FormEvent) {
@@ -36,7 +56,7 @@ export function Login() {
     setBusy(true);
     const res =
       mode === "up"
-        ? await authClient.signUp.email({ name: name || email.split("@")[0], email, password })
+        ? await signUp()
         : await authClient.signIn.email({ email, password });
     setBusy(false);
     if (res.error) {
@@ -112,6 +132,14 @@ export function Login() {
             {mode === "up" && <small className="muted">Mínimo 8 caracteres.</small>}
             {mode === "in" && canReset && <Link to="/recuperar" className="linkbtn small forgot">¿Te olvidaste la contraseña?</Link>}
           </div>
+          {mode === "up" && (
+            <div className="sr-only" aria-hidden="true">
+              <label>
+                No completes este campo
+                <input tabIndex={-1} autoComplete="off" value={trap} onChange={(e) => setTrap(e.target.value)} />
+              </label>
+            </div>
+          )}
           {error && <p className="error" role="alert">{error}</p>}
           <button className="btn btn--primary" disabled={busy}>
             {busy ? "Un toque…" : mode === "up" ? "Crear cuenta" : "Entrar"}
@@ -133,6 +161,8 @@ function translate(code: string | undefined, fallback: string | undefined) {
     case "USER_ALREADY_EXISTS_USE_ANOTHER_EMAIL": return "Ya hay una cuenta con ese email.";
     case "PASSWORD_TOO_SHORT": return "La contraseña es muy corta.";
     case "INVALID_EMAIL": return "Ese email no parece válido.";
+    case "BOT_CHECK":
+    case "BOT_CHECK_EXPIRED": return "No pudimos confirmar que sos una persona. Probá de nuevo.";
     default: return fallback ?? "No se pudo. Probá de nuevo.";
   }
 }

@@ -14,8 +14,11 @@ export const env = {
   GOOGLE_CLIENT_SECRET: process.env.GOOGLE_CLIENT_SECRET,
   VAPID_PUBLIC_KEY: process.env.VAPID_PUBLIC_KEY,
   VAPID_PRIVATE_KEY: process.env.VAPID_PRIVATE_KEY,
-  // Mails (bienvenida, recuperar contraseña). Ej.: smtps://resend:API_KEY@smtp.resend.com:465
+  // Mails (recuperar contraseña y avisos de moderación). Ej. con Amazon SES:
+  // smtps://USUARIO_SMTP:CLAVE_SMTP@email-smtp.eu-west-1.amazonaws.com:465
   SMTP_URL: process.env.SMTP_URL,
+  // Tope de mails en 24 horas, entre todos. Si se llega, no sale ninguno más hasta que baje (ver mail.ts).
+  MAIL_DAILY_CAP: Number(process.env.MAIL_DAILY_CAP ?? 2000),
   MAIL_FROM: process.env.MAIL_FROM ?? "qule.ar <hola@qule.local>",
   // Emails con acceso al panel de moderación, separados por coma
   ADMIN_EMAILS: (process.env.ADMIN_EMAILS ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean),
@@ -38,6 +41,15 @@ export const env = {
   S3_REGION: process.env.S3_REGION ?? "auto", // R2 usa "auto"
   S3_ACCESS_KEY_ID: process.env.S3_ACCESS_KEY_ID,
   S3_SECRET_ACCESS_KEY: process.env.S3_SECRET_ACCESS_KEY,
+  // Chequeo anti-bots al crear una cuenta con mail (ver botCheck.ts): bits en cero que tiene que encontrar el
+  // navegador. 16 son un par de segundos en un celu. 0 lo apaga (por defecto, fuera de producción).
+  SIGNUP_POW_BITS: Number(process.env.SIGNUP_POW_BITS ?? (process.env.NODE_ENV === "production" ? 16 : 0)),
+  // Las cuentas creadas desde esta fecha necesitan confirmar el mail para aparecer en Gente. Las de antes siguen
+  // apareciendo (no escondemos a nadie de golpe) y ven un aviso para confirmarlo. Ver verification.ts.
+  // Fuera de producción no se exige (las cuentas de prueba no tienen mail real), salvo que se configure.
+  EMAIL_VERIFY_SINCE: new Date(
+    process.env.EMAIL_VERIFY_SINCE ?? (process.env.NODE_ENV === "production" ? "2026-11-25T00:00:00-03:00" : "9999-01-01T00:00:00Z"),
+  ),
 };
 
 if (process.env.NODE_ENV === "production" && !process.env.BETTER_AUTH_SECRET) {

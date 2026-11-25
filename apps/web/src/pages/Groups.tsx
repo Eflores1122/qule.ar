@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router";
+import { loadedCount, useRememberScroll } from "../features/navigation/viewMemory";
 import { api, getSocket, ROLE_LABEL, upload, type GroupListing } from "../api";
 import { GroupAvatar } from "../components/GroupAvatar";
 import { PhotoPicker } from "../components/GroupPhoto";
@@ -10,37 +11,76 @@ import { MyInvites } from "../components/Invite";
 import { JoinButton } from "../components/JoinButton";
 import { DialogFocus } from "../components/DialogFocus";
 
+/** Tiene que coincidir con EXPLORE_PAGE en apps/api/src/routes/groups.ts */
+const GROUPS_PAGE = 60;
+type GroupPage = { groups: GroupListing[]; nextOffset: number | null };
+
 export function Groups() {
   const [params, setParams] = useSearchParams();
   const tab = params.get("ver") === "todos" ? "all" : "mine";
   const { groups: mine, invites, refreshGroups } = useTabData();
   const [all, setAll] = useState<GroupListing[] | null>(null);
-  const [q, setQ] = useState("");
+  const [nextOffset, setNextOffset] = useState<number | null>(null);
+  const [loadingMore, setLoadingMore] = useState(false);
+  // La búsqueda va en la dirección: al volver de un grupo sigue ahí
+  const q = params.get("q") ?? "";
+  const setQ = (value: string) => setParams(value ? { ver: "todos", q: value } : { ver: "todos" }, { replace: true });
+  const pageRef = useRef<HTMLDivElement>(null);
+  useRememberScroll(pageRef, tab === "mine" ? mine != null : all != null);
   const [creating, setCreating] = useState(false);
+  const shown = all?.length ?? 0;
 
+  // Los grupos con más gente primero, de a páginas. Al recargar (por un evento o al unirse) se pide de una vez
+  // todo lo que ya se estaba viendo, para no volver a la primera página.
   const loadAll = useCallback(
-    (query = q) => api<GroupListing[]>(`/groups/all?q=${encodeURIComponent(query)}`).then(setAll).catch(() => {}),
+    (query = q, keep = 0) => {
+      const limit = Math.max(GROUPS_PAGE, Math.min(300, keep));
+      return api<GroupPage>(`/groups/all?q=${encodeURIComponent(query)}&limit=${limit}`)
+        .then((r) => { setAll(r.groups); setNextOffset(r.nextOffset); })
+        .catch(() => {});
+    },
     [q],
   );
+
+  async function loadMore() {
+    if (nextOffset == null) return;
+    setLoadingMore(true);
+    try {
+      const r = await api<GroupPage>(`/groups/all?q=${encodeURIComponent(q)}&offset=${nextOffset}`);
+      setAll((prev) => {
+        const seen = new Set((prev ?? []).map((g) => g.id));
+        return [...(prev ?? []), ...r.groups.filter((g) => !seen.has(g.id))];
+      });
+      setNextOffset(r.nextOffset);
+    } catch {
+      // Se puede volver a tocar
+    }
+    setLoadingMore(false);
+  }
 
   useEffect(() => {
     if (tab !== "all") return;
     const s = getSocket();
-    const refresh = () => loadAll();
+    const refresh = () => loadAll(q, shown);
     for (const ev of GROUP_EVENTS) s.on(ev, refresh);
     return () => {
       for (const ev of GROUP_EVENTS) s.off(ev, refresh);
     };
-  }, [loadAll, tab]);
+  }, [loadAll, tab, q, shown]);
+
+  // Cuántos grupos había cargados con esta búsqueda, para volver a mostrarlos todos
+  useEffect(() => {
+    if (all) loadedCount.set(`grupos:${q}`, all.length);
+  }, [all, q]);
 
   useEffect(() => {
     if (tab !== "all") return;
-    const t = setTimeout(() => loadAll(q), 250);
+    const t = setTimeout(() => loadAll(q, loadedCount.get(`grupos:${q}`)), 250);
     return () => clearTimeout(t);
   }, [tab, q, loadAll]);
 
   return (
-    <div className="page">
+    <div className="page" ref={pageRef}>
       <header className="topbar">
         <h1 className="topbar__title">Grupos</h1>
         <button className="btn btn--small btn--primary" onClick={() => setCreating(true)}><PlusIcon /> Crear</button>
@@ -103,10 +143,15 @@ export function Groups() {
                     </p>
                   </div>
                   <div className="gcard__action">
-                    <JoinButton g={g} onChange={() => { loadAll(); refreshGroups("refresh"); }} />
+                    <JoinButton g={g} onChange={() => { loadAll(q, shown); refreshGroups("refresh"); }} />
                   </div>
                 </li>
               ))}
+              {nextOffset != null && (
+                <li className="glist__more">
+                  <button className="btn" disabled={loadingMore} onClick={loadMore}>{loadingMore ? "Cargando…" : "Ver más grupos"}</button>
+                </li>
+              )}
             </ul>
           )}
         </>

@@ -5,10 +5,11 @@ import { useMe } from "../App";
 import { albumCount, AlbumViewer } from "../components/AlbumViewer";
 import { EditIcon, EyeIcon, LockIcon, SettingsIcon, StarIcon } from "../components/Icons";
 import { ProfileCover, ProfileStats } from "../components/ProfileContent";
+import { VerifyEmailBanner } from "../features/auth/VerifyEmailBanner";
 
 export function MyProfileOverview() {
   const { me } = useMe();
-  const [viewingAlbum, setViewingAlbum] = useState(false);
+  const [viewingAlbum, setViewingAlbum] = useState<string | null>(null);
   const [unseen, setUnseen] = useState(0);
 
   useEffect(() => {
@@ -18,8 +19,12 @@ export function MyProfileOverview() {
   if (!me?.profile) return null;
   const { profile, photos } = me;
   const publicPhotos = photos.filter((photo) => !photo.isPrivate).map((photo) => photo.url);
-  const album = photos.filter((photo) => photo.isPrivate);
-  const videos = album.filter((photo) => photo.kind === "video").length;
+  // Cada álbum privado con lo que tiene adentro (los vacíos no se muestran acá)
+  const albums = me.albums.flatMap((a) => {
+    const items = photos.filter((photo) => photo.isPrivate && photo.albumId === a.id);
+    return items.length ? [{ ...a, items, videos: items.filter((photo) => photo.kind === "video").length }] : [];
+  });
+  const viewing = albums.find((a) => a.id === viewingAlbum);
 
   return (
     <div className="page profile">
@@ -34,6 +39,7 @@ export function MyProfileOverview() {
 
       <div className="profile__body">
         <Link to="/yo/editar" className="btn btn--primary"><EditIcon /> Editar perfil</Link>
+        <VerifyEmailBanner inline />
 
         <section aria-labelledby="my-profile-activity">
           <h2 id="my-profile-activity" className="section__title">Tu actividad</h2>
@@ -55,20 +61,25 @@ export function MyProfileOverview() {
           </div>
         </section>
 
-        <section className="album my-profile__album">
-          <div>
-            <h2 className="album__title"><LockIcon /> Álbum privado</h2>
-            <p className="muted small">{album.length ? albumCount(album.length, videos) : "Todavía no agregaste archivos."}</p>
-          </div>
-          {album.length > 0 && (
-            <button type="button" className="btn btn--small" onClick={() => setViewingAlbum(true)}>Ver álbum</button>
-          )}
-        </section>
+        {albums.length ? albums.map((a) => (
+          <section className="album my-profile__album" key={a.id}>
+            <div>
+              <h2 className="album__title"><LockIcon /> {a.name}</h2>
+              <p className="muted small">{albumCount(a.items.length, a.videos)}</p>
+            </div>
+            <button type="button" className="btn btn--small" onClick={() => setViewingAlbum(a.id)} aria-label={`Ver ${a.name}`}>Ver álbum</button>
+          </section>
+        )) : (
+          <section className="album my-profile__album">
+            <div>
+              <h2 className="album__title"><LockIcon /> Álbum privado</h2>
+              <p className="muted small">Todavía no agregaste archivos.</p>
+            </div>
+          </section>
+        )}
       </div>
 
-      {viewingAlbum && album.length > 0 && (
-        <AlbumViewer items={album} title="Tu álbum privado" onClose={() => setViewingAlbum(false)} />
-      )}
+      {viewing && <AlbumViewer items={viewing.items} title={viewing.name} onClose={() => setViewingAlbum(null)} />}
     </div>
   );
 }

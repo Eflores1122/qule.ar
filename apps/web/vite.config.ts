@@ -1,11 +1,11 @@
 import { defineConfig, type Plugin } from "vite";
 import react from "@vitejs/plugin-react";
-import { APP_DESCRIPTION, APP_NAME, DEFAULT_THEME, FONTS_HREF, themes, tokensCss, webManifest } from "@mortero/brand";
+import { APP_DESCRIPTION, APP_NAME, APP_SLOGAN, DEFAULT_THEME, FONTS_HREF, themes, tokensCss, webManifest } from "@mortero/brand";
 
 /**
  * Lleva la marca (packages/brand) a la web:
  * - `import "virtual:brand.css"` da todas las variables CSS (colores, temas, tamaños, radios…)
- * - completa los %MARCADORES% de index.html (nombre, color de la barra, fuentes, tema guardado)
+ * - completa los %MARCADORES% de index.html (nombre, color de la barra, fuentes, tema guardado, tags para redes)
  * - arma /manifest.webmanifest
  */
 function brand(): Plugin {
@@ -17,9 +17,14 @@ function brand(): Plugin {
     `(function(){try{var t=localStorage.getItem("mortero:tema"),c=${colors};` +
     `if(t&&t!==${JSON.stringify(DEFAULT_THEME)}&&c[t]){document.documentElement.dataset.theme=t;` +
     `document.querySelector('meta[name="theme-color"]').setAttribute("content",c[t]);}}catch(e){}})();`;
+  // URL pública para og:url, canonical y og:image (los crawlers no resuelven rutas relativas).
+  // En Docker llega por --build-arg (ver Dockerfile); el default es producción.
+  const siteUrl = (process.env.APP_URL ?? "https://qule.ar").replace(/\/+$/, "");
   const vars: Record<string, string> = {
     APP_NAME,
-    APP_DESCRIPTION: APP_DESCRIPTION.replace(/^./, (c) => c.toLowerCase()),
+    APP_DESCRIPTION,
+    APP_SLOGAN,
+    SITE_URL: siteUrl,
     THEME_COLOR: themes[DEFAULT_THEME].bg,
     FONTS_HREF,
     THEME_SCRIPT: themeScript,

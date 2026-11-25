@@ -1,0 +1,2 @@
+ALTER TABLE "direct_message" ADD COLUMN "album_id" text;--> statement-breakpoint
+CREATE UNIQUE INDEX "dm_notice_album_idx" ON "direct_message" USING btree ("conversation_id","sender_id","album_id") WHERE "direct_message"."kind" in ('album', 'album_revoked', 'album_expired') and "direct_message"."album_id" is not null;

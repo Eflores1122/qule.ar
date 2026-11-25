@@ -4,7 +4,7 @@ qule.ar guarda datos muy sensibles: orientación, estado serológico, ubicación
 
 ## Cómo reportar una vulnerabilidad
 
-1. Entrá a la pestaña **Security** del repositorio y tocá **Report a vulnerability**. Lo que escribas ahí lo ve solo el equipo del proyecto.
+1. Entrá a la pestaña **Security** del repositorio y tocá **Report a vulnerability**. Lo que escribas ahí lo ve solo el equipo del proyecto. Si no tenés cuenta de GitHub, escribinos a **privacidad@qule.ar**.
 2. Contanos:
    - qué encontraste y dónde (la pantalla, la ruta del API o el archivo);
    - cómo reproducirlo, paso a paso;
@@ -40,5 +40,7 @@ Para que sepas desde dónde partimos:
 
 - Encabezados de seguridad (CSP, anti-iframe, HSTS): `apps/api/src/security.ts`.
 - Límite de intentos de login por IP, y límites por persona en mensajes, fotos y reportes: `apps/api/src/auth.ts` y `apps/api/src/ratelimit.ts`.
+- Cada PR pasa por CodeQL, el análisis de seguridad automático de GitHub: `.github/workflows/codeql.yml`. Lo que encuentra se ve en **Security > Code scanning**.
+- Dependabot avisa cuando una dependencia tiene una vulnerabilidad conocida y abre solo el PR que la arregla: `.github/dependabot.yml`.
 - La ubicación se guarda redondeada a una zona de ~500 m, y la distancia escondida no se usa para nada: `apps/api/src/geo.ts`.
 - Lo que se sabe y lo que falta está en la [Política de privacidad](apps/web/src/legal/privacidad.md), sin letra chica.

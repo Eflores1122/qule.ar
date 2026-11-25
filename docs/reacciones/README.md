@@ -15,6 +15,7 @@ Los que usa la app están en `apps/web/public/reacciones/` (estilo 1, Degradé).
 | `ojitos` | Te miro | Te estoy mirando |
 | `ganas` | Con ganas | El diablito |
 | `gotas` | Gotitas | Lo dejamos a tu imaginación |
+| `risa` | Jaja | Me hiciste reír. Solo para mensajes: no se manda como toque |
 
 ## Estilos explorados
 

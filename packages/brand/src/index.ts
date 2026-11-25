@@ -32,6 +32,8 @@ export const palette = {
   accent2: "#ff8a63",
   /** Texto sobre brasa. */
   accentInk: "#1a0d08",
+  /** Blanco: borde de citas sobre burbujas propias, para que se distinga del fondo brasa. */
+  quoteLine: "#ffffff",
   /** Mensajes en cola del antispam, avisos informativos, favoritos. */
   queue: "#f5b84a",
   /** Borrar, bloquear, errores. */
@@ -207,6 +209,7 @@ function globalVars(): Record<string, string> {
     accent: p.accent,
     "accent-2": p.accent2,
     "accent-ink": p.accentInk,
+    "quote-line": p.quoteLine,
     "accent-ink-muted": alpha(p.accentInk, 0.65),
     "accent-soft": alpha(p.accent, 0.14),
     "accent-glow": alpha(p.accent, 0.18),

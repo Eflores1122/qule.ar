@@ -1,13 +1,14 @@
 import { createContext, useCallback, useContext, useEffect, useState } from "react";
 import { Navigate, NavLink, Outlet, Route, Routes, useLocation } from "react-router";
-import { api, ApiError, authClient, closeSocket, getSocket, type Me } from "./api";
+import { api, ApiError, closeSocket, getSocket, type Me } from "./api";
 import { Admin } from "./pages/Admin";
+import { Suspended } from "./pages/Suspended";
 import { Login } from "./pages/Login";
 import { NotifyBanner } from "./components/NotifyBanner";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { TermsBanner } from "./components/TermsBanner";
+import { VerifyEmailBanner } from "./features/auth/VerifyEmailBanner";
 import { Legal } from "./pages/Legal";
-import { Wordmark } from "./components/Wordmark";
 import { Logo } from "./components/Logo";
 import { TAB_PATHS, useTabSwipe } from "./features/navigation/useTabSwipe";
 import { TabDataProvider, useTabData } from "./features/navigation/tabData";
@@ -17,6 +18,7 @@ import { Onboarding } from "./pages/Onboarding";
 import { GroupChat } from "./pages/GroupChat";
 import { Groups } from "./pages/Groups";
 import { GroupInfo } from "./pages/GroupInfo";
+import { GroupRequests } from "./pages/GroupRequests";
 import { Inbox } from "./pages/Inbox";
 import { Conversation } from "./pages/Conversation";
 import { ProfilePage } from "./pages/Profile";
@@ -71,6 +73,7 @@ export function App() {
           <Route path="/grupos" element={<Groups />} />
           <Route path="/grupos/:id" element={<GroupChat />} />
           <Route path="/grupos/:id/info" element={<GroupInfo />} />
+          <Route path="/grupos/:id/solicitudes" element={<GroupRequests />} />
           <Route path="/mensajes" element={<Inbox />} />
           <Route path="/mensajes/:id" element={<Conversation />} />
           <Route path="/perfil/:id" element={<ProfilePage />} />
@@ -80,7 +83,9 @@ export function App() {
           <Route path="/visitas" element={<Views />} />
           <Route path="/favoritos" element={<Favorites />} />
           <Route path="/toques" element={<Toques />} />
-          <Route path="/admin" element={<Admin />} />
+          <Route element={<RequirePermission allows={(me) => me.user.isAdmin} />}>
+            <Route path="/admin" element={<Admin />} />
+          </Route>
         </Route>
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
@@ -90,47 +95,26 @@ export function App() {
 }
 
 function RequireAuth({ children, needProfile }: { children: React.ReactNode; needProfile?: boolean }) {
-  const { me } = useMe();
+  const { me, reload } = useMe();
   const loc = useLocation();
   if (!me) return <Navigate to="/entrar" replace state={{ from: loc.pathname }} />;
-  if (me.profile?.suspendedAt) return <Suspended />;
+  if (me.profile?.suspendedAt) return <Suspended me={me} onSignedOut={reload} />;
   if (needProfile && !me.profile) return <Navigate to="/bienvenida" replace />;
   if (!needProfile && me.profile && loc.pathname === "/bienvenida") return <Navigate to="/yo/editar?nuevo=1" replace />;
   return <>{children}</>;
 }
 
-function Suspended() {
-  const { me, reload } = useMe();
-  return (
-    <div className="auth">
-      <div className="auth__hero">
-        <Logo className="auth__logo" />
-        <Wordmark big />
-      </div>
-      <div className="auth__card">
-        <h2>Tu cuenta está suspendida</h2>
-        {me?.profile?.suspendReason && <p className="muted">Motivo: {me.profile.suspendReason}</p>}
-        <p className="muted small">Mientras esté suspendida no aparecés en la app ni podés usarla. Si creés que es un error, escribinos desde el repositorio del proyecto.</p>
-        <button
-          className="btn"
-          onClick={async () => {
-            await authClient.signOut();
-            closeSocket();
-            await reload();
-          }}
-        >
-          Cerrar sesión
-        </button>
-      </div>
-    </div>
-  );
+function RequirePermission({ allows }: { allows: (me: Me) => boolean }) {
+  const { me } = useMe();
+  if (!me || !allows(me)) return <Navigate to="/" replace />;
+  return <Outlet />;
 }
 
 type Toast = { id: number; text: string; to?: string };
 
 function Shell() {
   const { me, reload } = useMe();
-  return <TabDataProvider key={me?.user.id} onUnauthorized={reload}><ShellContent /></TabDataProvider>;
+  return <TabDataProvider key={me?.user.id} userId={me?.user.id ?? ""} onUnauthorized={reload}><ShellContent /></TabDataProvider>;
 }
 
 function ShellContent() {
@@ -183,7 +167,7 @@ function ShellContent() {
   }, [unread, pending]);
 
   // En una conversación abierta, la barra de abajo se esconde para dejar lugar al teclado
-  const inThread = /^\/mensajes\/.+/.test(loc.pathname);
+  const inThread = /^\/mensajes\/.+/.test(loc.pathname) || /^\/grupos\/[^/]+\/?$/.test(loc.pathname);
   const inMyProfile = /^\/yo(?:\/|$)/.test(loc.pathname);
   const nearbyEntry = loc.pathname.startsWith("/perfil/") ? loc.state?.nearbyEntry : undefined;
 
@@ -193,6 +177,7 @@ function ShellContent() {
         <Outlet />
       </main>
       {!inThread && <TermsBanner />}
+      {!inThread && <VerifyEmailBanner />}
       {!inThread && !inMyProfile && <NotifyBanner />}
       {toast && (
         <div className="toast" role="status" key={toast.id}>

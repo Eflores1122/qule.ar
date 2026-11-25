@@ -2,7 +2,7 @@ import {
   pgTable, text, timestamp, boolean, integer, date, jsonb, uniqueIndex, index, primaryKey, doublePrecision,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { encryptedText } from "../crypt.js";
+import { encryptedMessageText, encryptedText } from "../crypt.js";
 
 // ---------- Better Auth (no cambiar nombres de campos) ----------
 
@@ -54,6 +54,9 @@ export const verification = pgTable("verification", {
 
 // ---------- Perfil ----------
 
+/** Valores posibles de profile.hasPlace. Sin dato (null) es "sin decir". */
+export const HAS_PLACE = ["si", "no"] as const;
+
 export const profile = pgTable("profile", {
   userId: text("user_id").primaryKey().references(() => user.id, { onDelete: "cascade" }),
   displayName: text("display_name").notNull(),
@@ -67,6 +70,8 @@ export const profile = pgTable("profile", {
   lookingFor: jsonb("looking_for").$type<string[]>().notNull().default([]),
   relationship: text("relationship"),
   pronouns: text("pronouns"),
+  // Si tiene lugar para recibir: "si", "no" o null (sin decir). Opcional, lo elige cada persona; nunca se deduce de otra cosa.
+  hasPlace: text("has_place"),
   // Datos de salud (sensibles, Ley 25.326 art. 2 y 7): se guardan cifrados con DATA_KEY. Ver src/crypt.ts
   hivStatus: encryptedText("hiv_status"),
   lastTested: encryptedText("last_tested"),
@@ -82,6 +87,8 @@ export const profile = pgTable("profile", {
   // Moderación: una cuenta suspendida no puede usar la app y no aparece en ningún lado
   suspendedAt: timestamp("suspended_at", { withTimezone: true }),
   suspendReason: text("suspend_reason"),
+  // Quién suspendió (para que la apelación la revise, si se puede, otra persona). null en las suspensiones viejas.
+  suspendedBy: text("suspended_by"),
   // Términos y privacidad: qué versión aceptó y cuándo (prueba del consentimiento, Ley 25.326)
   termsVersion: text("terms_version"),
   termsAcceptedAt: timestamp("terms_accepted_at", { withTimezone: true }),
@@ -94,12 +101,27 @@ export const profile = pgTable("profile", {
   index("profile_grid_idx").on(t.lastSeenAt.desc()).where(sql`${t.incognito} = false and ${t.suspendedAt} is null`),
 ]);
 
+/**
+ * Álbumes privados de cada persona (por ejemplo, uno para cuando es activo y otro para cuando es pasivo).
+ * Cada uno se comparte por separado. El primero (position 0) es el álbum por defecto: ahí van las fotos y
+ * videos que se suben sin elegir álbum y, con la migración 0019, todo lo que ya estaba en el álbum único.
+ */
+export const album = pgTable("album", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  position: integer("position").notNull().default(0),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("album_user_idx").on(t.userId, t.position)]);
+
 export const photo = pgTable("photo", {
   id: text("id").primaryKey(),
   userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   key: text("key").notNull(),
   position: integer("position").notNull().default(0),
   isPrivate: boolean("is_private").notNull().default(false),
+  // En qué álbum privado está. Solo tiene valor si isPrivate; al borrar el álbum se borran sus archivos (ver premium.ts).
+  albumId: text("album_id").references(() => album.id),
   // "photo" o "video". Los videos solo pueden estar en el álbum privado.
   kind: text("kind").notNull().default("photo"),
   // Miniatura del video (una foto .webp sacada del primer segundo)
@@ -113,14 +135,20 @@ export const photo = pgTable("photo", {
   index("photo_poster_key_idx").on(t.posterKey),
 ]);
 
-/** A quién le compartiste tu álbum privado. Se puede revocar en cualquier momento. */
+/** A quién le compartiste cada álbum privado. Se puede revocar en cualquier momento. */
 export const albumGrant = pgTable("album_grant", {
+  albumId: text("album_id").notNull().references(() => album.id, { onDelete: "cascade" }),
+  // Dueño del álbum, repetido para revocar todo de una (bloqueos, "quitar todos los accesos")
   ownerId: text("owner_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   granteeId: text("grantee_id").notNull().references(() => user.id, { onDelete: "cascade" }),
   // Hasta cuándo lo puede ver. null = sin límite.
   expiresAt: timestamp("expires_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
-}, (t) => [primaryKey({ columns: [t.ownerId, t.granteeId] }), index("album_grant_grantee_idx").on(t.granteeId)]);
+}, (t) => [
+  primaryKey({ columns: [t.albumId, t.granteeId] }),
+  index("album_grant_grantee_idx").on(t.granteeId),
+  index("album_grant_owner_idx").on(t.ownerId, t.granteeId),
+]);
 
 /** Quién vio tu perfil (una fila por persona, con la última visita). */
 export const profileView = pgTable("profile_view", {
@@ -157,7 +185,8 @@ export const report = pgTable("report", {
   // o, si se reporta un perfil por algo urgente, sus fotos públicas). Esos archivos no se borran mientras
   // el reporte esté abierto o haya terminado en una medida; si se descarta, se liberan.
   targetName: text("target_name"),
-  messageBody: text("message_body"),
+  // Cifrada (ver src/crypt.ts): no se puede comparar en la base, se compara después de leerla
+  messageBody: encryptedMessageText("message_body"),
   evidenceKeys: jsonb("evidence_keys").$type<string[]>().notNull().default([]),
   reason: text("reason").notNull(),
   details: text("details"),
@@ -239,7 +268,8 @@ export const groupJoinRequest = pgTable("group_join_request", {
   resolvedAt: timestamp("resolved_at", { withTimezone: true }),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [
-  index("gjr_group_status_idx").on(t.groupId, t.status),
+  // Lista paginada de solicitudes: pendientes de un grupo, de la más nueva a la más vieja
+  index("gjr_group_status_created_idx").on(t.groupId, t.status, t.createdAt, t.id),
   index("gjr_user_idx").on(t.userId, t.groupId),
   index("gjr_resolved_by_idx").on(t.resolvedBy),
 ]);
@@ -293,8 +323,14 @@ export const directMessage = pgTable("direct_message", {
   id: text("id").primaryKey(),
   conversationId: text("conversation_id").notNull().references(() => conversation.id, { onDelete: "cascade" }),
   senderId: text("sender_id").notNull().references(() => user.id, { onDelete: "cascade" }),
-  kind: text("kind").notNull().default("text"), // text | photo | album
-  body: text("body"),
+  kind: text("kind").notNull().default("text"), // text | photo | album | album_revoked | album_expired
+  // Identificador histórico del álbum, incluso después de borrarlo. Null en avisos anteriores a la columna.
+  albumId: text("album_id"),
+  // Cifrado en la base con DATA_KEY (ver src/crypt.ts). No se puede buscar por texto en la base.
+  body: encryptedMessageText("body"),
+  // Mensaje citado al responder (de la misma conversación). Sin FK a propósito:
+  // si se borra el original, la cita queda huérfana y se muestra "Mensaje borrado".
+  replyToId: text("reply_to_id"),
   photoKey: text("photo_key"),
   // Foto temporal: se ve una sola vez y después se borra del servidor
   expiring: boolean("expiring").notNull().default(false),
@@ -307,12 +343,20 @@ export const directMessage = pgTable("direct_message", {
   index("dm_photo_key_idx").on(t.photoKey),
   // Al borrar una cuenta se borran sus mensajes: sin esto había que recorrer la tabla entera
   index("dm_sender_idx").on(t.senderId),
+  // Un solo aviso por álbum en cada conversación: el aviso muestra el estado actual y se actualiza en su
+  // lugar en vez de duplicarse. Parcial: los mensajes comunes y los avisos viejos sin álbum quedan afuera
+  // (Postgres trata los NULL como distintos, así que esos nunca chocan).
+  uniqueIndex("dm_notice_album_idx")
+    .on(t.conversationId, t.senderId, t.albumId)
+    .where(sql`${t.kind} in ('album', 'album_revoked', 'album_expired') and ${t.albumId} is not null`),
 ]);
 
 // ---------- Toques y reacciones ----------
 
 /** Las reacciones que existen (los íconos están en apps/web/public/reacciones). */
 export const REACTIONS = ["hola", "fuego", "rayo", "lengua", "chispa", "ojitos", "ganas", "gotas"] as const;
+/** A los mensajes también se les puede reaccionar con risa (no es un toque). */
+export const MESSAGE_REACTIONS = [...REACTIONS, "risa"] as const;
 
 /** Un toque: avisarle a alguien que te gusta, con una reacción. A diferencia de la estrella, la otra persona se entera. */
 export const toque = pgTable("toque", {
@@ -332,3 +376,60 @@ export const reaction = pgTable("reaction", {
   kind: text("kind").notNull(),
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 }, (t) => [primaryKey({ columns: [t.messageId, t.userId] }), index("reaction_msg_idx").on(t.messageId), index("reaction_user_idx").on(t.userId)]);
+
+// ---------- Moderación: permisos, apelaciones y registro ----------
+
+/**
+ * Permisos chicos del panel de moderación. Quien administra en general (ADMIN_USER_IDS / ADMIN_EMAILS en el
+ * servidor) tiene todo; al resto se le dan de a uno desde el panel. Ver STAFF_PERMISSIONS en staff.ts.
+ */
+export const staffPermission = pgTable("staff_permission", {
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  permission: text("permission").notNull(), // reports | sanctions | appeals
+  grantedBy: text("granted_by").references(() => user.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [primaryKey({ columns: [t.userId, t.permission] })]);
+
+/**
+ * Pedido de revisión de una suspensión, hecho desde la app por la persona suspendida. Uno por suspensión
+ * (suspendedAt identifica cuál). Si la cuenta se borra, se borra con ella.
+ */
+export const appeal = pgTable("appeal", {
+  id: text("id").primaryKey(),
+  userId: text("user_id").notNull().references(() => user.id, { onDelete: "cascade" }),
+  suspendedAt: timestamp("suspended_at", { withTimezone: true }).notNull(),
+  // Copia del motivo y de quién suspendió, por si la suspensión cambia o se levanta
+  suspendReason: text("suspend_reason"),
+  suspendedBy: text("suspended_by"),
+  body: text("body").notNull(),
+  // Una sola ampliación mientras está abierta
+  extra: text("extra"),
+  extraAt: timestamp("extra_at", { withTimezone: true }),
+  status: text("status").notNull().default("open"), // open | upheld | lifted
+  response: text("response"),
+  reviewedBy: text("reviewed_by").references(() => user.id, { onDelete: "set null" }),
+  reviewedAt: timestamp("reviewed_at", { withTimezone: true }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [uniqueIndex("appeal_suspension_idx").on(t.userId, t.suspendedAt), index("appeal_status_idx").on(t.status, t.createdAt)]);
+
+/** Registro de lo que hace moderación: quién, cuándo, sobre qué y por qué. Lo ve solo quien administra. */
+export const modAction = pgTable("mod_action", {
+  id: text("id").primaryKey(),
+  actorId: text("actor_id").references(() => user.id, { onDelete: "set null" }),
+  action: text("action").notNull(),
+  // Cuenta, grupo o reporte sobre el que se actuó (sin FK: el registro queda aunque se borren)
+  targetId: text("target_id"),
+  details: text("details"),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("mod_action_created_idx").on(t.createdAt)]);
+
+/**
+ * Mails mandados, para los topes (general por día y por dirección). No guarda la dirección: solo un hash.
+ * Se borra lo de más de 2 días.
+ */
+export const mailLog = pgTable("mail_log", {
+  id: text("id").primaryKey(),
+  toHash: text("to_hash").notNull(),
+  kind: text("kind").notNull(), // reset | account
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+}, (t) => [index("mail_log_created_idx").on(t.createdAt), index("mail_log_to_idx").on(t.toHash, t.createdAt)]);

@@ -35,7 +35,7 @@ Las controla `npm run lint` (stylelint + `scripts/check-brand.mjs`) y corre en c
 
 1. **En el CSS no hay valores sueltos** de color, radio, sombra, capa (`z-index`), familia o tamaño de letra. Se usa la variable: `var(--danger)`, `var(--radius-xl)`, `var(--text-sm)`.
 2. **Si falta una variable, se agrega en `packages/brand`**, con un nombre por uso (`--queue-soft`), no por valor (`--amarillo-claro`). Y se suma a esta guía.
-3. **Las variables de la marca no se definen en el CSS.** En `styles.css` solo hay variables de layout (`--tabbar-h`, `--safe-b`).
+3. **Las variables de la marca no se definen en el CSS.** En `styles.css` solo hay variables de layout (`--tabbar-h`, `--safe-b`, `--composer-action-height`). El alto de las acciones del chat coincide con el mínimo del campo de mensaje.
 4. **Sin colores en TS/TSX.** La única excepción es la "G" de Google (`components/GoogleMark.tsx`).
 5. **Sin `style={{ … }}` para cosas fijas.** Un margen va en una clase de `styles.css`. `style` queda para valores que se calculan en el momento (el tamaño de un avatar, una barra de progreso).
 6. **Pesos de letra que se cargan:** Inter 400, 500, 600 y 700; Bricolage Grotesque 600 y 800. Si hace falta otro, se agrega en `fonts` (`packages/brand`) para que se cargue de verdad.
@@ -61,6 +61,7 @@ Las controla `npm run lint` (stylelint + `scripts/check-brand.mjs`) y corre en c
 | `--accent` | `#ff6a3d` | Brasa: botones principales, el logo en texto, lo activo. **Se usa poco**: si todo es naranja, nada se destaca. |
 | `--accent-2` | `#ff8a63` | Hover del botón principal, links, texto sobre brasa suave |
 | `--accent-ink` | `#1a0d08` | Texto sobre brasa |
+| `--quote-line` | `#ffffff` | Borde de citas sobre burbujas propias, para que se distinga del fondo brasa |
 | `--queue` | `#f5b84a` | Mensajes en cola del antispam, avisos, favoritos |
 | `--danger` | `#ff4d6d` | Borrar, bloquear, errores |
 | `--ok` | `#4fd18b` | En línea |

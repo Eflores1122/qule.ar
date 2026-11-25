@@ -20,9 +20,10 @@ self.addEventListener("push", (event) => {
       if (looking && !data.always) return;
       await self.registration.showNotification(data.title, {
         body: data.body,
-        icon: "/icon-192.png",
+        // Los avisos de moderación traen su propio ícono (ver push.ts); el resto, el de la app
+        icon: data.icon || "/icon-192.png",
         // Silueta blanca con fondo transparente: con un PNG a color, Android muestra un cuadrado blanco
-        badge: "/badge-96.png",
+        badge: data.badge || "/badge-96.png",
         tag: data.tag,
         renotify: Boolean(data.tag),
         data: { url: data.url },
@@ -35,7 +36,10 @@ self.addEventListener("notificationclick", (event) => {
   event.notification.close();
   const destination = new URL(event.notification.data?.url || "/", self.location.origin);
   const target = destination.origin === self.location.origin ? destination : new URL("/", self.location.origin);
-  if (target.pathname === "/toques" || /^\/mensajes\/[^/]+$/.test(target.pathname)) {
+  if (event.notification.tag.startsWith("req-") && /^\/grupos\/[^/]+\/info$/.test(target.pathname)) {
+    target.pathname = target.pathname.replace(/\/info$/, "/solicitudes");
+  }
+  if (/^\/grupos\/[^/]+\/solicitudes$/.test(target.pathname) || target.pathname === "/toques" || /^\/mensajes\/[^/]+$/.test(target.pathname)) {
     target.searchParams.set("aviso", "1");
   }
   const url = target.href;

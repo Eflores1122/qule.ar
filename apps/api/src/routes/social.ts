@@ -1,15 +1,17 @@
+import { DM_EVENTS, INBOX_LIMIT, READ_RECEIPT_LIMIT, type DmReadReceipt } from "@mortero/shared/realtime";
 import { and, asc, desc, eq, inArray, isNull, lt, ne, or, sql } from "drizzle-orm";
+import { alias } from "drizzle-orm/pg-core";
 import { Hono } from "hono";
 import { HTTPException } from "hono/http-exception";
 import { z } from "zod";
 import { db, schema } from "../db/index.js";
 import {
-  ageFrom, authorsFor, imageUrl, isBlocked, mediaOut, newId, reactionsFor, type ReactionSummary, requireProfile, requireUser, type AppEnv,
+  ageFrom, authorsFor, imageUrl, isBlocked, mediaOut, newId, reactionsFor, requireProfile, requireUser, serializeDm, type AppEnv, type ReactionSummary,
 } from "../lib.js";
 import { emitToUser, isOnline } from "../realtime.js";
 import { distanceLabel, visibleKm } from "../geo.js";
 import { deleteImage, MAX_UPLOAD_BYTES, saveImage } from "../storage.js";
-import { albumAccessUntil, recordView } from "./premium.js";
+import { albumAccess, markAlbumNoticesRevoked, recordView } from "./premium.js";
 import { myRecentToque } from "./toques.js";
 import { pushTo } from "../push.js";
 import { EXPIRING_GRACE_MS, EXPIRING_SECONDS } from "../expiring.js";
@@ -34,8 +36,16 @@ socialRoutes.get("/users/:id", async (c) => {
   const allPhotos = await db.select().from(photo).where(eq(photo.userId, id)).orderBy(asc(photo.position));
   const photos = allPhotos.filter((x) => !x.isPrivate);
   const privatePhotos = allPhotos.filter((x) => x.isPrivate);
-  // undefined = no tiene acceso; null = sin límite; Date = hasta esa fecha
-  const albumUntil = privatePhotos.length > 0 ? (id === me.id ? null : await albumAccessUntil(id, me.id)) : undefined;
+  // Qué álbumes puedo ver y hasta cuándo (null = sin límite). Cada álbum se comparte por separado.
+  const albums = privatePhotos.length > 0 ? await db.select().from(schema.album).where(eq(schema.album.userId, id)).orderBy(asc(schema.album.position), asc(schema.album.createdAt)) : [];
+  const access = id === me.id ? new Map(albums.map((a) => [a.id, null])) : privatePhotos.length > 0 ? await albumAccess(id, me.id) : new Map<string, Date | null>();
+  const visibleAlbums = albums.flatMap((a) => {
+    if (!access.has(a.id)) return [];
+    const items = privatePhotos.filter((x) => x.albumId === a.id);
+    if (!items.length) return [];
+    const until = access.get(a.id) ?? null;
+    return [{ id: a.id, name: a.name, count: items.length, videos: items.filter((x) => x.kind === "video").length, items: items.map(mediaOut), expiresAt: until ? until.toISOString() : null }];
+  });
   // Lista explícita de campos públicos: nunca la fecha de nacimiento ni la celda de ubicación
   const mine = c.get("profile")!;
   await recordView(me.id, mine.incognito, id);
@@ -44,8 +54,8 @@ socialRoutes.get("/users/:id", async (c) => {
   const on = !p.incognito && isOnline(id);
   const [fav] = await db.select().from(schema.favorite)
     .where(and(eq(schema.favorite.userId, me.id), eq(schema.favorite.favoriteId, id)));
-  // Si yo le compartí mi álbum y hasta cuándo
-  const myGrant = id === me.id ? undefined : await albumAccessUntil(me.id, id);
+  // Qué álbumes míos le compartí y hasta cuándo
+  const myGrants = id === me.id ? new Map<string, Date | null>() : await albumAccess(me.id, id);
   return c.json({
     id,
     displayName: p.displayName,
@@ -59,6 +69,7 @@ socialRoutes.get("/users/:id", async (c) => {
     lookingFor: p.lookingFor,
     relationship: p.relationship,
     pronouns: p.pronouns,
+    hasPlace: p.hasPlace,
     hivStatus: p.hivStatus,
     lastTested: p.lastTested,
     photos: photos.map((x) => imageUrl(x.key)),
@@ -66,19 +77,24 @@ socialRoutes.get("/users/:id", async (c) => {
     online: on,
     recent: !p.incognito && (on || Date.now() - p.lastSeenAt.getTime() < 15 * 60_000),
     favorite: Boolean(fav),
-    // Álbum privado: cuántas fotos y videos hay y, si te lo compartieron, el contenido y hasta cuándo lo ves
+    // Álbumes privados: cuántas fotos y videos hay en total y, de los que te compartieron, el contenido y hasta cuándo
+    // los ves. Los nombres de los álbumes que no te compartieron no se muestran.
+    // items junta lo de todos los álbumes que ves (null si no ves ninguno); expiresAt es el del primero.
     privateAlbum: privatePhotos.length
       ? {
           count: privatePhotos.length,
           videos: privatePhotos.filter((x) => x.kind === "video").length,
-          items: albumUntil !== undefined ? privatePhotos.map(mediaOut) : null,
-          expiresAt: albumUntil ? albumUntil.toISOString() : null,
+          items: visibleAlbums.length ? visibleAlbums.flatMap((a) => a.items) : null,
+          expiresAt: visibleAlbums[0]?.expiresAt ?? null,
+          albums: visibleAlbums,
         }
       : null,
-    iSharedAlbum: myGrant !== undefined,
+    iSharedAlbum: myGrants.size > 0,
+    // Qué álbumes míos le compartí y hasta cuándo (expiresAt null = sin límite)
+    myShares: [...myGrants].map(([albumId, until]) => ({ albumId, expiresAt: until ? until.toISOString() : null })),
     // El último toque que le mandé, si fue hace menos de 12 horas
     myToque: id === me.id ? null : await myRecentToque(me.id, id),
-    sharedUntil: myGrant ? myGrant.toISOString() : null,
+    sharedUntil: [...myGrants.values()].find((x) => x)?.toISOString() ?? null,
     distance: km != null ? distanceLabel(km) : null,
   });
 });
@@ -95,23 +111,93 @@ async function myConversation(convId: string, userId: string) {
   return { conv, otherId: conv.userA === userId ? conv.userB : conv.userA };
 }
 
-function serializeDm(m: typeof directMessage.$inferSelect, reactions: ReactionSummary[] = []) {
-  return {
-    id: m.id,
-    conversationId: m.conversationId,
-    senderId: m.senderId,
-    kind: m.kind === "text" && m.photoKey ? "photo" : m.kind,
-    body: m.body,
-    // Las fotos temporales nunca viajan en la lista: se piden una sola vez con /open
-    photo: m.expiring ? null : imageUrl(m.photoKey),
-    expiring: m.expiring,
-    opened: Boolean(m.openedAt),
-    readAt: m.readAt?.toISOString() ?? null,
-    createdAt: m.createdAt.toISOString(),
-    reactions,
-  };
+type DmReply = { id: string; authorName: string | null; body: string | null };
+
+/** Texto corto para mostrar dentro de una cita. */
+function replyPreview(m: typeof directMessage.$inferSelect): string | null {
+  const body = m.body?.trim().slice(0, 160) || null;
+  if (m.kind.startsWith("album")) return body ? `Álbum privado · ${body}` : "Álbum privado";
+  if (m.expiring) return body ? `Foto temporal · ${body}` : "Foto temporal";
+  if (m.kind === "photo" || m.photoKey) return body ?? "Foto";
+  return body;
 }
 
+/** Serializa una tanda de mensajes resolviendo las citas en lote. */
+async function serializeDms(
+  rows: (typeof directMessage.$inferSelect)[],
+  reactions: Map<string, ReactionSummary[]> = new Map(),
+) {
+  const replyIds = [...new Set(rows.map((m) => m.replyToId).filter((x): x is string => Boolean(x)))];
+  const quoted = replyIds.length
+    ? await db.select().from(directMessage).where(inArray(directMessage.id, replyIds))
+    : [];
+  const quotedById = new Map(quoted.map((m) => [m.id, m]));
+  const authors = quoted.length ? await authorsFor(quoted.map((m) => m.senderId)) : null;
+  return rows.map((m) => {
+    let replyTo: DmReply | null = null;
+    if (m.replyToId) {
+      const q = quotedById.get(m.replyToId);
+      replyTo = q && q.conversationId === m.conversationId
+        ? { id: q.id, authorName: authors?.get(q.senderId)?.name ?? "Cuenta borrada", body: replyPreview(q) }
+        : { id: m.replyToId, authorName: null, body: null };
+    }
+    return serializeDm(m, reactions.get(m.id), undefined, replyTo);
+  });
+}
+
+/** Valida que el mensaje citado exista en la misma conversación. */
+async function replyToIdFor(replyToId: string | undefined, conversationId: string) {
+  if (!replyToId) return null;
+  const [orig] = await db
+    .select({ id: directMessage.id })
+    .from(directMessage)
+    .where(and(eq(directMessage.id, replyToId), eq(directMessage.conversationId, conversationId)))
+    .limit(1);
+  if (!orig) throw new HTTPException(400, { message: "Ese mensaje ya no está" });
+  return orig.id;
+}
+
+/** El acceso vigente determina el estado visible. Consultarlo nunca modifica el aviso. */
+async function albumNoticeStates(
+  meId: string,
+  rows: { message: typeof directMessage.$inferSelect; otherId: string }[],
+) {
+  const states = new Map<string, { kind: string; albumId: string | null; expiresAt?: string | null }>();
+  const notices = rows.filter(({ message }) => message.kind === "album" || message.kind === "album_expired");
+  if (!notices.length) return states;
+
+  const peers = [...new Set(notices.map(({ otherId }) => otherId))];
+  const legacyOwners = [...new Set(notices.filter(({ message }) => message.albumId == null).map(({ message }) => message.senderId))];
+  const [grants, albums] = await Promise.all([
+    db.select().from(schema.albumGrant).where(or(
+      and(eq(schema.albumGrant.ownerId, meId), inArray(schema.albumGrant.granteeId, peers)),
+      and(inArray(schema.albumGrant.ownerId, peers), eq(schema.albumGrant.granteeId, meId)),
+    )),
+    legacyOwners.length
+      ? db.select({ id: schema.album.id, ownerId: schema.album.userId }).from(schema.album).where(inArray(schema.album.userId, legacyOwners))
+      : [],
+  ]);
+  const byGrant = new Map(grants.map((g) => [JSON.stringify([g.albumId, g.ownerId, g.granteeId]), g]));
+  const byOwner = new Map<string, string[]>();
+  for (const a of albums) {
+    const ids = byOwner.get(a.ownerId) ?? [];
+    ids.push(a.id);
+    byOwner.set(a.ownerId, ids);
+  }
+  const now = new Date();
+  for (const { message, otherId } of notices) {
+    const candidates = byOwner.get(message.senderId) ?? [];
+    if (message.albumId == null && candidates.length > 1) continue;
+    const albumId = message.albumId ?? candidates[0] ?? null;
+    const granteeId = message.senderId === meId ? otherId : meId;
+    const grant = byGrant.get(JSON.stringify([albumId, message.senderId, granteeId]));
+    const active = grant && (grant.expiresAt == null || grant.expiresAt > now);
+    states.set(message.id, active
+      ? { kind: "album", albumId, expiresAt: grant.expiresAt?.toISOString() ?? null }
+      : { kind: "album_expired", albumId });
+  }
+  return states;
+}
 
 socialRoutes.get("/conversations", async (c) => {
   const me = c.get("user");
@@ -119,8 +205,8 @@ socialRoutes.get("/conversations", async (c) => {
     .select()
     .from(conversation)
     .where(or(eq(conversation.userA, me.id), eq(conversation.userB, me.id)))
-    .orderBy(desc(conversation.lastMessageAt))
-    .limit(100);
+    .orderBy(desc(conversation.lastMessageAt), desc(conversation.id))
+    .limit(INBOX_LIMIT);
   if (!convs.length) return c.json([]);
   const otherIdFor = (cv: typeof conversation.$inferSelect) => cv.userA === me.id ? cv.userB : cv.userA;
   const others = convs.map(otherIdFor);
@@ -139,7 +225,7 @@ socialRoutes.get("/conversations", async (c) => {
   // El índice por conversación y fecha permite buscar solo el último mensaje de cada chat.
   const lastMessage = db.select().from(directMessage)
     .where(eq(directMessage.conversationId, conversation.id))
-    .orderBy(desc(directMessage.createdAt)).limit(1).as("last_message");
+    .orderBy(desc(directMessage.createdAt), desc(directMessage.id)).limit(1).as("last_message");
   const [authors, latest, unreadCounts] = await Promise.all([
     authorsFor(visible.map(otherIdFor)),
     db.select().from(conversation).innerJoinLateral(lastMessage, sql`true`).where(inArray(conversation.id, ids)),
@@ -148,10 +234,17 @@ socialRoutes.get("/conversations", async (c) => {
       .groupBy(directMessage.conversationId),
   ]);
   const latestById = new Map(latest.map(({ last_message }) => [last_message.conversationId, last_message]));
+  const states = await albumNoticeStates(me.id, visible.flatMap((cv) => {
+    const message = latestById.get(cv.id);
+    return message ? [{ message, otherId: otherIdFor(cv) }] : [];
+  }));
   const unreadById = new Map(unreadCounts.map((r) => [r.id, r.unread]));
   return c.json(visible.flatMap((cv) => {
     const last = latestById.get(cv.id);
-    return last ? [{ id: cv.id, other: authors.get(otherIdFor(cv)), last: serializeDm(last), unread: unreadById.get(cv.id) ?? 0 }] : [];
+    return last ? [{
+      id: cv.id, lastMessageAt: cv.lastMessageAt.toISOString(),
+      other: authors.get(otherIdFor(cv)), last: { ...serializeDm(last), ...states.get(last.id) }, unread: unreadById.get(cv.id) ?? 0,
+    }] : [];
   }));
 });
 
@@ -185,6 +278,32 @@ socialRoutes.get("/conversations/:id", async (c) => {
   return c.json({ id: conv.id, other: authors.get(otherId) });
 });
 
+socialRoutes.get("/conversations/:id/summary", async (c) => {
+  const me = c.get("user");
+  const { conv, otherId } = await myConversation(c.req.param("id"), me.id);
+  if (await isBlocked(me.id, otherId)) return c.notFound();
+
+  const unread = alias(directMessage, "unread");
+  const unreadCount = db.select({ count: sql<number>`count(*)::int` }).from(unread)
+    .where(and(eq(unread.conversationId, conv.id), eq(unread.senderId, otherId), isNull(unread.readAt)));
+  const [last] = await db.select({
+    message: directMessage,
+    unread: sql<number>`(${unreadCount})`.as("unread_count"),
+  }).from(directMessage)
+    .where(eq(directMessage.conversationId, conv.id))
+    .orderBy(desc(directMessage.createdAt), desc(directMessage.id))
+    .limit(1);
+  if (!last) return c.json(null);
+  const [states, authors] = await Promise.all([
+    albumNoticeStates(me.id, [{ message: last.message, otherId }]),
+    authorsFor([otherId]),
+  ]);
+  return c.json({
+    id: conv.id, lastMessageAt: new Date(Math.max(conv.lastMessageAt.getTime(), last.message.createdAt.getTime())).toISOString(),
+    other: authors.get(otherId), last: { ...serializeDm(last.message), ...states.get(last.message.id) }, unread: last.unread,
+  });
+});
+
 socialRoutes.get("/conversations/:id/messages", async (c) => {
   const me = c.get("user");
   const { conv, otherId } = await myConversation(c.req.param("id"), me.id);
@@ -196,10 +315,14 @@ socialRoutes.get("/conversations/:id/messages", async (c) => {
     .select()
     .from(directMessage)
     .where(and(...conds))
-    .orderBy(desc(directMessage.createdAt))
+    .orderBy(desc(directMessage.createdAt), desc(directMessage.id))
     .limit(50);
-  const reactions = await reactionsFor(rows.map((m) => m.id));
-  return c.json({ messages: rows.reverse().map((m) => serializeDm(m, reactions.get(m.id))), hasMore: rows.length === 50 });
+  const [reactions, states] = await Promise.all([
+    reactionsFor(rows.map((m) => m.id)),
+    albumNoticeStates(me.id, rows.map((message) => ({ message, otherId }))),
+  ]);
+  const messages = (await serializeDms(rows.reverse(), reactions)).map((m) => ({ ...m, ...states.get(m.id) }));
+  return c.json({ messages, hasMore: rows.length === 50 });
 });
 
 socialRoutes.post("/conversations/:id/messages", async (c) => {
@@ -210,6 +333,7 @@ socialRoutes.post("/conversations/:id/messages", async (c) => {
   let body: string | null = null;
   let photoKey: string | null = null;
   let expiring = false;
+  let replyToId: string | null = null;
   if ((c.req.header("content-type") ?? "").includes("multipart/form-data")) {
     await limit(me.id, "dmPhoto");
     const form = await c.req.parseBody();
@@ -217,6 +341,7 @@ socialRoutes.post("/conversations/:id/messages", async (c) => {
     const file = form.file;
     if (!(file instanceof File)) throw new HTTPException(400, { message: "Falta la foto" });
     if (file.size > MAX_UPLOAD_BYTES) throw new HTTPException(413, { message: "La foto pesa demasiado (máx. 12 MB)" });
+    replyToId = await replyToIdFor(typeof form.replyToId === "string" ? form.replyToId.trim() : undefined, conv.id);
     try {
       photoKey = await saveImage(await file.arrayBuffer());
     } catch {
@@ -224,20 +349,26 @@ socialRoutes.post("/conversations/:id/messages", async (c) => {
     }
   } else {
     await limit(me.id, "dm");
-    const r = z.object({ body: z.string().trim().min(1).max(2000) }).safeParse(await c.req.json());
+    const r = z.object({
+      body: z.string().trim().min(1).max(2000),
+      replyToId: z.string().trim().min(1).max(64).optional(),
+    }).safeParse(await c.req.json());
     if (!r.success) throw new HTTPException(400, { message: "Mensaje vacío o demasiado largo" });
     body = r.data.body;
+    replyToId = await replyToIdFor(r.data.replyToId, conv.id);
   }
 
   const now = new Date();
   const [row] = await db
     .insert(directMessage)
-    .values({ id: newId(), conversationId: conv.id, senderId: me.id, kind: photoKey ? "photo" : "text", body, photoKey, expiring, createdAt: now })
+    .values({ id: newId(), conversationId: conv.id, senderId: me.id, kind: photoKey ? "photo" : "text", body, photoKey, expiring, replyToId, createdAt: now })
     .returning();
-  await db.update(conversation).set({ lastMessageAt: now }).where(eq(conversation.id, conv.id));
-  const msg = serializeDm(row);
-  emitToUser(me.id, "dm:message", msg);
-  emitToUser(otherId, "dm:message", msg);
+  await db.update(conversation)
+    .set({ lastMessageAt: sql`greatest(${conversation.lastMessageAt}, ${now.toISOString()})` })
+    .where(eq(conversation.id, conv.id));
+  const [msg] = await serializeDms([row]);
+  emitToUser(me.id, DM_EVENTS.message, msg);
+  emitToUser(otherId, DM_EVENTS.message, msg);
   // Notificación discreta (sin nombre ni contenido). Se manda siempre: si la app está abierta y a la vista,
   // el service worker no la muestra. Antes se salteaba si "estaba en línea", y en el celu con la app
   // minimizada la conexión queda abierta un rato y el aviso nunca llegaba.
@@ -270,7 +401,7 @@ socialRoutes.post("/conversations/:id/messages/:mid/open", async (c) => {
     await deleteImageUnlessEvidence(key);
     await db.update(directMessage).set({ photoKey: null }).where(eq(directMessage.id, row.id)).catch(() => {});
   }, EXPIRING_GRACE_MS);
-  emitToUser(row.senderId, "dm:opened", { conversationId: conv.id, id: row.id });
+  emitToUser(row.senderId, DM_EVENTS.opened, { conversationId: conv.id, id: row.id });
   return c.json({ photo: imageUrl(key), seconds: EXPIRING_SECONDS });
 });
 
@@ -278,30 +409,72 @@ socialRoutes.post("/conversations/:id/messages/:mid/open", async (c) => {
 socialRoutes.delete("/conversations/:id/messages/:mid", async (c) => {
   const me = c.get("user");
   const { conv, otherId } = await myConversation(c.req.param("id"), me.id);
+  const [existing] = await db
+    .select()
+    .from(directMessage)
+    .where(and(eq(directMessage.id, c.req.param("mid")), eq(directMessage.conversationId, conv.id), eq(directMessage.senderId, me.id)));
+  if (!existing) return c.notFound();
+  // Los avisos de álbum muestran el estado de lo compartido: no se desenvían, se actualizan solos.
+  if (existing.kind === "album" || existing.kind === "album_revoked" || existing.kind === "album_expired") {
+    throw new HTTPException(400, { message: "Los avisos de álbum no se pueden desenviar" });
+  }
   const [row] = await db
     .delete(directMessage)
-    .where(and(eq(directMessage.id, c.req.param("mid")), eq(directMessage.conversationId, conv.id), eq(directMessage.senderId, me.id)))
+    .where(eq(directMessage.id, existing.id))
     .returning();
   if (!row) return c.notFound();
   if (row.photoKey) await deleteImageUnlessEvidence(row.photoKey);
   await db.delete(schema.reaction).where(eq(schema.reaction.messageId, row.id));
   const payload = { conversationId: conv.id, id: row.id };
-  emitToUser(me.id, "dm:deleted", payload);
-  emitToUser(otherId, "dm:deleted", payload);
+  emitToUser(me.id, DM_EVENTS.deleted, payload);
+  emitToUser(otherId, DM_EVENTS.deleted, payload);
   return c.json({ ok: true });
 });
 
 socialRoutes.post("/conversations/:id/read", async (c) => {
   const me = c.get("user");
   const { conv, otherId } = await myConversation(c.req.param("id"), me.id);
+  if (await isBlocked(me.id, otherId)) return c.notFound();
+  const messageId = z.string().min(1).max(128);
+  // Las pestañas abiertas antes del despliegue todavía mandan un POST sin cuerpo.
+  const legacyRequest = (await c.req.text()).length === 0;
+  const input = z.object({
+    messageIds: z.array(messageId).max(READ_RECEIPT_LIMIT),
+    beforeId: messageId.optional(),
+  })
+    .safeParse(legacyRequest ? { messageIds: [] } : await c.req.json().catch(() => null));
+  if (!input.success) throw new HTTPException(400, { message: "Faltan los mensajes vistos" });
+  const { messageIds, beforeId } = input.data;
+  if (!legacyRequest && !messageIds.length && !beforeId) return c.json({ ok: true, changed: false });
+  const oldest = alias(directMessage, "oldest_loaded");
+  const boundary = beforeId
+    ? db.select({ createdAt: oldest.createdAt, id: oldest.id }).from(oldest)
+        .where(and(eq(oldest.id, beforeId), eq(oldest.conversationId, conv.id)))
+    : undefined;
   const now = new Date();
-  const updated = await db
-    .update(directMessage)
-    .set({ readAt: now })
-    .where(and(eq(directMessage.conversationId, conv.id), eq(directMessage.senderId, otherId), isNull(directMessage.readAt)))
-    .returning({ id: directMessage.id });
-  if (updated.length) emitToUser(otherId, "dm:read", { conversationId: conv.id, readAt: now.toISOString() });
-  return c.json({ ok: true });
+  const unreadFromOther = and(eq(directMessage.conversationId, conv.id), eq(directMessage.senderId, otherId), isNull(directMessage.readAt));
+  const receipt = await db.transaction(async (tx) => {
+    const explicit = messageIds.length ? await tx.update(directMessage).set({ readAt: now })
+      .where(and(unreadFromOther, inArray(directMessage.id, messageIds))).returning({ id: directMessage.id }) : [];
+    let through: { createdAt: string; id: string } | undefined;
+    if (legacyRequest || boundary) {
+      const older = tx.$with("older").as(tx.update(directMessage).set({ readAt: now })
+        .where(and(unreadFromOther, boundary && sql`(${directMessage.createdAt}, ${directMessage.id}) < (${boundary})`))
+        .returning({ createdAt: directMessage.createdAt, id: directMessage.id }));
+      const [last] = await tx.with(older).select().from(older).orderBy(desc(older.createdAt), desc(older.id)).limit(1);
+      if (last) through = { createdAt: last.createdAt.toISOString(), id: last.id };
+    }
+    if (!explicit.length && !through) return null;
+    return { audience: "sender", conversationId: conv.id, readAt: now.toISOString(), messageIds: explicit.map(({ id }) => id), through } satisfies DmReadReceipt;
+  });
+  const receiptId = receipt ? newId() : null;
+  if (receipt && receiptId) {
+    emitToUser(otherId, DM_EVENTS.read, receipt);
+    emitToUser(me.id, DM_EVENTS.read, {
+      audience: "reader", conversationId: conv.id, receiptId,
+    } satisfies DmReadReceipt);
+  }
+  return c.json({ ok: true, changed: Boolean(receiptId), receiptId });
 });
 
 // ---------- Bloqueos ----------
@@ -317,18 +490,33 @@ socialRoutes.post("/blocks", async (c) => {
   const me = c.get("user");
   const { userId } = z.object({ userId: z.string() }).parse(await c.req.json());
   if (userId === me.id) throw new HTTPException(400, { message: "No podés bloquearte a vos" });
-  await db.insert(block).values({ blockerId: me.id, blockedId: userId }).onConflictDoNothing();
-  // Al bloquear se corta el acceso a los álbumes en las dos direcciones
-  await db.delete(schema.albumGrant).where(or(
-    and(eq(schema.albumGrant.ownerId, me.id), eq(schema.albumGrant.granteeId, userId)),
-    and(eq(schema.albumGrant.ownerId, userId), eq(schema.albumGrant.granteeId, me.id)),
-  ));
+  const added = await db.transaction(async (tx) => {
+    const [row] = await tx.insert(block).values({ blockerId: me.id, blockedId: userId })
+      .onConflictDoNothing().returning({ id: block.blockedId });
+    if (!row) return false;
+    // Al bloquear se corta el acceso a los álbumes en las dos direcciones.
+    await tx.delete(schema.albumGrant).where(or(
+      and(eq(schema.albumGrant.ownerId, me.id), eq(schema.albumGrant.granteeId, userId)),
+      and(eq(schema.albumGrant.ownerId, userId), eq(schema.albumGrant.granteeId, me.id)),
+    ));
+    return true;
+  });
+  if (added) {
+    // Los avisos de álbum quedan como revocados: al desbloquear, el chat muestra el estado real.
+    // Emitimos después del commit. Si el proceso se interrumpe, las consultas igual reflejan que el acceso terminó.
+    await markAlbumNoticesRevoked(me.id, userId, null);
+    await markAlbumNoticesRevoked(userId, me.id, null);
+    for (const id of [me.id, userId]) emitToUser(id, DM_EVENTS.access, null);
+  }
   return c.json({ ok: true });
 });
 
 socialRoutes.delete("/blocks/:userId", async (c) => {
   const me = c.get("user");
-  await db.delete(block).where(and(eq(block.blockerId, me.id), eq(block.blockedId, c.req.param("userId"))));
+  const userId = c.req.param("userId");
+  const [removed] = await db.delete(block).where(and(eq(block.blockerId, me.id), eq(block.blockedId, userId))).returning({ id: block.blockedId });
+  if (!removed) return c.json({ ok: true });
+  for (const id of [me.id, userId]) emitToUser(id, DM_EVENTS.access, null);
   return c.json({ ok: true });
 });
 
@@ -362,7 +550,7 @@ socialRoutes.post("/reports", async (c) => {
       reason: rest.reason, details: rest.details,
       targetName: g.name, messageBody: [g.name, g.description].filter(Boolean).join(" · "),
     });
-    if (isUrgent(rest.reason)) notifyModeratorsUrgent().catch((e) => console.error("notifyModeratorsUrgent", e));
+    if (isUrgent(rest.reason)) notifyModeratorsUrgent(rest.reason).catch((e) => console.error("notifyModeratorsUrgent", e));
     return c.json({ ok: true });
   }
   if (!maybeUser) throw new HTTPException(400, { message: "Falta a quién reportás" });
@@ -402,6 +590,6 @@ socialRoutes.post("/reports", async (c) => {
     targetName: target?.name ?? null, messageBody, evidenceKeys,
   });
   // Lo urgente (menores, contenido íntimo sin consentimiento, amenazas) le avisa a moderación al instante
-  if (isUrgent(rest.reason)) notifyModeratorsUrgent().catch((e) => console.error("notifyModeratorsUrgent", e));
+  if (isUrgent(rest.reason)) notifyModeratorsUrgent(rest.reason).catch((e) => console.error("notifyModeratorsUrgent", e));
   return c.json({ ok: true });
 });

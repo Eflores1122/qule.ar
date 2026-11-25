@@ -14,8 +14,10 @@ export const requireUser = createMiddleware<AppEnv>(async (c, next) => {
   const s = await auth.api.getSession({ headers: c.req.raw.headers });
   if (!s) throw new HTTPException(401, { message: "Tenés que iniciar sesión" });
   const [p] = await db.select().from(profile).where(eq(profile.userId, s.user.id));
-  // Cuenta suspendida: solo puede ver su estado (GET /api/me) y borrar su cuenta (DELETE /api/me)
-  if (p?.suspendedAt && !(c.req.path === "/api/me" && ["GET", "DELETE"].includes(c.req.method))) {
+  // Cuenta suspendida: solo puede ver su estado (GET /api/me), borrar su cuenta (DELETE /api/me) y pedir que
+  // se revise la suspensión (/api/appeal, ver routes/appeals.ts)
+  const allowed = (c.req.path === "/api/me" && ["GET", "DELETE"].includes(c.req.method)) || c.req.path === "/api/appeal" || c.req.path.startsWith("/api/appeal/");
+  if (p?.suspendedAt && !allowed) {
     throw new HTTPException(403, { message: "Tu cuenta está suspendida" });
   }
   c.set("user", s.user);
@@ -105,6 +107,35 @@ export async function isBlocked(a: string, b: string): Promise<boolean> {
 export const newId = () => crypto.randomUUID();
 
 export type ReactionSummary = { kind: string; by: string[] };
+
+/**
+ * Un mensaje privado como lo ve el chat. `expiresAt` solo viaja en los avisos de álbum activos:
+ * hasta cuándo vale el acceso (ISO) o null si es sin límite. Ausente = vencido o de antes de guardar el álbum.
+ */
+export function serializeDm(
+  m: typeof schema.directMessage.$inferSelect,
+  reactions: ReactionSummary[] = [],
+  expiresAt?: string | null,
+  replyTo: { id: string; authorName: string | null; body: string | null } | null = null,
+) {
+  return {
+    id: m.id,
+    conversationId: m.conversationId,
+    senderId: m.senderId,
+    kind: m.kind === "text" && m.photoKey ? "photo" : m.kind,
+    body: m.body,
+    ...(m.albumId ? { albumId: m.albumId } : {}),
+    // Las fotos temporales nunca viajan en la lista: se piden una sola vez con /open
+    photo: m.expiring ? null : imageUrl(m.photoKey),
+    expiring: m.expiring,
+    opened: Boolean(m.openedAt),
+    readAt: m.readAt?.toISOString() ?? null,
+    createdAt: m.createdAt.toISOString(),
+    ...(expiresAt !== undefined ? { expiresAt } : null),
+    replyTo,
+    reactions,
+  };
+}
 
 /** Reacciones de varios mensajes, agrupadas por tipo: [{ kind: "fuego", by: [userId, ...] }]. */
 export async function reactionsFor(messageIds: string[]): Promise<Map<string, ReactionSummary[]>> {
