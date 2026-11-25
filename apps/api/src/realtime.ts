@@ -1,4 +1,4 @@
-import { DM_EVENTS } from "@mortero/shared/realtime";
+import { DM_EVENTS, SOCKET_ERRORS } from "@mortero/shared/realtime";
 import type { Server as HttpServer } from "node:http";
 import { and, eq, inArray, lte } from "drizzle-orm";
 import { createAdapter } from "@socket.io/cluster-adapter";
@@ -49,20 +49,20 @@ export function attachRealtime(server: HttpServer, opts: { publishQueued: boolea
       if (typeof v === "string") headers.set(k, v);
     }
     const s = await auth.api.getSession({ headers });
-    if (!s) return next(new Error("sin sesión"));
+    if (!s) return next(new Error(SOCKET_ERRORS.noSession));
     try {
       await limit(s.user.id, "socket");
     } catch {
-      return next(new Error("Demasiados intentos de conexión"));
+      return next(new Error(SOCKET_ERRORS.tooManyAttempts));
     }
     const [p] = await db.select({ suspendedAt: schema.profile.suspendedAt }).from(schema.profile)
       .where(eq(schema.profile.userId, s.user.id));
-    if (!p || p.suspendedAt) return next(new Error("perfil no disponible"));
+    if (!p || p.suspendedAt) return next(new Error(SOCKET_ERRORS.noProfile));
     const release = await reserveSocket(s.user.id);
-    if (!release) return next(new Error("No pudimos abrir más conexiones para esta cuenta"));
+    if (!release) return next(new Error(SOCKET_ERRORS.tooManySockets));
     if (socket.conn.readyState !== "open") {
       release();
-      return next(new Error("conexión cerrada"));
+      return next(new Error(SOCKET_ERRORS.closed));
     }
     const onClose = () => {
       socket.conn.off("close", onClose);
